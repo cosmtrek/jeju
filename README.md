@@ -1,41 +1,147 @@
 # Jeju
 
-Jeju is a local-first, config-defined mini agent runtime written in Go.
+![Jeju project architecture](docs/jeju-architecture.png)
 
-It loads an Agent Manifest, validates and compiles it, runs a single-agent ReAct loop, writes JSONL trajectory, stores run artifacts, applies tool permissions, and evaluates completed runs with rule-based checks.
+> Manifest. Agent. Done.
 
-The V0 technical spec is in [docs/spec-v0.md](docs/spec-v0.md).
+Jeju is a config-defined agent runtime written in Go. Agents start with a manifest: a declarative spec that describes an agent's model, instructions, runtime limits, tools, skills, policy, sandbox, trajectory, and evaluation.
+
+Instead of wiring behavior into runtime code, Jeju loads, validates, and compiles a manifest into a runnable agent. The current runtime executes locally with workspace controls and file-backed runs, while the manifest-centered design leaves room for future cloud execution.
+
 DeepSeek setup notes are in [docs/deepseek.md](docs/deepseek.md).
+
+## Features
+
+- **Agent Manifest as the source of truth**: define the agent's model, instructions, runtime limits, tools, skills, policy, sandbox, trajectory, and evaluation in one declarative file.
+- **Config-defined behavior**: change agent behavior by editing manifest, prompt, and skill files instead of modifying runtime code.
+- **Compiled runtime boundary**: Jeju follows `config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run`, keeping YAML parsing out of the runtime.
+- **Portable execution model**: Jeju runs locally today with filesystem-backed runs and workspaces, while the manifest/runtime boundary keeps the design open for future cloud execution.
+- **Auditable trajectories**: every run writes JSONL events and keeps large payloads under run artifacts.
+- **Permission-aware tools**: tool calls pass through `policy.Gate`, with risk metadata and interactive approval for side-effecting operations.
+- **Workspace-constrained file and shell access**: builtin file tools stay inside the configured workspace, and shell commands run in the sandbox workdir with timeouts.
+- **Skill disclosure model**: skills are disclosed first and loaded manually, so the runtime does not inject every skill asset by default.
+- **Mock and real model modes**: the scaffolded mock model supports fast local tests without credentials; OpenAI-compatible providers support real API-backed runs.
+- **Built-in inspection flow**: `runs` and `inspect` make completed runs easy to list and debug.
+- **Rule-based evaluation**: completed runs can be checked for expected lifecycle, model, tool, permission, and output conditions.
+
+## Design Philosophy
+
+Jeju treats an agent as a small, explicit runtime unit instead of an opaque application. The core idea is that the manifest should be the source of truth for agent behavior, and the runtime should execute the compiled result through a narrow path:
+
+```text
+Manifest -> Validate -> Compile -> Run -> Gate -> Trace -> Evaluate -> Inspect
+```
+
+The runtime does not read YAML directly. Configuration is loaded, validated, and compiled into a `CompiledAgent` before execution. This keeps runtime behavior grounded in the manifest, loaded instructions, tools, skills, policy, sandbox, trajectory, and evaluator configuration rather than hardcoded branches.
+
+Local execution is the first runtime target. Runs are stored on disk, file and shell tools are constrained to a configured workspace, and every run leaves behind enough metadata and trajectory data to inspect what happened.
+
+## Agent Manifest
+
+An Agent Manifest is the source of truth for a Jeju agent. It defines the agent's identity, model, instructions, runtime limits, workspace, tools, skills, permission policy, trajectory store, and optional evaluation rules.
+
+See [docs/agent-manifest.md](docs/agent-manifest.md) for the full field reference, defaults, supported values, and validation rules.
+
+At a high level, a manifest looks like this:
+
+```yaml
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: research
+  description: "Local research assistant"
+
+models:
+  default: primary
+  providers:
+    primary:
+      provider: mock
+      model: mock-react
+
+instructions:
+  system: ./prompts/research.md
+
+runtime:
+  mode: react
+  limits:
+    max_steps: 8
+    max_duration_sec: 300
+
+workspace:
+  path: ./workspace/research
+
+tools:
+  - name: file_write
+    type: builtin
+    permission: ask
+    risk: [write]
+    side_effect: true
+
+skills:
+  mode: disclose
+  paths:
+    - ./skills/web_research
+  activation:
+    policy: manual
+    active:
+      - web_research
+
+sandbox:
+  type: local
+  workdir: ./workspace/research
+
+policy:
+  default_permission: ask
+
+trajectory:
+  enabled: true
+  format: jsonl
+  store:
+    type: file
+    path: ./runs
+```
+
+The important sections are:
+
+- `models`: selects the model provider. The default scaffold uses `mock`; `openai_compatible` can point at real Chat Completions-compatible endpoints.
+- `instructions`: loads the system prompt from a file so behavior can be reviewed and versioned.
+- `runtime`: sets the loop mode and execution limits.
+- `workspace` and `sandbox`: define where file and shell work is allowed.
+- `tools`: declares available tools, risk level, side effects, and permission requirements.
+- `skills`: discloses available capabilities and manually activates the skills that should load instructions.
+- `policy`: gates tool execution before side effects happen.
+- `trajectory`: records model calls, tool calls, permission decisions, skill events, artifacts, evaluation, and lifecycle events.
+- `evaluate`: optionally runs rule-based checks after completion.
 
 ## Quick Start
 
+The generated agent uses the `mock` model by default, so the full lifecycle can run without API credentials. The commands below create an isolated Jeju working directory under `.jeju-dev/`, keeping generated agents, workspaces, runs, and skill fixtures separate from the source tree.
+
 ```bash
+# 1. Check the CLI entrypoint.
 go run ./cmd/jeju --help
+
+# 2. Scaffold a new agent into an isolated working directory.
 go run ./cmd/jeju init research --dir .jeju-dev
+
+# 3. Enter the generated Jeju working directory.
 cd .jeju-dev
+
+# 4. Validate the generated Agent Manifest.
 go run ../cmd/jeju validate agents/research.agent.yaml
+
+# 5. Run the agent. The leading "y" approves the scaffolded file write.
 printf 'y\n' | go run ../cmd/jeju run agents/research.agent.yaml "写一份关于 AgentOps 的简短分析，并保存到 notes.md"
+
+# 6. List recorded runs.
 go run ../cmd/jeju runs
+
+# 7. Inspect a completed run and its trajectory/artifacts.
 go run ../cmd/jeju inspect <run_id>
 ```
 
-The generated agent uses the `mock` model by default so the V0 lifecycle can run without API credentials. `init --dir` writes a separate Jeju working directory, so quick-start agents, workspaces, run directories, and skill fixtures stay separate from source code. Run `validate`, `run`, `runs`, and `inspect` from that generated directory. Change the model provider to `openai_compatible` in the manifest to use a real Chat Completions-compatible endpoint.
-
-## V0 Scope
-
-- Manifest YAML loading, defaults, env interpolation, validation
-- Config to `CompiledAgent`
-- Single-agent ReAct runtime
-- Mock model and OpenAI-compatible model client
-- Builtin `file_read`, `file_write`, and `shell`
-- Basic command tool protocol
-- Permission and risk gate with interactive approval
-- Skill disclosure plus manual active skill loading
-- Local sandbox restricted to the configured workspace
-- JSONL trajectory with console and file sinks
-- Run metadata, config snapshot, final output, artifacts
-- Rule-based evaluation
-- `init`, `validate`, `run`, `inspect`, and `runs` CLI commands
+Run `validate`, `run`, `runs`, and `inspect` from the generated working directory. To use a real model, change the manifest provider from `mock` to `openai_compatible` and point it at a Chat Completions-compatible endpoint.
 
 ## Tests
 
