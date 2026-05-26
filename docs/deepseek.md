@@ -14,7 +14,7 @@ models:
       env_key: DEEPSEEK_API_KEY
 ```
 
-`provider: deepseek` defaults `base_url` to `https://api.deepseek.com` and sends requests to `/chat/completions`. `env_key` is the name of the environment variable that contains the API key. `api_key_env` is still accepted for backward compatibility.
+`provider: deepseek` defaults `base_url` to `https://api.deepseek.com` and sends requests to `/chat/completions`. `env_key` is the name of the environment variable that contains the API key.
 
 The DeepSeek provider enables JSON response mode by default because Jeju V0 expects model output to be a JSON action.
 

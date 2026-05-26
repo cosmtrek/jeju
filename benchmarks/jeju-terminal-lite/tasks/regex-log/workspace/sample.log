@@ -1,0 +1,8 @@
+2025-08-01 api 10.0.0.1 accepted
+noise user 1134-12-1234 and date 2025-08-02 without ip
+client=192.168.1.9 first=2025-08-03 retry=2025-08-04 done
+bad 999.1.1.1 on 2025-08-05
+prefixA2025-08-06 172.16.0.7 should not match adjacent date
+edge 8.8.8.8 date=2025-02-29 ok
+trail 1.2.3.4 2025-11-30Z should not match adjacent suffix
+two 10.10.10.10 2025-12-01 and 2025-12-02

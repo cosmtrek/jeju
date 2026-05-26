@@ -12,7 +12,6 @@ type ProviderConfig struct {
 	Model           string
 	BaseURL         string
 	EnvKey          string
-	APIKeyEnv       string
 	JSONMode        bool
 	Temperature     *float64
 	MaxOutputTokens int

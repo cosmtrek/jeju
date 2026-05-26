@@ -1,0 +1,14 @@
+{
+  "category": "simple_python",
+  "expected_tool_calls": [
+    {
+      "tool": "keyword_count",
+      "input": {
+        "text": "Agent runtimes route tool calls. A careful agent validates arguments before a tool runs. The best agent records every step.",
+        "keyword": "agent",
+        "case_sensitive": false
+      }
+    }
+  ],
+  "expected_final_contains": ["3"]
+}

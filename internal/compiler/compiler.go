@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -94,7 +95,6 @@ func compileModels(cfg config.ModelsConfig) (*model.Registry, error) {
 			Model:           item.Model,
 			BaseURL:         item.BaseURL,
 			EnvKey:          item.EnvKey,
-			APIKeyEnv:       item.APIKeyEnv,
 			Temperature:     item.Temperature,
 			MaxOutputTokens: item.MaxOutputTokens,
 			TimeoutSec:      item.TimeoutSec,
@@ -121,11 +121,19 @@ func compileTools(configs []config.ToolConfig, box sandbox.Sandbox) (*tools.Regi
 		spec := tools.Spec{
 			Name:            cfg.Name,
 			Description:     cfg.Description,
+			Args:            cfg.Args,
 			Permission:      cfg.Permission,
 			Risks:           cfg.Risk,
 			TimeoutSec:      cfg.TimeoutSec,
 			SideEffect:      cfg.SideEffect,
 			SandboxRequired: cfg.SandboxRequired,
+		}
+		if cfg.Schema != "" {
+			var schema any
+			if err := json.Unmarshal([]byte(cfg.Schema), &schema); err != nil {
+				return nil, fmt.Errorf("tool %q schema is invalid JSON: %w", cfg.Name, err)
+			}
+			spec.InputSchema = schema
 		}
 		switch cfg.Type {
 		case "builtin":

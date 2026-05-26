@@ -1,4 +1,4 @@
-.PHONY: test vet test-agent test-agent-deepseek
+.PHONY: test vet test-agent test-agent-deepseek benchmark-terminal-lite benchmark-bfcl-lite
 
 test:
 	go test ./...
@@ -11,3 +11,9 @@ test-agent:
 
 test-agent-deepseek:
 	./scripts/run-deepseek-agent.sh
+
+benchmark-terminal-lite:
+	./scripts/run-terminal-lite-benchmark.sh
+
+benchmark-bfcl-lite:
+	./scripts/run-bfcl-lite-benchmark.sh

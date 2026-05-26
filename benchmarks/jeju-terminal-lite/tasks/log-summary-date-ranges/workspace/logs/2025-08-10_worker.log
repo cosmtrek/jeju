@@ -1,0 +1,4 @@
+INFO ok
+INFO cache
+WARNING slow
+ERROR timeout

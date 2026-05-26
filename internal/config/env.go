@@ -12,7 +12,6 @@ func ResolveEnv(m *AgentManifest) {
 		provider.BaseURL = expandEnv(provider.BaseURL)
 		provider.Model = expandEnv(provider.Model)
 		provider.EnvKey = expandEnv(provider.EnvKey)
-		provider.APIKeyEnv = expandEnv(provider.APIKeyEnv)
 		m.Models.Providers[name] = provider
 	}
 }

@@ -9,6 +9,7 @@ disclosure:
   capabilities:
     - markdown_note
     - file_write
+    - keyword_count
   inputs:
     topic:
       type: string
@@ -19,6 +20,7 @@ disclosure:
   requires:
     tools:
       - file_write
+      - keyword_count
   risk:
     level: write
     notes: "Writes a local workspace file"

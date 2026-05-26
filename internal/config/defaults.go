@@ -2,18 +2,11 @@ package config
 
 func ApplyDefaults(m *AgentManifest) {
 	for name, provider := range m.Models.Providers {
-		if provider.APIKeyEnv == "" {
-			provider.APIKeyEnv = provider.EnvKey
-		}
-		if provider.EnvKey == "" {
-			provider.EnvKey = provider.APIKeyEnv
-		}
 		if provider.Provider == "deepseek" {
 			if provider.BaseURL == "" {
 				provider.BaseURL = "https://api.deepseek.com"
 			}
-			if provider.APIKeyEnv == "" {
-				provider.APIKeyEnv = "DEEPSEEK_API_KEY"
+			if provider.EnvKey == "" {
 				provider.EnvKey = "DEEPSEEK_API_KEY"
 			}
 		}

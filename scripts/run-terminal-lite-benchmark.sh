@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+suite_root="$repo_root/benchmarks/jeju-terminal-lite"
+work_root="$repo_root/.jeju-dev/terminal-lite"
+task_filter=""
+
+usage() {
+  cat <<'USAGE'
+Usage: ./scripts/run-terminal-lite-benchmark.sh [--task TASK_NAME] [--workdir DIR]
+
+Runs the Jeju Terminal Lite benchmark. By default all tasks are run.
+
+Options:
+  --task TASK_NAME  Run only one task.
+  --workdir DIR     Override the disposable benchmark output directory.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --task)
+      task_filter="${2:-}"
+      shift 2
+      ;;
+    --workdir)
+      work_root="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
+  echo "DEEPSEEK_API_KEY is required for the default terminal-lite benchmark agent." >&2
+  exit 2
+fi
+
+tasks=(
+  regex-log
+  log-summary-date-ranges
+  constraints-scheduling
+  fix-git
+  openssl-selfsigned-cert
+)
+
+if [[ -n "$task_filter" ]]; then
+  found=0
+  for task in "${tasks[@]}"; do
+    if [[ "$task" == "$task_filter" ]]; then
+      found=1
+    fi
+  done
+  if [[ "$found" -ne 1 ]]; then
+    echo "unknown task: $task_filter" >&2
+    exit 2
+  fi
+  tasks=("$task_filter")
+fi
+
+mkdir -p "$work_root"
+(
+  cd "$repo_root"
+  go build -o "$work_root/jeju" ./cmd/jeju
+)
+
+pass_count=0
+fail_count=0
+failed_tasks=()
+for task in "${tasks[@]}"; do
+  echo "==> $task"
+  run_dir="$work_root/$task"
+  rm -rf "$run_dir"
+  mkdir -p "$run_dir"
+
+  cp -R "$suite_root/agents" "$run_dir/agents"
+  cp -R "$suite_root/prompts" "$run_dir/prompts"
+  mkdir -p "$run_dir/workspace"
+  cp -R "$suite_root/tasks/$task/workspace" "$run_dir/workspace/app"
+
+  if [[ -x "$suite_root/tasks/$task/setup.sh" ]]; then
+    (cd "$run_dir" && "$suite_root/tasks/$task/setup.sh")
+  fi
+
+  task_prompt="$(cat "$suite_root/tasks/$task/task.md")"
+  task_failed=0
+  (
+    cd "$run_dir"
+    printf 'y\n%.0s' {1..40} | "$work_root/jeju" run agents/benchmark.agent.yaml "$task_prompt"
+  ) || task_failed=1
+
+  (
+    cd "$run_dir/workspace/app"
+    python3 check.py
+  ) || task_failed=1
+
+  latest_run="$(find "$run_dir/runs" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+  for artifact in metadata.json config.snapshot.yaml trajectory.jsonl final.md evaluation.json; do
+    test -f "$latest_run/$artifact" || task_failed=1
+  done
+
+  python3 - "$latest_run" <<'PY' || task_failed=1
+import json
+import sys
+from pathlib import Path
+
+run_dir = Path(sys.argv[1])
+metadata = json.loads((run_dir / "metadata.json").read_text())
+if metadata.get("status") != "completed":
+    raise SystemExit(f"run did not complete: {metadata.get('status')}")
+
+evaluation = json.loads((run_dir / "evaluation.json").read_text())
+if not evaluation.get("passed"):
+    raise SystemExit(f"evaluation did not pass: {evaluation}")
+
+events = [json.loads(line) for line in (run_dir / "trajectory.jsonl").read_text().splitlines() if line.strip()]
+types = {event.get("type") for event in events}
+required = {"run.started", "model.started", "model.completed", "action.parsed", "run.completed"}
+missing = sorted(required - types)
+if missing:
+    raise SystemExit(f"missing trajectory events: {missing}")
+PY
+
+  if [[ "$task_failed" -eq 0 ]]; then
+    pass_count=$((pass_count + 1))
+  else
+    fail_count=$((fail_count + 1))
+    failed_tasks+=("$task")
+  fi
+done
+
+echo "PASS $pass_count/${#tasks[@]} terminal-lite tasks"
+if [[ "$fail_count" -gt 0 ]]; then
+  echo "FAIL $fail_count/${#tasks[@]} terminal-lite tasks: ${failed_tasks[*]}" >&2
+  exit 1
+fi

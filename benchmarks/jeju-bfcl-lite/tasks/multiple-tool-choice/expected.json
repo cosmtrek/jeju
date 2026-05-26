@@ -1,0 +1,13 @@
+{
+  "category": "multiple",
+  "expected_tool_calls": [
+    {
+      "tool": "text_stats",
+      "input": {
+        "text": "Jeju records every tool call with context."
+      }
+    }
+  ],
+  "forbidden_tools": ["keyword_count", "date_shift"],
+  "expected_final_contains": ["7", "42"]
+}

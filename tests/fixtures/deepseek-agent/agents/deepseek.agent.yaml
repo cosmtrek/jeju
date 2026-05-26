@@ -42,6 +42,41 @@ tools:
     permission: ask
     risk: [write]
     side_effect: true
+  - name: keyword_count
+    type: command
+    description: "Example custom command tool that counts keyword occurrences in text"
+    command: ./tools/keyword_count.py
+    args:
+      - --text
+      - "{{.text}}"
+      - --keyword
+      - "{{.keyword}}"
+      - --case-sensitive
+      - "{{.case_sensitive}}"
+    schema: |
+      {
+        "type": "object",
+        "required": ["text", "keyword"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to search"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "Keyword to count"
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "description": "Whether matching should be case sensitive",
+            "default": false
+          }
+        }
+      }
+    permission: allow
+    risk: [read]
+    side_effect: false
+    timeout_sec: 10
 
 skills:
   mode: disclose
@@ -70,6 +105,9 @@ policy:
     - match:
         risk: write
       permission: ask
+    - match:
+        risk: read
+      permission: allow
     - match:
         risk: destructive
       permission: deny

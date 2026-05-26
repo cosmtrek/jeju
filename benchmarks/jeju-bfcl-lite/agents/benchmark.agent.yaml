@@ -1,0 +1,182 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: bfcl-lite
+  description: "Jeju BFCL Lite benchmark agent"
+
+models:
+  default: primary
+  providers:
+    primary:
+      provider: deepseek
+      model: deepseek-v4-flash
+      env_key: DEEPSEEK_API_KEY
+      temperature: 0.1
+      max_output_tokens: 2048
+      timeout_sec: 120
+
+instructions:
+  system: ./prompts/benchmark.md
+
+runtime:
+  mode: react
+  limits:
+    max_steps: 6
+    max_duration_sec: 180
+    max_tool_calls: 3
+    max_consecutive_errors: 2
+  interactive:
+    enabled: true
+    pause_on:
+      - permission_required
+      - agent_question
+
+workspace:
+  path: ./workspace/app
+
+tools:
+  - name: keyword_count
+    type: command
+    description: "Count how many times a keyword appears in text"
+    command: ./tools/keyword_count.py
+    args:
+      - --text
+      - "{{.text}}"
+      - --keyword
+      - "{{.keyword}}"
+      - --case-sensitive
+      - "{{.case_sensitive}}"
+    schema: |
+      {
+        "type": "object",
+        "required": ["text", "keyword"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to search"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "Keyword to count"
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "description": "Whether matching should be case sensitive",
+            "default": false
+          }
+        }
+      }
+    permission: allow
+    risk: [read]
+    side_effect: false
+    timeout_sec: 10
+
+  - name: text_stats
+    type: command
+    description: "Count words and characters in text"
+    command: ./tools/text_stats.py
+    args:
+      - --text
+      - "{{.text}}"
+    schema: |
+      {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to analyze"
+          }
+        }
+      }
+    permission: allow
+    risk: [read]
+    side_effect: false
+    timeout_sec: 10
+
+  - name: date_shift
+    type: command
+    description: "Shift an ISO date by a number of days"
+    command: ./tools/date_shift.py
+    args:
+      - --date
+      - "{{.date}}"
+      - --days
+      - "{{.days}}"
+    schema: |
+      {
+        "type": "object",
+        "required": ["date", "days"],
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "ISO date in YYYY-MM-DD format"
+          },
+          "days": {
+            "type": "integer",
+            "description": "Number of days to add; use negative values to subtract"
+          }
+        }
+      }
+    permission: allow
+    risk: [read]
+    side_effect: false
+    timeout_sec: 10
+
+skills:
+  mode: disclose
+  disclosure:
+    include: [name, description, when_to_use, capabilities, inputs, outputs, requires, risk]
+  activation:
+    policy: manual
+    max_active: 0
+  loading:
+    strategy: lazy
+
+memory:
+  enabled: false
+
+sandbox:
+  type: local
+  workdir: ./workspace/app
+
+policy:
+  default_permission: ask
+  rules:
+    - match:
+        risk: read
+      permission: allow
+    - match:
+        risk: destructive
+      permission: deny
+
+trajectory:
+  enabled: true
+  format: jsonl
+  store:
+    type: file
+    path: ./runs
+  sinks:
+    - type: console
+      level: info
+    - type: file
+      path: ./runs
+
+evaluate:
+  enabled: true
+  on_run_complete: true
+  evaluators:
+    - name: bfcl_lite_runtime
+      type: rule
+      rules:
+        - final_answer_exists
+        - no_model_error
+        - no_tool_error
+        - max_steps_not_exceeded
+        - max_tool_calls_not_exceeded
+        - no_permission_denied
+        - run_completed
+  outputs:
+    path: ./runs
+    file: evaluation.json

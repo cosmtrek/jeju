@@ -38,11 +38,12 @@ Final format:
 	b.WriteString("\n# Available Tools\n")
 	for _, spec := range a.Tools.Specs() {
 		data, _ := json.Marshal(map[string]any{
-			"name":        spec.Name,
-			"description": spec.Description,
-			"permission":  spec.Permission,
-			"risks":       spec.Risks,
-			"side_effect": spec.SideEffect,
+			"name":         spec.Name,
+			"description":  spec.Description,
+			"input_schema": spec.InputSchema,
+			"permission":   spec.Permission,
+			"risks":        spec.Risks,
+			"side_effect":  spec.SideEffect,
 		})
 		b.WriteString("- ")
 		b.Write(data)

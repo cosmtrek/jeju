@@ -15,6 +15,7 @@ type Spec struct {
 	Name            string
 	Description     string
 	InputSchema     any
+	Args            []string
 	Permission      string
 	Risks           []string
 	TimeoutSec      int

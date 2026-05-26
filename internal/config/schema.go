@@ -38,7 +38,6 @@ type ModelConfig struct {
 	Model           string   `yaml:"model"`
 	BaseURL         string   `yaml:"base_url,omitempty"`
 	EnvKey          string   `yaml:"env_key,omitempty"`
-	APIKeyEnv       string   `yaml:"api_key_env,omitempty"`
 	Temperature     *float64 `yaml:"temperature,omitempty"`
 	MaxOutputTokens int      `yaml:"max_output_tokens,omitempty"`
 	TimeoutSec      int      `yaml:"timeout_sec,omitempty"`

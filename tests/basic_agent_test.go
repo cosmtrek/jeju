@@ -119,7 +119,11 @@ func copyDir(t *testing.T, src, dst string) {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0o644)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode().Perm())
 	}); err != nil {
 		t.Fatalf("copy fixture failed: %v", err)
 	}

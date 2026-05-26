@@ -31,11 +31,12 @@ func NewOpenAICompatibleClient(cfg ProviderConfig) *OpenAICompatibleClient {
 func (c *OpenAICompatibleClient) Generate(ctx context.Context, req Request) (Response, error) {
 	start := time.Now()
 	apiKey := ""
-	if c.Config.APIKeyEnv != "" {
-		apiKey = os.Getenv(c.Config.APIKeyEnv)
+	apiKeyEnv := c.Config.EnvKey
+	if apiKeyEnv != "" {
+		apiKey = os.Getenv(apiKeyEnv)
 	}
 	if apiKey == "" {
-		return Response{}, fmt.Errorf("missing API key env %q", c.Config.APIKeyEnv)
+		return Response{}, fmt.Errorf("missing API key env %q", apiKeyEnv)
 	}
 	baseURL := strings.TrimRight(c.Config.BaseURL, "/")
 	if baseURL == "" {

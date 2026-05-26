@@ -1,0 +1,6 @@
+{
+  "category": "irrelevance",
+  "expected_tool_calls": [],
+  "forbidden_tools": ["keyword_count", "text_stats", "date_shift"],
+  "expected_final_contains": ["run"]
+}
