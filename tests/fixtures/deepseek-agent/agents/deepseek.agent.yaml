@@ -1,0 +1,105 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: deepseek
+  description: "DeepSeek V4 Flash fixture agent"
+
+models:
+  default: primary
+  providers:
+    primary:
+      provider: deepseek
+      model: deepseek-v4-flash
+      env_key: DEEPSEEK_API_KEY
+      temperature: 0.2
+      max_output_tokens: 4096
+      timeout_sec: 120
+
+instructions:
+  system: ./prompts/deepseek.md
+
+runtime:
+  mode: react
+  limits:
+    max_steps: 8
+    max_duration_sec: 300
+    max_tool_calls: 10
+    max_consecutive_errors: 3
+  interactive:
+    enabled: true
+    pause_on:
+      - permission_required
+      - agent_question
+
+workspace:
+  path: ./workspace/deepseek
+
+tools:
+  - name: file_write
+    type: builtin
+    description: "Write files to workspace"
+    permission: ask
+    risk: [write]
+    side_effect: true
+
+skills:
+  mode: disclose
+  paths:
+    - ./skills/deepseek_writer
+  disclosure:
+    include: [name, description, when_to_use, capabilities, inputs, outputs, requires, risk]
+  activation:
+    policy: manual
+    active:
+      - deepseek_writer
+    max_active: 1
+  loading:
+    strategy: lazy
+
+memory:
+  enabled: false
+
+sandbox:
+  type: local
+  workdir: ./workspace/deepseek
+
+policy:
+  default_permission: ask
+  rules:
+    - match:
+        risk: write
+      permission: ask
+    - match:
+        risk: destructive
+      permission: deny
+
+trajectory:
+  enabled: true
+  format: jsonl
+  store:
+    type: file
+    path: ./runs
+  sinks:
+    - type: console
+      level: info
+    - type: file
+      path: ./runs
+
+evaluate:
+  enabled: true
+  on_run_complete: true
+  evaluators:
+    - name: basic_trajectory
+      type: rule
+      rules:
+        - final_answer_exists
+        - no_model_error
+        - no_tool_error
+        - max_steps_not_exceeded
+        - max_tool_calls_not_exceeded
+        - no_permission_denied
+        - run_completed
+  outputs:
+    path: ./runs
+    file: evaluation.json

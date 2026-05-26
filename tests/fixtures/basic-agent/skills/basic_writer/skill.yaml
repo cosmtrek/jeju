@@ -1,0 +1,25 @@
+apiVersion: jeju/v1alpha1
+kind: Skill
+metadata:
+  name: basic_writer
+  description: "Write a minimal Markdown note"
+disclosure:
+  when_to_use:
+    - "Need to save a short note"
+  capabilities:
+    - markdown_note
+  inputs:
+    topic:
+      type: string
+      required: true
+  outputs:
+    note:
+      type: markdown
+  requires:
+    tools:
+      - file_write
+  risk:
+    level: write
+    notes: "Writes a local workspace file"
+instructions:
+  file: ./instructions.md

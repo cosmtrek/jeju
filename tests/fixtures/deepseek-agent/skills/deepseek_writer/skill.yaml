@@ -1,0 +1,26 @@
+apiVersion: jeju/v1alpha1
+kind: Skill
+metadata:
+  name: deepseek_writer
+  description: "Write a short Markdown note using DeepSeek"
+disclosure:
+  when_to_use:
+    - "Need a DeepSeek-backed local file write test"
+  capabilities:
+    - markdown_note
+    - file_write
+  inputs:
+    topic:
+      type: string
+      required: true
+  outputs:
+    note:
+      type: markdown
+  requires:
+    tools:
+      - file_write
+  risk:
+    level: write
+    notes: "Writes a local workspace file"
+instructions:
+  file: ./instructions.md
