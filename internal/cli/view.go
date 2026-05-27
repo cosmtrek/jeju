@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -10,10 +11,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+
 	"jeju/internal/evaluate"
 	"jeju/internal/runs"
 	"jeju/internal/trajectory"
 )
+
+var markdownRenderer = goldmark.New(goldmark.WithExtensions(extension.GFM))
+
+func renderMarkdown(src string) template.HTML {
+	if src == "" {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := markdownRenderer.Convert([]byte(src), &buf); err != nil {
+		return template.HTML(template.HTMLEscapeString(src))
+	}
+	return template.HTML(buf.String())
+}
 
 func runView(args []string) error {
 	opts, err := parseViewArgs(args)
@@ -26,23 +43,47 @@ func runView(args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := buildRunReport(store, runDir)
-	if err != nil {
-		return err
-	}
 
 	out := opts.out
 	if out == "" {
-		out = filepath.Join(runDir.Path, "report.html")
+		out = defaultRunReportPath(runDir)
 	}
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		return err
-	}
-	if err := writeRunReportHTML(out, report); err != nil {
+	if err := writeRunReport(store, runDir, out); err != nil {
 		return err
 	}
 	fmt.Printf("wrote %s\n", out)
 	return nil
+}
+
+func writeDefaultRunReport(store *runs.Store, runID string) (string, error) {
+	runDir, err := store.LoadRun(runID)
+	if err != nil {
+		return "", err
+	}
+	out := defaultRunReportPath(runDir)
+	if err := writeRunReport(store, runDir, out); err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(out)
+	if err != nil {
+		return out, nil
+	}
+	return abs, nil
+}
+
+func defaultRunReportPath(runDir *runs.RunDir) string {
+	return filepath.Join(runDir.Path, runs.ReportFile)
+}
+
+func writeRunReport(store *runs.Store, runDir *runs.RunDir, out string) error {
+	report, err := buildRunReport(store, runDir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return err
+	}
+	return writeRunReportHTML(out, report)
 }
 
 type viewOptions struct {
@@ -86,17 +127,79 @@ type runReport struct {
 	Duration         string
 	Summary          inspectSummary
 	Final            string
+	FinalHTML        template.HTML
 	ConfigSnapshot   string
 	Evaluation       *evaluate.Result
 	EvaluationExists bool
+	EvalScoreLabel   string
+	EvalScorePercent string
 	Artifacts        []artifactView
+	Steps            []stepView
+	Blocks           []stepBlock
 	Events           []eventView
 	MetadataJSON     string
 }
 
 type artifactView struct {
-	Path string
-	Size int64
+	Path        string
+	Size        int64
+	Content     string
+	ContentType string
+	ContentNote string
+}
+
+type stepView struct {
+	Number     int
+	Kind       string // file_write | shell_ok | shell_failed | parse_failed | final | other
+	Title      string
+	Status     string // ok | failed | running
+	TypeLabel  string // "TOOL" | "MODEL"
+	TypeClass  string // "tool" | "model"
+	Thought    string
+	Error      string
+
+	// shell tool
+	Command         string
+	ShellExitCode   string
+	ShellDurationMS string
+	ShellStdout     string
+	ShellStderr     string
+
+	// file_write tool
+	FilePath        string
+	FileBytes       int64
+	FileBytesLabel  string
+	FileLineCount   int
+	FileContent     string
+	FileContentType string
+	FileContentNote string
+
+	// generic tool fallback
+	Tool       string
+	ToolOutput string
+
+	// debug-only
+	InputRef       string
+	OutputRef      string
+	DebugArtifacts []artifactRefView
+	Events         []eventView
+}
+
+type artifactRefView struct {
+	Path        string
+	Type        string
+	Content     string
+	ContentType string
+	ContentNote string
+}
+
+type stepBlock struct {
+	IsGroup    bool
+	Step       stepView
+	Steps      []stepView
+	GroupTitle string
+	GroupError string
+	GroupCount int
 }
 
 type eventView struct {
@@ -137,6 +240,10 @@ func buildRunReport(store *runs.Store, runDir *runs.RunDir) (runReport, error) {
 	if err != nil {
 		return runReport{}, err
 	}
+	artifactByPath := mapArtifacts(artifacts)
+	workspaceRoot := findWorkspaceRoot(runDir.Path, meta.Agent)
+	steps := buildStepViews(events, artifactByPath, workspaceRoot)
+	blocks := groupSteps(steps)
 	metadataJSON, err := marshalIndented(meta)
 	if err != nil {
 		return runReport{}, err
@@ -146,6 +253,18 @@ func buildRunReport(store *runs.Store, runDir *runs.RunDir) (runReport, error) {
 	if meta.EndedAt != nil {
 		duration = meta.EndedAt.Sub(meta.StartedAt).Round(time.Millisecond).String()
 	}
+
+	evalScoreLabel := ""
+	evalScorePercent := ""
+	if evaluationExists && evaluation != nil {
+		if evaluation.Passed {
+			evalScoreLabel = "eval passed"
+		} else {
+			evalScoreLabel = fmt.Sprintf("eval %.0f%%", evaluation.Score*100)
+		}
+		evalScorePercent = fmt.Sprintf("%.0f%%", evaluation.Score*100)
+	}
+
 	return runReport{
 		GeneratedAt:      time.Now(),
 		RunDir:           runDir.Path,
@@ -153,10 +272,15 @@ func buildRunReport(store *runs.Store, runDir *runs.RunDir) (runReport, error) {
 		Duration:         duration,
 		Summary:          summarizeInspect(events),
 		Final:            final,
+		FinalHTML:        renderMarkdown(final),
 		ConfigSnapshot:   configSnapshot,
 		Evaluation:       evaluation,
 		EvaluationExists: evaluationExists,
+		EvalScoreLabel:   evalScoreLabel,
+		EvalScorePercent: evalScorePercent,
 		Artifacts:        artifacts,
+		Steps:            steps,
+		Blocks:           blocks,
 		Events:           mapEventViews(events),
 		MetadataJSON:     metadataJSON,
 	}, nil
@@ -211,10 +335,12 @@ func listArtifacts(root string) ([]artifactView, error) {
 		if err != nil {
 			return err
 		}
-		artifacts = append(artifacts, artifactView{
+		artifact := artifactView{
 			Path: filepath.ToSlash(rel),
 			Size: info.Size(),
-		})
+		}
+		artifact.Content, artifact.ContentType, artifact.ContentNote = readArtifactPreview(path, info.Size())
+		artifacts = append(artifacts, artifact)
 		return nil
 	})
 	if err != nil {
@@ -224,6 +350,91 @@ func listArtifacts(root string) ([]artifactView, error) {
 		return artifacts[i].Path < artifacts[j].Path
 	})
 	return artifacts, nil
+}
+
+func readArtifactPreview(path string, size int64) (string, string, string) {
+	const maxEmbed = 200 * 1024
+	if size > maxEmbed {
+		return "", "", "Too large to embed in report."
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", err.Error()
+	}
+	if !isLikelyText(data) {
+		return "", "", "Binary content is not embedded."
+	}
+	content := string(data)
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+	if ext == "json" {
+		var raw any
+		if err := json.Unmarshal(data, &raw); err == nil {
+			if pretty, err := marshalIndented(raw); err == nil {
+				content = pretty
+			}
+		}
+	}
+	return content, ext, ""
+}
+
+// findWorkspaceRoot returns the absolute path to the workspace directory used by
+// the run, or "" if it cannot be located. By convention, the runs directory and
+// the workspace directory are siblings under the project working dir.
+func findWorkspaceRoot(runDirPath, agent string) string {
+	if agent == "" {
+		return ""
+	}
+	runsDir := filepath.Dir(runDirPath)
+	root := filepath.Dir(runsDir)
+	ws := filepath.Join(root, "workspace", agent)
+	if info, err := os.Stat(ws); err == nil && info.IsDir() {
+		return ws
+	}
+	return ""
+}
+
+func readWorkspaceFile(workspaceRoot, relPath string) (content, contentType, note string, size int64) {
+	if workspaceRoot == "" || relPath == "" {
+		return "", "", "", 0
+	}
+	path := filepath.Join(workspaceRoot, relPath)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", "", "", 0
+	}
+	if info.IsDir() {
+		return "", "", "", 0
+	}
+	size = info.Size()
+	const maxEmbed = 200 * 1024
+	if size > maxEmbed {
+		return "", "", "Too large to embed in report.", size
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", err.Error(), size
+	}
+	if !isLikelyText(data) {
+		return "", "", "Binary content is not embedded.", size
+	}
+	return string(data), strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."), "", size
+}
+
+func isLikelyText(data []byte) bool {
+	for _, b := range data {
+		if b == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func mapArtifacts(artifacts []artifactView) map[string]artifactView {
+	out := make(map[string]artifactView, len(artifacts))
+	for _, artifact := range artifacts {
+		out[artifact.Path] = artifact
+	}
+	return out
 }
 
 func mapEventViews(events []trajectory.Event) []eventView {
@@ -243,6 +454,280 @@ func mapEventViews(events []trajectory.Event) []eventView {
 		})
 	}
 	return out
+}
+
+func buildStepViews(events []trajectory.Event, artifacts map[string]artifactView, workspaceRoot string) []stepView {
+	stepsByNumber := map[int]*stepView{}
+	order := []int{}
+	for _, event := range events {
+		if event.Step <= 0 {
+			continue
+		}
+		step, ok := stepsByNumber[event.Step]
+		if !ok {
+			step = &stepView{Number: event.Step, Status: "running"}
+			stepsByNumber[event.Step] = step
+			order = append(order, event.Step)
+		}
+		step.Events = append(step.Events, mapEventViews([]trajectory.Event{event})...)
+		applyEventToStep(step, event, artifacts, workspaceRoot)
+	}
+	sort.Ints(order)
+	steps := make([]stepView, 0, len(order))
+	for _, number := range order {
+		step := stepsByNumber[number]
+		finalizeStep(step)
+		steps = append(steps, *step)
+	}
+	return steps
+}
+
+func applyEventToStep(step *stepView, event trajectory.Event, artifacts map[string]artifactView, workspaceRoot string) {
+	switch event.Type {
+	case trajectory.EventActionParsed:
+		if thought := stringPayload(event.Payload, "thought"); thought != "" {
+			step.Thought = thought
+		}
+		if tool := stringPayload(event.Payload, "tool"); tool != "" {
+			step.Tool = tool
+		}
+		if stringPayload(event.Payload, "type") == "final" {
+			step.Kind = "final"
+			step.Status = "completed"
+		}
+	case trajectory.EventActionParseFailed:
+		step.Kind = "parse_failed"
+		step.Status = "failed"
+		step.Error = stringPayload(event.Payload, "error")
+	case trajectory.EventModelStarted:
+		step.InputRef = stringPayload(event.Payload, "input_ref")
+	case trajectory.EventModelCompleted:
+		step.OutputRef = stringPayload(event.Payload, "output_ref")
+	case trajectory.EventToolRequested:
+		if tool := stringPayload(event.Payload, "tool"); tool != "" {
+			step.Tool = tool
+		}
+		if input, ok := event.Payload["input"].(map[string]any); ok {
+			if cmd := stringPayload(input, "command"); cmd != "" {
+				step.Command = cmd
+			}
+			if path := stringPayload(input, "path"); path != "" && step.Tool == "file_write" {
+				step.FilePath = path
+			}
+		}
+	case trajectory.EventToolCompleted:
+		step.Status = "completed"
+		if tool := stringPayload(event.Payload, "tool"); tool != "" {
+			step.Tool = tool
+		}
+		if ref := stringPayload(event.Payload, "output_ref"); ref != "" {
+			step.OutputRef = ref
+			applyToolOutput(step, artifacts[ref])
+		}
+		switch step.Tool {
+		case "shell":
+			step.Kind = "shell_ok"
+		case "file_write":
+			step.Kind = "file_write"
+			if step.FilePath != "" {
+				step.FileContent, step.FileContentType, step.FileContentNote, _ = readWorkspaceFile(workspaceRoot, step.FilePath)
+			}
+		}
+	case trajectory.EventToolFailed:
+		step.Status = "failed"
+		step.Error = stringPayload(event.Payload, "error")
+		if tool := stringPayload(event.Payload, "tool"); tool != "" {
+			step.Tool = tool
+		}
+		if step.Tool == "shell" {
+			step.Kind = "shell_failed"
+		}
+	case trajectory.EventStepCompleted:
+		status := stringPayload(event.Payload, "status")
+		if status != "" && step.Status != "failed" && step.Status != "completed" {
+			step.Status = status
+		}
+	case trajectory.EventArtifactCreated:
+		path := stringPayload(event.Payload, "path")
+		if path == "" {
+			return
+		}
+		artifact := artifacts[path]
+		ref := artifactRefView{
+			Path:        path,
+			Type:        stringPayload(event.Payload, "type"),
+			Content:     artifact.Content,
+			ContentType: artifact.ContentType,
+			ContentNote: artifact.ContentNote,
+		}
+		// All artifact references go into debug; the main view uses dedicated fields
+		// (ShellStdout, FileContent, etc.) to surface the meaningful bits.
+		step.DebugArtifacts = append(step.DebugArtifacts, ref)
+	}
+}
+
+func applyToolOutput(step *stepView, artifact artifactView) {
+	if artifact.Content == "" {
+		return
+	}
+	// Tool output JSON is shaped {"output":"<inner JSON>","artifacts":[...]} where
+	// inner JSON is the tool's actual return payload. Unwrap and parse it.
+	var wrapper struct {
+		Output string `json:"output"`
+	}
+	inner := artifact.Content
+	if err := json.Unmarshal([]byte(artifact.Content), &wrapper); err == nil && wrapper.Output != "" {
+		inner = wrapper.Output
+	}
+	step.ToolOutput = inner
+	switch step.Tool {
+	case "shell":
+		var shell struct {
+			DurationMS int    `json:"duration_ms"`
+			ExitCode   int    `json:"exit_code"`
+			Stdout     string `json:"stdout"`
+			Stderr     string `json:"stderr"`
+		}
+		if err := json.Unmarshal([]byte(inner), &shell); err == nil {
+			step.ShellExitCode = fmt.Sprintf("%d", shell.ExitCode)
+			step.ShellDurationMS = fmt.Sprintf("%d", shell.DurationMS)
+			step.ShellStdout = shell.Stdout
+			step.ShellStderr = shell.Stderr
+		}
+	case "file_write":
+		var fw struct {
+			Bytes int64  `json:"bytes"`
+			Path  string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(inner), &fw); err == nil {
+			step.FileBytes = fw.Bytes
+			step.FileBytesLabel = formatBytes(fw.Bytes)
+			if fw.Path != "" {
+				step.FilePath = fw.Path
+			}
+		}
+	}
+}
+
+func formatBytes(n int64) string {
+	switch {
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	}
+}
+
+func finalizeStep(step *stepView) {
+	if step.Kind == "" {
+		step.Kind = "other"
+	}
+	if step.Status == "" {
+		step.Status = "running"
+	}
+	step.Title = stepTitle(step)
+	step.TypeLabel, step.TypeClass = stepType(step)
+	if step.FileContent != "" {
+		step.FileLineCount = strings.Count(step.FileContent, "\n")
+		if !strings.HasSuffix(step.FileContent, "\n") && step.FileContent != "" {
+			step.FileLineCount++
+		}
+	}
+}
+
+func stepType(step *stepView) (label, class string) {
+	switch step.Kind {
+	case "file_write", "shell_ok", "shell_failed", "other":
+		return "TOOL", "tool"
+	case "final", "parse_failed":
+		return "MODEL", "model"
+	default:
+		return "", ""
+	}
+}
+
+func stepTitle(step *stepView) string {
+	switch step.Kind {
+	case "file_write":
+		if step.FilePath != "" && step.FileBytesLabel != "" {
+			return fmt.Sprintf("wrote %s · %s", step.FilePath, step.FileBytesLabel)
+		}
+		if step.FilePath != "" {
+			return fmt.Sprintf("wrote %s", step.FilePath)
+		}
+		return "file_write"
+	case "shell_ok":
+		if step.Command != "" {
+			return fmt.Sprintf("$ %s", truncate(step.Command, 120))
+		}
+		return "shell"
+	case "shell_failed":
+		if step.Command != "" {
+			return fmt.Sprintf("$ %s", truncate(step.Command, 120))
+		}
+		return "shell"
+	case "parse_failed":
+		return "model returned invalid JSON"
+	case "final":
+		return "Final answer"
+	default:
+		if step.Tool != "" {
+			return step.Tool
+		}
+		return fmt.Sprintf("Step %d", step.Number)
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
+}
+
+func groupSteps(steps []stepView) []stepBlock {
+	blocks := make([]stepBlock, 0, len(steps))
+	i := 0
+	for i < len(steps) {
+		if steps[i].Kind == "parse_failed" {
+			j := i + 1
+			for j < len(steps) && steps[j].Kind == "parse_failed" && steps[j].Error == steps[i].Error {
+				j++
+			}
+			if j-i >= 2 {
+				group := make([]stepView, j-i)
+				copy(group, steps[i:j])
+				blocks = append(blocks, stepBlock{
+					IsGroup:    true,
+					Steps:      group,
+					GroupTitle: fmt.Sprintf("Steps %d–%d · model returned invalid JSON × %d", steps[i].Number, steps[j-1].Number, j-i),
+					GroupError: steps[i].Error,
+					GroupCount: j - i,
+				})
+				i = j
+				continue
+			}
+		}
+		blocks = append(blocks, stepBlock{Step: steps[i]})
+		i++
+	}
+	return blocks
+}
+
+func stringPayload(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return fmt.Sprint(value)
 }
 
 func marshalIndented(value any) (string, error) {
@@ -271,14 +756,16 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f7f9;
-      --panel: #ffffff;
-      --ink: #1d2430;
-      --muted: #667085;
-      --line: #d8dee8;
-      --accent: #2563eb;
+      --bg: #ffffff;
+      --ink: #172033;
+      --muted: #6b7280;
+      --faint: #9aa2af;
+      --line: #e5e8ee;
+      --soft: #f5f6f8;
       --ok: #15803d;
       --bad: #b42318;
+      --warn: #a15c07;
+      --accent: #2563eb;
       --code: #101828;
     }
     * { box-sizing: border-box; }
@@ -286,241 +773,577 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
       margin: 0;
       background: var(--bg);
       color: var(--ink);
-      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    header {
-      border-bottom: 1px solid var(--line);
-      background: var(--panel);
-      padding: 24px 32px;
-    }
-    main {
-      max-width: 1180px;
+
+    /* ---------- Shared layout wrap ---------- */
+    .wrap {
+      max-width: 1280px;
       margin: 0 auto;
-      padding: 24px;
+      padding-left: 40px;
+      padding-right: 40px;
     }
-    h1, h2, h3 { margin: 0; line-height: 1.2; }
-    h1 { font-size: 24px; }
-    h2 { font-size: 18px; margin-bottom: 14px; }
-    h3 { font-size: 14px; margin-bottom: 8px; }
-    .subtle { color: var(--muted); }
-    .grid {
+
+    /* ---------- Header ---------- */
+    header {
+      padding: 28px 0 28px;
+      border-bottom: 1px solid var(--line);
+    }
+    .header-inner {
       display: grid;
-      gap: 16px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px 32px;
+      align-items: baseline;
     }
-    .grid.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-    .grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 18px;
-      margin-bottom: 16px;
+    .header-id {
+      display: flex;
+      gap: 14px;
+      align-items: baseline;
+      flex-wrap: wrap;
     }
-    .metric {
-      background: #fbfcfe;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 14px;
-      min-width: 0;
-    }
-    .metric .label {
-      color: var(--muted);
-      font-size: 12px;
-      text-transform: uppercase;
-    }
-    .metric .value {
-      font-size: 22px;
-      font-weight: 650;
-      margin-top: 4px;
-      overflow-wrap: anywhere;
-    }
-    dl {
-      display: grid;
-      grid-template-columns: 150px minmax(0, 1fr);
-      gap: 8px 14px;
+    .header-id h1 {
       margin: 0;
+      font-size: 19px;
+      font-weight: 650;
+      letter-spacing: -.01em;
     }
-    dt { color: var(--muted); }
-    dd { margin: 0; overflow-wrap: anywhere; }
+    .run-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .header-score-wrap {
+      text-align: right;
+      grid-row: 1 / span 2;
+      grid-column: 2;
+      align-self: center;
+    }
+    .header-score-label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .04em;
+      margin-bottom: 2px;
+    }
+    .header-score {
+      font: 700 28px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: -.02em;
+      font-variant-numeric: tabular-nums;
+    }
+    .header-score.ok { color: var(--ok); }
+    .header-score.bad { color: var(--bad); }
+    .header-meta {
+      color: var(--muted);
+      font-size: 12.5px;
+      font-variant-numeric: tabular-nums;
+      grid-column: 1;
+    }
+    .header-meta .sep { color: var(--faint); margin: 0 8px; }
+
+    /* ---------- Main layout ---------- */
+    main { padding: 40px 0 56px; }
+    .layout {
+      display: grid;
+      grid-template-columns: 4fr 6fr;
+      gap: 56px;
+    }
+    .col { min-width: 0; }
+    .col > section { margin-bottom: 40px; }
+    .col > section:last-child { margin-bottom: 0; }
+
+    /* ---------- Section heads ---------- */
+    h2 {
+      margin: 0 0 14px;
+      font-size: 11px;
+      font-weight: 650;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+    }
+    h3 {
+      margin: 0 0 6px;
+      font-size: 11px;
+      color: var(--faint);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-weight: 600;
+    }
+    .subtle { color: var(--muted); }
+    .faint { color: var(--faint); }
+
+    /* ---------- Content blocks ---------- */
+    .task {
+      font-size: 15px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+    .final-md { font-size: 14px; line-height: 1.65; color: var(--ink); }
+    .final-md > *:first-child { margin-top: 0; }
+    .final-md > *:last-child { margin-bottom: 0; }
+    .final-md h1, .final-md h2, .final-md h3, .final-md h4 {
+      margin: 22px 0 8px;
+      font-weight: 650;
+      letter-spacing: -.005em;
+      color: var(--ink);
+      text-transform: none;
+    }
+    .final-md h1 { font-size: 18px; }
+    .final-md h2 { font-size: 16px; }
+    .final-md h3 { font-size: 14.5px; }
+    .final-md h4 { font-size: 13.5px; color: var(--muted); }
+    .final-md p { margin: 0 0 10px; }
+    .final-md ul, .final-md ol { margin: 0 0 10px; padding-left: 22px; }
+    .final-md li { margin: 2px 0; }
+    .final-md li > p { margin-bottom: 4px; }
+    .final-md strong { font-weight: 650; }
+    .final-md em { font-style: italic; }
+    .final-md code {
+      font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: var(--soft);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .final-md pre {
+      background: var(--soft);
+      color: var(--ink);
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 8px 0 12px;
+    }
+    .final-md pre code { background: transparent; padding: 0; border-radius: 0; }
+    .final-md blockquote {
+      margin: 8px 0;
+      padding: 4px 12px;
+      border-left: 3px solid var(--line);
+      color: var(--muted);
+    }
+    .final-md table { margin: 8px 0 14px; }
+    .final-md a { color: var(--accent); text-decoration: none; border-bottom: 1px solid currentColor; }
+    .final-md hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
+    .eval-line {
+      font-size: 14px;
+      display: flex;
+      gap: 14px;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
+    .eval-line .score { font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+    .eval-line .score.ok { color: var(--ok); }
+    .eval-line .score.bad { color: var(--bad); }
+    .eval-line .meta { color: var(--muted); font-size: 13px; }
+
+    /* ---------- Badges ---------- */
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 9px;
+      background: var(--soft);
+      font-size: 11.5px;
+      line-height: 1.6;
+      color: var(--ink);
+    }
+    .badge.ok { color: var(--ok); background: #ecfdf3; }
+    .badge.bad { color: var(--bad); background: #fef2f2; }
+    .badge.warn { color: var(--warn); background: #fff7ed; }
+    .badge.soft { color: var(--muted); background: var(--soft); }
+
+    /* ---------- Code blocks ---------- */
     pre {
       margin: 0;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       background: var(--code);
       color: #f8fafc;
-      border-radius: 8px;
-      padding: 14px;
+      border-radius: 6px;
+      padding: 11px 14px;
       overflow-x: auto;
-      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
+    pre.light {
+      background: var(--soft);
+      color: var(--ink);
     }
-    th, td {
-      border-bottom: 1px solid var(--line);
-      padding: 8px 10px;
+    pre.cmd { background: var(--soft); color: var(--ink); padding: 8px 12px; }
+
+    /* ---------- Timeline ---------- */
+    .timeline { display: flex; flex-direction: column; }
+    .step {
+      padding: 18px 0;
+      border-top: 1px solid var(--line);
+      min-width: 0;
+    }
+    .step:first-child { border-top: 0; padding-top: 0; }
+    .step-head {
+      display: flex;
+      gap: 12px;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+    .step-num {
+      color: var(--faint);
+      font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      min-width: 36px;
       text-align: left;
-      vertical-align: top;
-      overflow-wrap: anywhere;
     }
-    th {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-    .badge {
+    .step-type {
       display: inline-block;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 2px 8px;
-      background: #fff;
-      font-size: 12px;
+      font: 600 10.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+      padding: 1px 7px;
+      border-radius: 4px;
+      min-width: 60px;
+      text-align: center;
+      flex-shrink: 0;
     }
-    .badge.ok { color: var(--ok); border-color: #bbf7d0; background: #f0fdf4; }
-    .badge.bad { color: var(--bad); border-color: #fecaca; background: #fef2f2; }
-    details {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 10px 12px;
-      background: #fff;
-      margin: 8px 0;
+    .step-type.tool { color: #3730a3; background: #eef2ff; }
+    .step-type.model { color: #6b21a8; background: #faf5ff; }
+    .step-icon {
+      display: inline-block;
+      font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-width: 14px;
+      text-align: center;
+      color: var(--faint);
+      flex-shrink: 0;
     }
-    summary { cursor: pointer; font-weight: 600; }
-    .event-meta {
-      display: grid;
-      grid-template-columns: 90px 1fr 120px 160px;
-      gap: 8px;
-      margin: 8px 0;
+    .step-icon.ok { color: var(--ok); }
+    .step-icon.bad { color: var(--bad); }
+    .step-icon.warn { color: var(--warn); }
+    .step-title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .step-title code, .step-title .cmd-inline {
+      background: var(--soft);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .step-meta { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .step-body { display: grid; gap: 10px; padding-left: 48px; }
+    .thought {
       color: var(--muted);
-      font-size: 12px;
+      font-style: italic;
+      padding: 2px 0;
     }
-    @media (max-width: 760px) {
-      header { padding: 20px; }
-      main { padding: 16px; }
-      .grid.two, .grid.four { grid-template-columns: 1fr; }
-      dl { grid-template-columns: 1fr; }
-      .event-meta { grid-template-columns: 1fr; }
+    .thought::before { content: "“ "; opacity: .6; font-style: normal; }
+    .thought::after { content: " ”"; opacity: .6; font-style: normal; }
+    .err-line {
+      color: var(--bad);
+      font-size: 13px;
+      padding: 6px 10px;
+      background: #fef2f2;
+      border-radius: 6px;
+    }
+    .err-line::before { content: "⚠ "; }
+
+    /* Group of consecutive parse failures */
+    .group {
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+    }
+    .group:first-child { border-top: 0; padding-top: 0; }
+    .group > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      gap: 12px;
+      align-items: baseline;
+    }
+    .group > summary::-webkit-details-marker { display: none; }
+    .group > summary:hover .group-title { color: var(--accent); }
+    .group-title {
+      font-weight: 600;
+      font-size: 14px;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .group-error { color: var(--muted); font-size: 12.5px; margin-top: 6px; margin-left: 28px; }
+    .group .timeline { margin: 12px 0 4px 28px; padding-left: 14px; border-left: 1px solid var(--line); }
+
+    /* ---------- File block (collapsible source preview) ---------- */
+    details.file-block { padding: 0; background: transparent; }
+    details.file-block > summary {
+      list-style: none;
+      cursor: pointer;
+      display: inline-flex;
+      gap: 8px;
+      align-items: baseline;
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: var(--soft);
+      font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--ink);
+    }
+    details.file-block > summary::-webkit-details-marker { display: none; }
+    details.file-block > summary::before {
+      content: "▸";
+      color: var(--faint);
+      transition: transform .15s;
+    }
+    details.file-block[open] > summary::before { transform: rotate(90deg); }
+    details.file-block > summary .file-meta { color: var(--muted); }
+    details.file-block > pre { margin-top: 6px; }
+
+    /* ---------- Collapsible details / tables ---------- */
+    details.collapsible {
+      background: var(--soft);
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    details.collapsible > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    th { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    tr:last-child td { border-bottom: 0; }
+
+    /* ---------- Artifact viewer (native dialog) ---------- */
+    .artifact-link {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px dashed currentColor;
+      cursor: pointer;
+    }
+    .artifact-link:hover { color: #1d4ed8; }
+    dialog.artifact-viewer {
+      border: 0;
+      border-radius: 10px;
+      padding: 0;
+      max-width: 920px;
+      width: min(920px, 92vw);
+      max-height: 82vh;
+      background: #fff;
+      box-shadow: 0 24px 48px rgba(15, 23, 42, .28);
+    }
+    dialog.artifact-viewer::backdrop {
+      background: rgba(15, 23, 42, .42);
+    }
+    dialog.artifact-viewer .sheet { padding: 20px 24px 22px; }
+    dialog.artifact-viewer .dlg-head {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 6px;
+    }
+    dialog.artifact-viewer .dlg-title {
+      flex: 1;
+      font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      word-break: break-all;
+    }
+    dialog.artifact-viewer .dlg-close {
+      background: transparent;
+      border: 0;
+      color: var(--muted);
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+    dialog.artifact-viewer .dlg-meta { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+    dialog.artifact-viewer pre { max-height: 60vh; overflow: auto; }
+
+    /* ---------- Responsive ---------- */
+    @media (max-width: 900px) {
+      header { padding: 20px 20px 16px; }
+      main { padding: 24px 20px 32px; }
+      .layout { grid-template-columns: 1fr; gap: 36px; }
+      .step-body { padding-left: 0; }
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>Jeju Run {{.Metadata.RunID}}</h1>
-    <div class="subtle">Generated {{.GeneratedAt.Format "2006-01-02 15:04:05"}} from {{.RunDir}}</div>
-  </header>
-  <main>
-    <section class="panel">
-      <h2>Overview</h2>
-      <div class="grid four">
-        <div class="metric"><div class="label">Status</div><div class="value">{{.Metadata.Status}}</div></div>
-        <div class="metric"><div class="label">Agent</div><div class="value">{{.Metadata.Agent}}</div></div>
-        <div class="metric"><div class="label">Steps</div><div class="value">{{.Summary.Steps}}</div></div>
-        <div class="metric"><div class="label">Duration</div><div class="value">{{if .Duration}}{{.Duration}}{{else}}running{{end}}</div></div>
+    <div class="wrap header-inner">
+      <div class="header-id">
+        <h1><span class="run-id">{{.Metadata.RunID}}</span></h1>
+        {{if eq .Metadata.Status "completed"}}<span class="badge ok">{{.Metadata.Status}}</span>{{else}}<span class="badge warn">{{.Metadata.Status}}</span>{{end}}
       </div>
-    </section>
+      {{if .EvalScorePercent}}<div class="header-score-wrap">
+        <div class="header-score-label">评估分</div>
+        <div class="header-score {{if .Evaluation.Passed}}ok{{else}}bad{{end}}">{{.EvalScorePercent}}</div>
+      </div>{{end}}
+      <div class="header-meta">
+        {{if .Metadata.Agent}}{{.Metadata.Agent}}<span class="sep">·</span>{{end}}
+        {{.Summary.Steps}} steps<span class="sep">·</span>
+        {{if .Duration}}{{.Duration}}{{else}}running{{end}}
+        {{if .Summary.ToolFailed}}<span class="sep">·</span>{{.Summary.ToolFailed}} tool failure{{if ne .Summary.ToolFailed 1}}s{{end}}{{end}}
+        <span class="sep">·</span>{{.Metadata.StartedAt.Format "15:04:05"}} → {{if .Metadata.EndedAt}}{{.Metadata.EndedAt.Format "15:04:05"}}{{else}}running{{end}}
+      </div>
+    </div>
+  </header>
 
-    <section class="panel">
-      <h2>Run Details</h2>
-      <dl>
-        <dt>Task</dt><dd>{{.Metadata.Input}}</dd>
-        <dt>Started</dt><dd>{{.Metadata.StartedAt.Format "2006-01-02 15:04:05"}}</dd>
-        <dt>Ended</dt><dd>{{if .Metadata.EndedAt}}{{.Metadata.EndedAt.Format "2006-01-02 15:04:05"}}{{else}}-{{end}}</dd>
-        <dt>Config Snapshot</dt><dd>{{.Metadata.ConfigSnapshot}}</dd>
-        <dt>Trajectory</dt><dd>{{.Metadata.Trajectory}}</dd>
-        <dt>Final</dt><dd>{{.Metadata.Final}}</dd>
-        {{if .Metadata.Evaluation}}<dt>Evaluation</dt><dd>{{.Metadata.Evaluation}}</dd>{{end}}
-      </dl>
-    </section>
+  <main class="wrap">
+    <div class="layout">
+      <div class="col col-left">
+        <section>
+          <h2>Task</h2>
+          <div class="task">{{.Metadata.Input}}</div>
+        </section>
 
-    <section class="panel">
-      <h2>Summary</h2>
-      <table>
-        <thead><tr><th>Area</th><th>Started</th><th>Completed</th><th>Failed</th><th>Other</th></tr></thead>
-        <tbody>
-          <tr><td>Model calls</td><td>{{.Summary.ModelStarted}}</td><td>{{.Summary.ModelCompleted}}</td><td>{{.Summary.ModelFailed}}</td><td>-</td></tr>
-          <tr><td>Tool calls</td><td>{{.Summary.ToolStarted}}</td><td>{{.Summary.ToolCompleted}}</td><td>{{.Summary.ToolFailed}}</td><td>-</td></tr>
-          <tr><td>Permissions</td><td>{{.Summary.PermissionChecked}}</td><td>{{.Summary.PermissionApproved}}</td><td>{{.Summary.PermissionDenied}}</td><td>-</td></tr>
-          <tr><td>Skills</td><td>{{.Summary.SkillDisclosed}}</td><td>{{.Summary.SkillLoaded}}</td><td>-</td><td>artifacts {{.Summary.Artifacts}}</td></tr>
-        </tbody>
-      </table>
-    </section>
+        <section>
+          <h2>Final Output</h2>
+          {{if .FinalHTML}}<div class="final-md">{{.FinalHTML}}</div>{{else}}<div class="subtle">No final.md content found.</div>{{end}}
+        </section>
 
-    <div class="grid two">
-      <section class="panel">
-        <h2>Final Output</h2>
-        {{if .Final}}<pre>{{.Final}}</pre>{{else}}<div class="subtle">No final.md content found.</div>{{end}}
-      </section>
-
-      <section class="panel">
-        <h2>Evaluation</h2>
-        {{if .EvaluationExists}}
-          <dl>
-            <dt>Passed</dt><dd>{{if .Evaluation.Passed}}<span class="badge ok">true</span>{{else}}<span class="badge bad">false</span>{{end}}</dd>
-            <dt>Score</dt><dd>{{.Evaluation.Score}}</dd>
-            <dt>Evaluators</dt><dd>{{len .Evaluation.Evaluators}}</dd>
-          </dl>
-          {{range .Evaluation.Evaluators}}
-            <details>
-              <summary>{{.Name}} <span class="badge">{{.Type}}</span></summary>
-              <dl>
-                <dt>Passed</dt><dd>{{.Passed}}</dd>
-                <dt>Score</dt><dd>{{.Score}}</dd>
-              </dl>
-              {{if .Results}}
-                <table>
-                  <thead><tr><th>Rule</th><th>Passed</th><th>Message</th></tr></thead>
-                  <tbody>{{range .Results}}<tr><td>{{.Rule}}</td><td>{{.Passed}}</td><td>{{.Message}}</td></tr>{{end}}</tbody>
-                </table>
+        <section>
+          <h2>Evaluation</h2>
+          {{if .EvaluationExists}}
+            <div class="eval-line">
+              {{if .Evaluation.Passed}}
+                <span class="score ok">{{printf "%.2f" .Evaluation.Score}}</span>
+                <span class="badge ok">passed</span>
+              {{else}}
+                <span class="score bad">{{printf "%.2f" .Evaluation.Score}}</span>
+                <span class="badge bad">failed</span>
               {{end}}
-            </details>
+              <span class="meta">{{len .Evaluation.Evaluators}} evaluator{{if ne (len .Evaluation.Evaluators) 1}}s{{end}}</span>
+            </div>
+            {{range .Evaluation.Evaluators}}
+              <details class="collapsible" style="margin-top:14px">
+                <summary>{{.Name}} <span class="badge soft">{{.Type}}</span></summary>
+                {{if .Results}}
+                  <table>
+                    <thead><tr><th>Rule</th><th>Passed</th><th>Message</th></tr></thead>
+                    <tbody>{{range .Results}}<tr><td>{{.Rule}}</td><td>{{if .Passed}}<span class="badge ok">true</span>{{else}}<span class="badge bad">false</span>{{end}}</td><td>{{.Message}}</td></tr>{{end}}</tbody>
+                  </table>
+                {{end}}
+              </details>
+            {{end}}
+          {{else}}
+            <div class="subtle">No evaluation.json content found.</div>
           {{end}}
-        {{else}}
-          <div class="subtle">No evaluation.json content found.</div>
-        {{end}}
-      </section>
+        </section>
+      </div>
+
+      <div class="col col-right">
+        <section>
+          <h2>Process</h2>
+          {{if .Blocks}}
+            <div class="timeline">
+              {{range .Blocks}}
+                {{if .IsGroup}}
+                  <details class="group">
+                    <summary>
+                      <span class="step-num">×{{.GroupCount}}</span>
+                      <span class="step-type model">MODEL</span>
+                      <span class="step-icon warn" aria-label="retry">↺</span>
+                      <span class="group-title">{{.GroupTitle}}</span>
+                    </summary>
+                    <div class="group-error">{{.GroupError}}</div>
+                    <div class="timeline">
+                      {{range .Steps}}{{template "step" .}}{{end}}
+                    </div>
+                  </details>
+                {{else}}
+                  {{template "step" .Step}}
+                {{end}}
+              {{end}}
+            </div>
+          {{else}}
+            <div class="subtle">No steps recorded.</div>
+          {{end}}
+        </section>
+      </div>
     </div>
 
-    <section class="panel">
-      <h2>Artifacts</h2>
-      {{if .Artifacts}}
-        <table>
-          <thead><tr><th>Path</th><th style="width: 140px;">Size</th></tr></thead>
-          <tbody>{{range .Artifacts}}<tr><td>{{.Path}}</td><td>{{.Size}} bytes</td></tr>{{end}}</tbody>
-        </table>
-      {{else}}
-        <div class="subtle">No artifacts found.</div>
-      {{end}}
-    </section>
-
-    <section class="panel">
-      <h2>Trajectory</h2>
-      {{range .Events}}
-        <details>
-          <summary>{{.Type}} <span class="badge">step {{.Step}}</span></summary>
-          <div class="event-meta">
-            <div>{{.ID}}</div>
-            <div>{{.Actor}}</div>
-            <div>step {{.Step}}</div>
-            <div>{{.Timestamp}}</div>
-          </div>
-          {{if .PayloadJSON}}<pre>{{.PayloadJSON}}</pre>{{else}}<div class="subtle">No payload.</div>{{end}}
-        </details>
-      {{end}}
-    </section>
-
-    <section class="panel">
-      <h2>Raw Metadata</h2>
-      <pre>{{.MetadataJSON}}</pre>
-    </section>
-
-    <section class="panel">
-      <h2>Config Snapshot</h2>
-      {{if .ConfigSnapshot}}<pre>{{.ConfigSnapshot}}</pre>{{else}}<div class="subtle">No config snapshot found.</div>{{end}}
-    </section>
   </main>
+
+  {{range .Artifacts}}
+    <dialog class="artifact-viewer" id="a-{{.Path}}" aria-label="{{.Path}}">
+      <div class="sheet">
+        <div class="dlg-head">
+          <span class="dlg-title">{{.Path}}</span>
+          <button type="button" class="dlg-close" aria-label="Close">×</button>
+        </div>
+        <div class="dlg-meta">{{.Size}} bytes{{if .ContentType}} · {{.ContentType}}{{end}}</div>
+        {{if .Content}}<pre class="light">{{.Content}}</pre>{{else}}<div class="subtle">{{if .ContentNote}}{{.ContentNote}}{{else}}No embedded content.{{end}}</div>{{end}}
+      </div>
+    </dialog>
+  {{end}}
+
+  <script>
+    (function () {
+      document.addEventListener('click', function (e) {
+        var link = e.target.closest('.artifact-link');
+        if (link) {
+          var id = link.getAttribute('data-target');
+          if (!id) return;
+          var dlg = document.getElementById(id);
+          if (dlg && typeof dlg.showModal === 'function') {
+            e.preventDefault();
+            dlg.showModal();
+          }
+          return;
+        }
+        if (e.target.matches('.dlg-close')) {
+          var d = e.target.closest('dialog');
+          if (d) d.close();
+          return;
+        }
+        if (e.target.tagName === 'DIALOG') {
+          e.target.close();
+        }
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          document.querySelectorAll('dialog[open]').forEach(function (d) { d.close(); });
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
+
+{{define "step"}}
+<div class="step {{if eq .Status "completed"}}ok{{else if eq .Status "failed"}}failed{{end}}">
+  <div class="step-head">
+    <span class="step-num">#{{.Number}}</span>
+    {{if .TypeLabel}}<span class="step-type {{.TypeClass}}">{{.TypeLabel}}</span>{{end}}
+    {{if eq .Status "failed"}}<span class="step-icon bad" aria-label="failed">✗</span>{{else if eq .Kind "final"}}<span class="step-icon" aria-label="final">→</span>{{else if eq .Status "completed"}}<span class="step-icon ok" aria-label="ok">✓</span>{{else}}<span class="step-icon" aria-label="{{.Status}}">·</span>{{end}}
+    <span class="step-title">{{.Title}}</span>
+    <span class="step-meta">
+      {{if eq .Kind "shell_ok"}}{{if .ShellExitCode}}exit {{.ShellExitCode}}{{end}}{{if .ShellDurationMS}} · {{.ShellDurationMS}} ms{{end}}{{end}}
+    </span>
+  </div>
+  <div class="step-body">
+    {{if .Thought}}<div class="thought">{{.Thought}}</div>{{end}}
+
+    {{if eq .Kind "file_write"}}
+      {{if .FileContent}}
+        <details class="file-block">
+          <summary>{{if .FilePath}}{{.FilePath}}{{else}}file{{end}}<span class="file-meta">{{if .FileLineCount}} · {{.FileLineCount}} lines{{end}}{{if .FileBytesLabel}} · {{.FileBytesLabel}}{{end}}</span></summary>
+          <pre class="light">{{.FileContent}}</pre>
+        </details>
+      {{else if .FilePath}}
+        <div>File: <a class="artifact-link" href="#" data-target="a-{{.FilePath}}">{{.FilePath}}</a>{{if .FileContentNote}} <span class="subtle">— {{.FileContentNote}}</span>{{end}}</div>
+      {{end}}
+    {{end}}
+
+    {{if eq .Kind "shell_ok"}}
+      {{if .Command}}<pre class="cmd">$ {{.Command}}</pre>{{end}}
+      {{if .ShellStdout}}<div><h3>stdout</h3><pre>{{.ShellStdout}}</pre></div>{{end}}
+      {{if .ShellStderr}}<div><h3>stderr</h3><pre>{{.ShellStderr}}</pre></div>{{end}}
+    {{end}}
+
+    {{if eq .Kind "shell_failed"}}
+      {{if .Command}}<pre class="cmd">$ {{.Command}}</pre>{{end}}
+      {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
+    {{end}}
+
+    {{if eq .Kind "parse_failed"}}
+      {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
+      {{if .OutputRef}}<div class="subtle">Raw model output: <a class="artifact-link" href="#" data-target="a-{{.OutputRef}}">{{.OutputRef}}</a></div>{{end}}
+    {{end}}
+
+    {{if eq .Kind "other"}}
+      {{if .Tool}}<div class="subtle">tool: {{.Tool}}</div>{{end}}
+      {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
+      {{if .ToolOutput}}<details class="collapsible"><summary>Tool output</summary><pre class="light">{{.ToolOutput}}</pre></details>{{end}}
+    {{end}}
+  </div>
+</div>
+{{end}}
 `))

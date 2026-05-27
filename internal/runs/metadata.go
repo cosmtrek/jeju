@@ -8,6 +8,7 @@ const (
 	TrajectoryFile     = "trajectory.jsonl"
 	FinalFile          = "final.md"
 	EvaluationFile     = "evaluation.json"
+	ReportFile         = "report.html"
 	ArtifactsDir       = "artifacts"
 )
 

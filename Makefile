@@ -1,6 +1,10 @@
 PROVIDER ?= mock
 
-.PHONY: test vet test-agent benchmark-terminal-lite benchmark-bfcl-lite
+.PHONY: build test vet test-agent benchmark-terminal-lite benchmark-bfcl-lite
+
+build:
+	mkdir -p .jeju-dev/bin
+	go build -o .jeju-dev/bin/jeju ./cmd/jeju
 
 test:
 	go test ./...

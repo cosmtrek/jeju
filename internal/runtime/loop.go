@@ -120,7 +120,7 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 	}
 	req := r.buildModelRequest(agent, state, cfg)
 	inputData, _ := json.MarshalIndent(req, "", "  ")
-	inputRef, _ := writeArtifact(ctx, agent, recorder, state, fmt.Sprintf("model_input_step_%d.json", state.Step), inputData, "model_input")
+	inputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "model_input", "", "json"), inputData, "model_input")
 	recorder.Emit(ctx, trajectory.EventModelStarted, state.RunID, state.Step, "model:"+modelName, map[string]any{
 		"provider":  cfg.Provider,
 		"model":     cfg.Model,
@@ -137,7 +137,7 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 		return err
 	}
 	state.ResetErrors()
-	outputRef, _ := writeArtifact(ctx, agent, recorder, state, fmt.Sprintf("model_output_step_%d.txt", state.Step), []byte(resp.Text), "model_output")
+	outputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "model_output", "", "txt"), []byte(resp.Text), "model_output")
 	recorder.Emit(ctx, trajectory.EventModelCompleted, state.RunID, state.Step, "model:"+modelName, map[string]any{
 		"provider":     resp.Provider,
 		"model":        resp.Model,
@@ -284,7 +284,7 @@ func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAg
 	state.ResetErrors()
 	state.ToolCalls++
 	outputData, _ := json.MarshalIndent(result, "", "  ")
-	outputRef, _ := writeArtifact(ctx, agent, recorder, state, fmt.Sprintf("tool_output_step_%d_%s.json", state.Step, action.Tool), outputData, "tool_output")
+	outputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "tool_output", action.Tool, "json"), outputData, "tool_output")
 	recorder.Emit(ctx, trajectory.EventToolCompleted, state.RunID, state.Step, "tool:"+action.Tool, map[string]any{
 		"tool":       action.Tool,
 		"input":      compactToolInput(action.Input),
@@ -409,6 +409,17 @@ func writeArtifact(ctx context.Context, agent *compiler.CompiledAgent, recorder 
 		"type": typ,
 	})
 	return ref, nil
+}
+
+func stepArtifactName(step int, typ string, suffix string, ext string) string {
+	name := fmt.Sprintf("step%03d_%s", step, typ)
+	if suffix != "" {
+		name += "_" + suffix
+	}
+	if ext != "" {
+		name += "." + ext
+	}
+	return name
 }
 
 func compactToolInput(input json.RawMessage) map[string]any {

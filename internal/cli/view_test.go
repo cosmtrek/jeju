@@ -53,7 +53,7 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 	if err := store.WriteEvaluation(runDir.RunID, []byte(`{"run_id":"x","passed":true,"score":1,"evaluators":[{"name":"rules","type":"rule","passed":true,"score":1}]}`)); err != nil {
 		t.Fatalf("WriteEvaluation failed: %v", err)
 	}
-	if _, err := store.WriteArtifact(runDir.RunID, "model_output_step_1.txt", []byte("output")); err != nil {
+	if _, err := store.WriteArtifact(runDir.RunID, "step001_model_output.txt", []byte("output")); err != nil {
 		t.Fatalf("WriteArtifact failed: %v", err)
 	}
 	if err := writeTrajectory(filepath.Join(runDir.Path, runs.TrajectoryFile), []trajectory.Event{
@@ -80,7 +80,7 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 		t.Fatalf("read report failed: %v", err)
 	}
 	html := string(data)
-	for _, want := range []string{"Jeju Run", "write notes", "Final Output", "Trajectory", "model_output_step_1.txt"} {
+	for _, want := range []string{"Jeju Run", "write notes", "Final Output", "step001_model_output.txt"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected html to contain %q", want)
 		}

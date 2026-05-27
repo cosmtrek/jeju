@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"jeju/internal/evaluate"
@@ -32,10 +34,13 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 		t.Fatalf("validate failed: %v", err)
 	}
 
+	var runOutput string
 	withStdin(t, "y\n", func() {
-		if err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "写一份关于 AgentOps 的简短分析，并保存到 notes.md"}); err != nil {
-			t.Fatalf("run failed: %v", err)
-		}
+		runOutput = captureStdout(t, func() {
+			if err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "写一份关于 AgentOps 的简短分析，并保存到 notes.md"}); err != nil {
+				t.Fatalf("run failed: %v", err)
+			}
+		})
 	})
 
 	store := runs.NewStore("./runs")
@@ -47,6 +52,16 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 		t.Fatalf("expected 1 run, got %d", len(items))
 	}
 	runID := items[0].RunID
+	runDir := filepath.Join(tmp, "jeju-work", "runs", runID)
+	reportPath := filepath.Join(runDir, runs.ReportFile)
+	assertFileExists(t, reportPath)
+	expectedReportOutput, err := filepath.EvalSymlinks(reportPath)
+	if err != nil {
+		t.Fatalf("resolve report path failed: %v", err)
+	}
+	if !strings.Contains(runOutput, "report: "+expectedReportOutput) {
+		t.Fatalf("run output did not include report path %q:\n%s", expectedReportOutput, runOutput)
+	}
 
 	if err := Execute(ctx, []string{"runs"}); err != nil {
 		t.Fatalf("runs failed: %v", err)
@@ -58,13 +73,12 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 		t.Fatalf("view failed: %v", err)
 	}
 
-	runDir := filepath.Join(tmp, "jeju-work", "runs", runID)
 	assertFileExists(t, filepath.Join(runDir, runs.MetadataFile))
 	assertFileExists(t, filepath.Join(runDir, runs.ConfigSnapshotFile))
 	assertFileExists(t, filepath.Join(runDir, runs.TrajectoryFile))
 	assertFileExists(t, filepath.Join(runDir, runs.FinalFile))
 	assertFileExists(t, filepath.Join(runDir, runs.EvaluationFile))
-	assertFileExists(t, filepath.Join(runDir, "report.html"))
+	assertFileExists(t, filepath.Join(runDir, runs.ReportFile))
 	assertFileExists(t, filepath.Join(tmp, "jeju-work", "workspace", "research", "notes.md"))
 
 	events, err := trajectory.ReadFile(filepath.Join(runDir, runs.TrajectoryFile))
@@ -117,6 +131,29 @@ func chdir(t *testing.T, dir string) func() {
 			t.Fatalf("restore cwd failed: %v", err)
 		}
 	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe failed: %v", err)
+	}
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = old
+		_ = reader.Close()
+	}()
+	fn()
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stdout writer failed: %v", err)
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read stdout failed: %v", err)
+	}
+	return string(data)
 }
 
 func withStdin(t *testing.T, input string, fn func()) {
