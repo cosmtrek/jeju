@@ -1,5 +1,7 @@
 package config
 
+import "jeju/internal/runs"
+
 func ApplyDefaults(m *AgentManifest) {
 	for name, provider := range m.Models.Providers {
 		if provider.Provider == "deepseek" {
@@ -91,7 +93,7 @@ func ApplyDefaults(m *AgentManifest) {
 		}
 	}
 	if m.Evaluate.Enabled && m.Evaluate.Outputs.File == "" {
-		m.Evaluate.Outputs.File = "evaluation.json"
+		m.Evaluate.Outputs.File = runs.EvaluationFile
 	}
 	if m.Evaluate.Enabled {
 		m.Evaluate.OnRunComplete = true

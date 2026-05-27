@@ -4,6 +4,7 @@ import "fmt"
 
 type Registry struct {
 	tools map[string]Tool
+	order []string
 }
 
 func NewRegistry() *Registry {
@@ -19,6 +20,7 @@ func (r *Registry) Register(tool Tool) error {
 		return fmt.Errorf("tool %q already registered", name)
 	}
 	r.tools[name] = tool
+	r.order = append(r.order, name)
 	return nil
 }
 
@@ -28,9 +30,9 @@ func (r *Registry) Get(name string) (Tool, bool) {
 }
 
 func (r *Registry) Specs() []Spec {
-	specs := make([]Spec, 0, len(r.tools))
-	for _, tool := range r.tools {
-		specs = append(specs, tool.Spec())
+	specs := make([]Spec, 0, len(r.order))
+	for _, name := range r.order {
+		specs = append(specs, r.tools[name].Spec())
 	}
 	return specs
 }

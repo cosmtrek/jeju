@@ -50,37 +50,37 @@ func TestBasicAgentFixtureFullRun(t *testing.T) {
 	}
 
 	runDir := filepath.Join(workdir, "runs", runID)
-	requireFile(t, filepath.Join(runDir, "metadata.json"))
-	requireFile(t, filepath.Join(runDir, "config.snapshot.yaml"))
-	requireFile(t, filepath.Join(runDir, "trajectory.jsonl"))
-	requireFile(t, filepath.Join(runDir, "final.md"))
-	requireFile(t, filepath.Join(runDir, "evaluation.json"))
+	requireFile(t, filepath.Join(runDir, runs.MetadataFile))
+	requireFile(t, filepath.Join(runDir, runs.ConfigSnapshotFile))
+	requireFile(t, filepath.Join(runDir, runs.TrajectoryFile))
+	requireFile(t, filepath.Join(runDir, runs.FinalFile))
+	requireFile(t, filepath.Join(runDir, runs.EvaluationFile))
 	requireFile(t, filepath.Join(workdir, "workspace", "basic", "notes.md"))
 
-	events, err := trajectory.ReadFile(filepath.Join(runDir, "trajectory.jsonl"))
+	events, err := trajectory.ReadFile(filepath.Join(runDir, runs.TrajectoryFile))
 	if err != nil {
 		t.Fatalf("read trajectory failed: %v", err)
 	}
 	requireEventTypes(t, events,
-		"run.started",
-		"skill.disclosed",
-		"skill.loaded",
-		"step.started",
-		"model.started",
-		"model.completed",
-		"action.parsed",
-		"tool.requested",
-		"permission.checked",
-		"permission.approved",
-		"tool.started",
-		"tool.completed",
-		"evaluation.started",
-		"evaluation.completed",
-		"run.completed",
+		trajectory.EventRunStarted,
+		trajectory.EventSkillDisclosed,
+		trajectory.EventSkillLoaded,
+		trajectory.EventStepStarted,
+		trajectory.EventModelStarted,
+		trajectory.EventModelCompleted,
+		trajectory.EventActionParsed,
+		trajectory.EventToolRequested,
+		trajectory.EventPermissionChecked,
+		trajectory.EventPermissionApproved,
+		trajectory.EventToolStarted,
+		trajectory.EventToolCompleted,
+		trajectory.EventEvaluationStarted,
+		trajectory.EventEvaluationCompleted,
+		trajectory.EventRunCompleted,
 	)
 
 	var result evaluate.Result
-	data, err := os.ReadFile(filepath.Join(runDir, "evaluation.json"))
+	data, err := os.ReadFile(filepath.Join(runDir, runs.EvaluationFile))
 	if err != nil {
 		t.Fatalf("read evaluation failed: %v", err)
 	}
@@ -177,9 +177,9 @@ func requireFile(t *testing.T, path string) {
 	}
 }
 
-func requireEventTypes(t *testing.T, events []trajectory.Event, types ...string) {
+func requireEventTypes(t *testing.T, events []trajectory.Event, types ...trajectory.EventType) {
 	t.Helper()
-	seen := map[string]bool{}
+	seen := map[trajectory.EventType]bool{}
 	for _, event := range events {
 		seen[event.Type] = true
 	}

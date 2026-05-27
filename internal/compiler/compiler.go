@@ -33,6 +33,7 @@ type CompiledAgent struct {
 	Policy         *policy.Gate
 	Evaluators     []evaluate.Evaluator
 	RunStore       *runs.Store
+	systemPrompt   string
 }
 
 func Compile(manifestPath string) (*CompiledAgent, error) {
@@ -69,7 +70,7 @@ func Compile(manifestPath string) (*CompiledAgent, error) {
 		return nil, err
 	}
 
-	return &CompiledAgent{
+	agent := &CompiledAgent{
 		Name:           manifest.Metadata.Name,
 		Description:    manifest.Metadata.Description,
 		Config:         *manifest,
@@ -83,7 +84,9 @@ func Compile(manifestPath string) (*CompiledAgent, error) {
 		Policy:         policy.NewGate(manifest.Policy),
 		Evaluators:     evaluators,
 		RunStore:       runs.NewStore(manifest.Trajectory.Store.Path),
-	}, nil
+	}
+	agent.systemPrompt = agent.renderSystemPrompt()
+	return agent, nil
 }
 
 func compileModels(cfg config.ModelsConfig) (*model.Registry, error) {

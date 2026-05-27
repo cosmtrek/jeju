@@ -2,6 +2,15 @@ package runs
 
 import "time"
 
+const (
+	MetadataFile       = "metadata.json"
+	ConfigSnapshotFile = "config.snapshot.yaml"
+	TrajectoryFile     = "trajectory.jsonl"
+	FinalFile          = "final.md"
+	EvaluationFile     = "evaluation.json"
+	ArtifactsDir       = "artifacts"
+)
+
 type Metadata struct {
 	RunID          string     `json:"run_id"`
 	Agent          string     `json:"agent"`

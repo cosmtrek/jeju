@@ -8,7 +8,7 @@ import (
 
 func TestFormatConsoleStructuredOutput(t *testing.T) {
 	runLine := formatConsole(Event{
-		Type:  "run.started",
+		Type:  EventRunStarted,
 		RunID: "20260526-000000-basic",
 		TS:    time.Now(),
 		Payload: map[string]any{
@@ -23,7 +23,7 @@ func TestFormatConsoleStructuredOutput(t *testing.T) {
 	}
 
 	toolLine := formatConsole(Event{
-		Type: "tool.requested",
+		Type: EventToolRequested,
 		Payload: map[string]any{
 			"tool": "file_write",
 			"input": map[string]any{
@@ -37,7 +37,7 @@ func TestFormatConsoleStructuredOutput(t *testing.T) {
 		t.Fatalf("unexpected tool line: %s", toolLine)
 	}
 
-	if line := formatConsole(Event{Type: "artifact.created"}); line != "" {
+	if line := formatConsole(Event{Type: EventArtifactCreated}); line != "" {
 		t.Fatalf("artifact.created should be hidden in console output, got %q", line)
 	}
 }

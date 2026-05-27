@@ -59,39 +59,39 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 	}
 
 	runDir := filepath.Join(tmp, "jeju-work", "runs", runID)
-	assertFileExists(t, filepath.Join(runDir, "metadata.json"))
-	assertFileExists(t, filepath.Join(runDir, "config.snapshot.yaml"))
-	assertFileExists(t, filepath.Join(runDir, "trajectory.jsonl"))
-	assertFileExists(t, filepath.Join(runDir, "final.md"))
-	assertFileExists(t, filepath.Join(runDir, "evaluation.json"))
+	assertFileExists(t, filepath.Join(runDir, runs.MetadataFile))
+	assertFileExists(t, filepath.Join(runDir, runs.ConfigSnapshotFile))
+	assertFileExists(t, filepath.Join(runDir, runs.TrajectoryFile))
+	assertFileExists(t, filepath.Join(runDir, runs.FinalFile))
+	assertFileExists(t, filepath.Join(runDir, runs.EvaluationFile))
 	assertFileExists(t, filepath.Join(runDir, "report.html"))
 	assertFileExists(t, filepath.Join(tmp, "jeju-work", "workspace", "research", "notes.md"))
 
-	events, err := trajectory.ReadFile(filepath.Join(runDir, "trajectory.jsonl"))
+	events, err := trajectory.ReadFile(filepath.Join(runDir, runs.TrajectoryFile))
 	if err != nil {
 		t.Fatalf("ReadFile trajectory failed: %v", err)
 	}
 	requireEventTypes(t, events,
-		"run.started",
-		"skill.disclosed",
-		"skill.loaded",
-		"step.started",
-		"model.started",
-		"model.completed",
-		"action.parsed",
-		"tool.requested",
-		"permission.checked",
-		"permission.approved",
-		"tool.started",
-		"tool.completed",
-		"step.completed",
-		"evaluation.started",
-		"evaluation.completed",
-		"run.completed",
+		trajectory.EventRunStarted,
+		trajectory.EventSkillDisclosed,
+		trajectory.EventSkillLoaded,
+		trajectory.EventStepStarted,
+		trajectory.EventModelStarted,
+		trajectory.EventModelCompleted,
+		trajectory.EventActionParsed,
+		trajectory.EventToolRequested,
+		trajectory.EventPermissionChecked,
+		trajectory.EventPermissionApproved,
+		trajectory.EventToolStarted,
+		trajectory.EventToolCompleted,
+		trajectory.EventStepCompleted,
+		trajectory.EventEvaluationStarted,
+		trajectory.EventEvaluationCompleted,
+		trajectory.EventRunCompleted,
 	)
 
 	var result evaluate.Result
-	data, err := os.ReadFile(filepath.Join(runDir, "evaluation.json"))
+	data, err := os.ReadFile(filepath.Join(runDir, runs.EvaluationFile))
 	if err != nil {
 		t.Fatalf("read evaluation failed: %v", err)
 	}
@@ -151,9 +151,9 @@ func assertFileExists(t *testing.T, path string) {
 	}
 }
 
-func requireEventTypes(t *testing.T, events []trajectory.Event, types ...string) {
+func requireEventTypes(t *testing.T, events []trajectory.Event, types ...trajectory.EventType) {
 	t.Helper()
-	seen := map[string]bool{}
+	seen := map[trajectory.EventType]bool{}
 	for _, event := range events {
 		seen[event.Type] = true
 	}

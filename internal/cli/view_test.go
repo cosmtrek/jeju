@@ -37,10 +37,10 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 		StartedAt:      time.Now(),
 		EndedAt:        &endedAt,
 		Input:          "write notes",
-		ConfigSnapshot: "config.snapshot.yaml",
-		Trajectory:     "trajectory.jsonl",
-		Final:          "final.md",
-		Evaluation:     "evaluation.json",
+		ConfigSnapshot: runs.ConfigSnapshotFile,
+		Trajectory:     runs.TrajectoryFile,
+		Final:          runs.FinalFile,
+		Evaluation:     runs.EvaluationFile,
 	}); err != nil {
 		t.Fatalf("WriteMetadata failed: %v", err)
 	}
@@ -56,9 +56,9 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 	if _, err := store.WriteArtifact(runDir.RunID, "model_output_step_1.txt", []byte("output")); err != nil {
 		t.Fatalf("WriteArtifact failed: %v", err)
 	}
-	if err := writeTrajectory(filepath.Join(runDir.Path, "trajectory.jsonl"), []trajectory.Event{
-		{ID: "evt_000001", Type: "run.started", RunID: runDir.RunID, TS: time.Now(), Actor: "runtime", Payload: map[string]any{"agent": "agent"}},
-		{ID: "evt_000002", Type: "model.completed", RunID: runDir.RunID, Step: 1, TS: time.Now(), Actor: "model:mock"},
+	if err := writeTrajectory(filepath.Join(runDir.Path, runs.TrajectoryFile), []trajectory.Event{
+		{ID: "evt_000001", Type: trajectory.EventRunStarted, RunID: runDir.RunID, TS: time.Now(), Actor: "runtime", Payload: map[string]any{"agent": "agent"}},
+		{ID: "evt_000002", Type: trajectory.EventModelCompleted, RunID: runDir.RunID, Step: 1, TS: time.Now(), Actor: "model:mock"},
 	}); err != nil {
 		t.Fatalf("writeTrajectory failed: %v", err)
 	}

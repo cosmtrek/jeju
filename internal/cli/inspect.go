@@ -25,7 +25,7 @@ func runInspect(args []string) error {
 	if err != nil {
 		return err
 	}
-	events, err := trajectory.ReadFile(filepath.Join(runDir.Path, "trajectory.jsonl"))
+	events, err := trajectory.ReadFile(filepath.Join(runDir.Path, runs.TrajectoryFile))
 	if err != nil {
 		return err
 	}
@@ -69,9 +69,9 @@ func runInspect(args []string) error {
 	fmt.Println("\nFiles")
 	fmt.Printf("  final: %s\n", filepath.Join(runDir.Path, meta.Final))
 	fmt.Printf("  trajectory: %s\n", filepath.Join(runDir.Path, meta.Trajectory))
-	fmt.Printf("  metadata: %s\n", filepath.Join(runDir.Path, "metadata.json"))
+	fmt.Printf("  metadata: %s\n", filepath.Join(runDir.Path, runs.MetadataFile))
 	fmt.Printf("  config_snapshot: %s\n", filepath.Join(runDir.Path, meta.ConfigSnapshot))
-	fmt.Printf("  artifacts: %s\n", filepath.Join(runDir.Path, "artifacts"))
+	fmt.Printf("  artifacts: %s\n", filepath.Join(runDir.Path, runs.ArtifactsDir))
 	return nil
 }
 
@@ -95,31 +95,31 @@ func summarizeInspect(events []trajectory.Event) inspectSummary {
 	var summary inspectSummary
 	for _, event := range events {
 		switch event.Type {
-		case "step.started":
+		case trajectory.EventStepStarted:
 			summary.Steps++
-		case "model.started":
+		case trajectory.EventModelStarted:
 			summary.ModelStarted++
-		case "model.completed":
+		case trajectory.EventModelCompleted:
 			summary.ModelCompleted++
-		case "model.failed":
+		case trajectory.EventModelFailed:
 			summary.ModelFailed++
-		case "tool.started":
+		case trajectory.EventToolStarted:
 			summary.ToolStarted++
-		case "tool.completed":
+		case trajectory.EventToolCompleted:
 			summary.ToolCompleted++
-		case "tool.failed":
+		case trajectory.EventToolFailed:
 			summary.ToolFailed++
-		case "permission.checked":
+		case trajectory.EventPermissionChecked:
 			summary.PermissionChecked++
-		case "permission.approved":
+		case trajectory.EventPermissionApproved:
 			summary.PermissionApproved++
-		case "permission.denied":
+		case trajectory.EventPermissionDenied:
 			summary.PermissionDenied++
-		case "skill.disclosed":
+		case trajectory.EventSkillDisclosed:
 			summary.SkillDisclosed++
-		case "skill.loaded":
+		case trajectory.EventSkillLoaded:
 			summary.SkillLoaded++
-		case "artifact.created":
+		case trajectory.EventArtifactCreated:
 			summary.Artifacts++
 		}
 	}

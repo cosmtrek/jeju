@@ -133,7 +133,7 @@ func buildRunReport(store *runs.Store, runDir *runs.RunDir) (runReport, error) {
 	if err != nil {
 		return runReport{}, err
 	}
-	artifacts, err := listArtifacts(filepath.Join(runDir.Path, "artifacts"))
+	artifacts, err := listArtifacts(filepath.Join(runDir.Path, runs.ArtifactsDir))
 	if err != nil {
 		return runReport{}, err
 	}
@@ -235,7 +235,7 @@ func mapEventViews(events []trajectory.Event) []eventView {
 		}
 		out = append(out, eventView{
 			ID:          event.ID,
-			Type:        event.Type,
+			Type:        string(event.Type),
 			Actor:       event.Actor,
 			Step:        event.Step,
 			Timestamp:   event.TS.Format("2006-01-02 15:04:05.000"),

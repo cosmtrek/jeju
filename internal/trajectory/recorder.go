@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"jeju/internal/config"
+	"jeju/internal/runs"
 )
 
 type Recorder struct {
@@ -24,7 +25,7 @@ func NewRecorder(cfg config.TrajectoryConfig, runDir string) (*Recorder, error) 
 		case "console":
 			recorder.Sinks = append(recorder.Sinks, NewConsoleSink())
 		case "file":
-			fileSink, err := NewFileSink(filepath.Join(runDir, "trajectory.jsonl"))
+			fileSink, err := NewFileSink(filepath.Join(runDir, runs.TrajectoryFile))
 			if err != nil {
 				return nil, err
 			}
@@ -32,7 +33,7 @@ func NewRecorder(cfg config.TrajectoryConfig, runDir string) (*Recorder, error) 
 		}
 	}
 	if len(recorder.Sinks) == 0 {
-		fileSink, err := NewFileSink(filepath.Join(runDir, "trajectory.jsonl"))
+		fileSink, err := NewFileSink(filepath.Join(runDir, runs.TrajectoryFile))
 		if err != nil {
 			return nil, err
 		}
@@ -41,7 +42,7 @@ func NewRecorder(cfg config.TrajectoryConfig, runDir string) (*Recorder, error) 
 	return recorder, nil
 }
 
-func (r *Recorder) Emit(ctx context.Context, typ string, runID string, step int, actor string, payload map[string]any) Event {
+func (r *Recorder) Emit(ctx context.Context, typ EventType, runID string, step int, actor string, payload map[string]any) Event {
 	id := atomic.AddUint64(&r.counter, 1)
 	event := Event{
 		ID:      fmt.Sprintf("evt_%06d", id),

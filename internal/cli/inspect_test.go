@@ -5,21 +5,22 @@ import (
 	"path/filepath"
 	"testing"
 
+	"jeju/internal/runs"
 	"jeju/internal/trajectory"
 )
 
 func TestSummarizeInspect(t *testing.T) {
 	summary := summarizeInspect([]trajectory.Event{
-		{Type: "step.started"},
-		{Type: "model.started"},
-		{Type: "model.completed"},
-		{Type: "tool.started"},
-		{Type: "tool.completed"},
-		{Type: "permission.checked"},
-		{Type: "permission.approved"},
-		{Type: "skill.disclosed"},
-		{Type: "skill.loaded"},
-		{Type: "artifact.created"},
+		{Type: trajectory.EventStepStarted},
+		{Type: trajectory.EventModelStarted},
+		{Type: trajectory.EventModelCompleted},
+		{Type: trajectory.EventToolStarted},
+		{Type: trajectory.EventToolCompleted},
+		{Type: trajectory.EventPermissionChecked},
+		{Type: trajectory.EventPermissionApproved},
+		{Type: trajectory.EventSkillDisclosed},
+		{Type: trajectory.EventSkillLoaded},
+		{Type: trajectory.EventArtifactCreated},
 	})
 	if summary.Steps != 1 ||
 		summary.ModelStarted != 1 ||
@@ -36,7 +37,7 @@ func TestSummarizeInspect(t *testing.T) {
 }
 
 func TestReadEvaluationSummary(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "evaluation.json")
+	path := filepath.Join(t.TempDir(), runs.EvaluationFile)
 	if err := os.WriteFile(path, []byte(`{"passed":true,"score":0.75,"evaluators":[{"name":"basic"}]}`), 0o644); err != nil {
 		t.Fatalf("write evaluation failed: %v", err)
 	}

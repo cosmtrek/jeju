@@ -8,6 +8,13 @@ import (
 )
 
 func (a *CompiledAgent) SystemPrompt() string {
+	if a.systemPrompt == "" {
+		return a.renderSystemPrompt()
+	}
+	return a.systemPrompt
+}
+
+func (a *CompiledAgent) renderSystemPrompt() string {
 	var b strings.Builder
 	b.WriteString(`You are running inside Jeju, a config-defined agent runtime.
 
