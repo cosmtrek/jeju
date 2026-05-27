@@ -111,6 +111,10 @@ func compileModels(cfg config.ModelsConfig) (*model.Registry, error) {
 			providerCfg.Provider = "deepseek"
 			providerCfg.JSONMode = true
 			registry.Add(name, providerCfg, model.NewOpenAICompatibleClient(providerCfg))
+		case "mimo":
+			providerCfg.Provider = "mimo"
+			providerCfg.JSONMode = true
+			registry.Add(name, providerCfg, model.NewOpenAICompatibleClient(providerCfg))
 		default:
 			return nil, fmt.Errorf("unsupported model provider %q", item.Provider)
 		}

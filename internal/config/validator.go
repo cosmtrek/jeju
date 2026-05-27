@@ -65,7 +65,7 @@ func Validate(m *AgentManifest) error {
 		if provider.Model == "" {
 			return fmt.Errorf("models.providers.%s.model is required", name)
 		}
-		if provider.Provider != "mock" && provider.Provider != "openai_compatible" && provider.Provider != "deepseek" {
+		if provider.Provider != "mock" && provider.Provider != "openai_compatible" && provider.Provider != "deepseek" && provider.Provider != "mimo" {
 			return fmt.Errorf("models.providers.%s.provider %q is not supported in V0", name, provider.Provider)
 		}
 	}

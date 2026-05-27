@@ -34,7 +34,8 @@
 
 - Run `go test ./...` after code changes.
 - Run `go vet ./...` for runtime/compiler/tooling changes.
-- Use `make test-agent` or `./scripts/run-basic-agent.sh` for a local one-command fixture agent run.
-- Use `make test-agent-deepseek` only when `DEEPSEEK_API_KEY` or `JEJU_DEEPSEEK_ENV_KEY` is intentionally set; it calls the real DeepSeek API.
+- Use `make test-agent` or `./scripts/run-agent.sh mock` for a local one-command fixture agent run.
+- Use `make test-agent PROVIDER=deepseek` only when `DEEPSEEK_API_KEY` or `JEJU_DEEPSEEK_ENV_KEY` is intentionally set; it calls the real DeepSeek API.
+- Use `make test-agent PROVIDER=mimo` only when `MIMO_API_KEY` or `JEJU_MIMO_ENV_KEY` is intentionally set; it calls the real MiMo API.
 - Keep the core smoke test in `internal/cli/core_flow_test.go` fast and isolated with `t.TempDir()`. It should continue covering `init --dir -> validate -> run -> runs -> inspect` plus run artifacts and key trajectory events.
-- `tests/fixtures/basic-agent/` is the static minimal agent fixture for full-path testing. Tests must copy it into `t.TempDir()` before running so fixture sources do not accumulate `runs/` or `workspace/` outputs.
+- `tests/fixtures/agent/` is the static full agent fixture for full-path testing. Tests must copy it into `t.TempDir()` before running so fixture sources do not accumulate `runs/` or `workspace/` outputs.

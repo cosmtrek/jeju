@@ -18,16 +18,25 @@ models:
 
 The DeepSeek provider enables JSON response mode by default because Jeju V0 expects model output to be a JSON action.
 
-Run the local DeepSeek fixture:
+Run the shared local fixture with DeepSeek:
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
-make test-agent-deepseek
+make test-agent PROVIDER=deepseek
 ```
 
 Use a custom environment variable name:
 
 ```bash
 export MY_DEEPSEEK_KEY=sk-...
-JEJU_DEEPSEEK_ENV_KEY=MY_DEEPSEEK_KEY make test-agent-deepseek
+JEJU_DEEPSEEK_ENV_KEY=MY_DEEPSEEK_KEY make test-agent PROVIDER=deepseek
 ```
+
+The shared local fixture also supports MiMo:
+
+```bash
+export MIMO_API_KEY=sk-...
+make test-agent PROVIDER=mimo
+```
+
+Set `JEJU_MIMO_BASE_URL` to override the default MiMo endpoint.

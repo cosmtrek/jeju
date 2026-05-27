@@ -2,8 +2,8 @@ apiVersion: jeju/v1alpha1
 kind: Agent
 
 metadata:
-  name: basic
-  description: "Minimal fixture agent for full runtime tests"
+  name: agent
+  description: "Full fixture agent for local runtime tests"
 
 models:
   default: primary
@@ -11,9 +11,12 @@ models:
     primary:
       provider: mock
       model: mock-react
+      temperature: 0.2
+      max_output_tokens: 4096
+      timeout_sec: 120
 
 instructions:
-  system: ./prompts/basic.md
+  system: ./prompts/agent.md
 
 runtime:
   mode: react
@@ -29,7 +32,7 @@ runtime:
       - agent_question
 
 workspace:
-  path: ./workspace/basic
+  path: ./workspace/agent
 
 tools:
   - name: file_write
@@ -38,17 +41,52 @@ tools:
     permission: ask
     risk: [write]
     side_effect: true
+  - name: keyword_count
+    type: command
+    description: "Example custom command tool that counts keyword occurrences in text"
+    command: ./tools/keyword_count.py
+    args:
+      - --text
+      - "{{.text}}"
+      - --keyword
+      - "{{.keyword}}"
+      - --case-sensitive
+      - "{{.case_sensitive}}"
+    schema: |
+      {
+        "type": "object",
+        "required": ["text", "keyword"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to search"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "Keyword to count"
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "description": "Whether matching should be case sensitive",
+            "default": false
+          }
+        }
+      }
+    permission: allow
+    risk: [read]
+    side_effect: false
+    timeout_sec: 10
 
 skills:
   mode: disclose
   paths:
-    - ./skills/basic_writer
+    - ./skills/agent_writer
   disclosure:
     include: [name, description, when_to_use, capabilities, inputs, outputs, requires, risk]
   activation:
     policy: manual
     active:
-      - basic_writer
+      - agent_writer
     max_active: 1
   loading:
     strategy: lazy
@@ -58,7 +96,7 @@ memory:
 
 sandbox:
   type: local
-  workdir: ./workspace/basic
+  workdir: ./workspace/agent
 
 policy:
   default_permission: ask
@@ -66,6 +104,9 @@ policy:
     - match:
         risk: write
       permission: ask
+    - match:
+        risk: read
+      permission: allow
     - match:
         risk: destructive
       permission: deny

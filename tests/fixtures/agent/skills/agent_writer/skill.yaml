@@ -1,11 +1,11 @@
 apiVersion: jeju/v1alpha1
 kind: Skill
 metadata:
-  name: deepseek_writer
-  description: "Write a short Markdown note using DeepSeek"
+  name: agent_writer
+  description: "Write a short Markdown note"
 disclosure:
   when_to_use:
-    - "Need a DeepSeek-backed local file write test"
+    - "Need a local file write test"
   capabilities:
     - markdown_note
     - file_write

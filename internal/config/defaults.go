@@ -12,6 +12,14 @@ func ApplyDefaults(m *AgentManifest) {
 				provider.EnvKey = "DEEPSEEK_API_KEY"
 			}
 		}
+		if provider.Provider == "mimo" {
+			if provider.BaseURL == "" {
+				provider.BaseURL = "https://api.xiaomimimo.com/v1"
+			}
+			if provider.EnvKey == "" {
+				provider.EnvKey = "MIMO_API_KEY"
+			}
+		}
 		m.Models.Providers[name] = provider
 	}
 

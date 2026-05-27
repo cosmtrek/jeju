@@ -33,7 +33,7 @@ def main():
             "case_sensitive": case_sensitive,
         },
         "metadata": {
-            "implementation": "tests/fixtures/deepseek-agent/workspace/deepseek/tools/keyword_count.py",
+            "implementation": "tests/fixtures/agent/workspace/agent/tools/keyword_count.py",
         },
     }))
 

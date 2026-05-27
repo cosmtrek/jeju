@@ -102,7 +102,7 @@ Provider fields:
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `provider` | yes | Supported values: `mock`, `openai_compatible`, `deepseek`. |
+| `provider` | yes | Supported values: `mock`, `openai_compatible`, `deepseek`, `mimo`. |
 | `model` | yes | Provider model name. Supports `${ENV_VAR}` expansion. |
 | `base_url` | no | API base URL. Supports `${ENV_VAR}` expansion. |
 | `env_key` | no | Environment variable name that contains the API key. Supports `${ENV_VAR}` expansion. |
@@ -114,6 +114,11 @@ Provider fields:
 
 - `base_url`: `https://api.deepseek.com`
 - `env_key`: `DEEPSEEK_API_KEY`
+
+`mimo` defaults:
+
+- `base_url`: `https://api.xiaomimimo.com/v1`
+- `env_key`: `MIMO_API_KEY`
 
 ## `model_roles`
 
@@ -489,7 +494,7 @@ models:
 - `kind` is `Agent`.
 - `metadata.name` matches `^[a-zA-Z][a-zA-Z0-9_-]*$`.
 - `models.default` exists in `models.providers`.
-- Model providers are `mock`, `openai_compatible`, or `deepseek`.
+- Model providers are `mock`, `openai_compatible`, `deepseek`, or `mimo`.
 - Referenced model roles point at known providers.
 - `instructions.system` exists.
 - `runtime.mode` is `react`.

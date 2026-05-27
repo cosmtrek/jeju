@@ -1,4 +1,4 @@
-# DeepSeek Fixture Custom Tool
+# Agent Fixture Custom Tool
 
 This fixture includes `keyword_count` as an example custom command tool.
 

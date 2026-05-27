@@ -149,7 +149,7 @@ Run `validate`, `run`, `runs`, and `inspect` from the generated working director
 go test ./...
 ```
 
-The full-path fixture agent is under `tests/fixtures/basic-agent/`. The test copies it into a temporary directory before running, so fixture sources stay clean.
+The full-path fixture agent is under `tests/fixtures/agent/`. The test copies it into a temporary directory before running, so fixture sources stay clean.
 
 To run the fixture agent locally end to end:
 
@@ -160,14 +160,23 @@ make test-agent
 Or run the script directly with an optional task:
 
 ```bash
-./scripts/run-basic-agent.sh "write a brief AgentOps note and save it to notes.md"
+./scripts/run-agent.sh mock "write a brief AgentOps note and save it to notes.md"
 ```
 
-The script writes local output under `.jeju-dev/basic-agent-run/`.
+The script writes local output under `.jeju-dev/<provider>-agent-run/`.
 
 To test with DeepSeek V4 Flash:
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
-make test-agent-deepseek
+make test-agent PROVIDER=deepseek
 ```
+
+To test with MiMo V2.5 Pro:
+
+```bash
+export MIMO_API_KEY=sk-...
+make test-agent PROVIDER=mimo
+```
+
+Set `JEJU_MIMO_BASE_URL` if you need to override the MiMo endpoint.
