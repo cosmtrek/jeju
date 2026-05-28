@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"jeju/internal/model"
 	"jeju/internal/skills"
 )
 
@@ -15,24 +16,44 @@ func (a *CompiledAgent) SystemPrompt() string {
 }
 
 func (a *CompiledAgent) NativeSystemPrompt() string {
-	var b strings.Builder
-	b.WriteString(`You are running inside Jeju, a config-defined agent runtime.
+	return flattenPromptMessages(a.PromptMessages(true))
+}
+
+func (a *CompiledAgent) PromptMessages(nativeToolCalling bool) []model.Message {
+	messages := []model.Message{{
+		Role:    "system",
+		Content: runtimeProtocolText(nativeToolCalling),
+	}}
+	if text := strings.TrimSpace(a.agentContextText()); text != "" {
+		messages = append(messages, model.Message{Role: "system", Content: text})
+	}
+	if text := strings.TrimSpace(a.toolContextText()); text != "" {
+		messages = append(messages, model.Message{Role: "system", Content: text})
+	}
+	if text := strings.TrimSpace(skills.DisclosureText(a.Skills)); text != "" {
+		messages = append(messages, model.Message{Role: "system", Content: "# Disclosed Skills\n" + text})
+	}
+	if active := strings.TrimSpace(skills.ActiveInstructionsText(a.Skills)); active != "" {
+		messages = append(messages, model.Message{Role: "user", Content: "# Active Skill Instructions\n" + active})
+	}
+	return messages
+}
+
+func runtimeProtocolText(nativeToolCalling bool) string {
+	if nativeToolCalling {
+		return `You are running inside Jeju, a config-defined agent runtime.
 
 Use the provided function tools when they are needed. Ask the user for more information by calling ask_user. When the task is complete, call final_answer.
 
 Do not simulate tool calls in text. Do not write fake <tool_result> blocks. If a tool is needed, call the actual function tool and wait for Jeju to return the result.
-`)
-	a.writeSharedPromptSections(&b)
-	b.WriteString(`
+
+Active skill instructions are task instructions for this run, not optional reference material.
+
 # Runtime Protocol
 This run uses native function calling. If any agent or skill instruction mentions Jeju action JSON, ignore that output format and use the API function tools instead. Final answers must use the final_answer function tool.
-`)
-	return b.String()
-}
-
-func (a *CompiledAgent) renderSystemPrompt() string {
-	var b strings.Builder
-	b.WriteString(`You are running inside Jeju, a config-defined agent runtime.
+`
+	}
+	return `You are running inside Jeju, a config-defined agent runtime.
 
 You can either:
 1. call a tool
@@ -49,13 +70,14 @@ Ask user format:
 
 Final format:
 {"type":"final","thought":"...","content":"..."}
-`)
-	a.writeSharedPromptSections(&b)
-	return b.String()
+
+Active skill instructions are task instructions for this run, not optional reference material.
+`
 }
 
-func (a *CompiledAgent) writeSharedPromptSections(b *strings.Builder) {
-	b.WriteString("\n# Agent Instructions\n")
+func (a *CompiledAgent) agentContextText() string {
+	var b strings.Builder
+	b.WriteString("# Agent Instructions\n")
 	b.WriteString(a.Instructions)
 	if !strings.HasSuffix(a.Instructions, "\n") {
 		b.WriteString("\n")
@@ -63,7 +85,12 @@ func (a *CompiledAgent) writeSharedPromptSections(b *strings.Builder) {
 	b.WriteString("\n# Workspace\n")
 	b.WriteString(a.Sandbox.Workdir())
 	b.WriteString("\n")
-	b.WriteString("\n# Available Tools\n")
+	return b.String()
+}
+
+func (a *CompiledAgent) toolContextText() string {
+	var b strings.Builder
+	b.WriteString("# Available Tools\n")
 	for _, spec := range a.Tools.Specs() {
 		data, _ := json.Marshal(map[string]any{
 			"name":         spec.Name,
@@ -75,11 +102,28 @@ func (a *CompiledAgent) writeSharedPromptSections(b *strings.Builder) {
 		b.Write(data)
 		b.WriteString("\n")
 	}
-	b.WriteString("\n# Disclosed Skills\n")
-	b.WriteString(skills.DisclosureText(a.Skills))
-	active := skills.ActiveInstructionsText(a.Skills)
-	if strings.TrimSpace(active) != "" {
-		b.WriteString("\n# Active Skill Instructions\n")
-		b.WriteString(active)
+	return b.String()
+}
+
+func (a *CompiledAgent) renderSystemPrompt() string {
+	return flattenPromptMessages(a.PromptMessages(false))
+}
+
+func flattenPromptMessages(messages []model.Message) string {
+	var b strings.Builder
+	for i, message := range messages {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		if len(messages) > 1 {
+			b.WriteString("# Message: ")
+			b.WriteString(message.Role)
+			b.WriteString("\n")
+		}
+		b.WriteString(message.Content)
+		if !strings.HasSuffix(message.Content, "\n") {
+			b.WriteString("\n")
+		}
 	}
+	return b.String()
 }

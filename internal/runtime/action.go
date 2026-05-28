@@ -14,12 +14,13 @@ const (
 )
 
 type Action struct {
-	Type     ActionType      `json:"type"`
-	Thought  string          `json:"thought,omitempty"`
-	Tool     string          `json:"tool,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
-	Question string          `json:"question,omitempty"`
-	Content  string          `json:"content,omitempty"`
+	Type       ActionType      `json:"type"`
+	Thought    string          `json:"thought,omitempty"`
+	Tool       string          `json:"tool,omitempty"`
+	Input      json.RawMessage `json:"input,omitempty"`
+	ToolCallID string          `json:"-"`
+	Question   string          `json:"question,omitempty"`
+	Content    string          `json:"content,omitempty"`
 }
 
 func ParseAction(text string) (Action, error) {

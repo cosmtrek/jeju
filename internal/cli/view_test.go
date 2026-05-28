@@ -97,6 +97,40 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 	}
 }
 
+func TestBuildStepViewsMultipleToolCalls(t *testing.T) {
+	runID := "run-multi"
+	events := []trajectory.Event{
+		{ID: "e1", Type: trajectory.EventActionParsed, RunID: runID, Step: 1, Actor: "runtime", Payload: map[string]any{"type": "tool_call", "tool": "search_api"}},
+		{ID: "e2", Type: trajectory.EventToolRequested, RunID: runID, Step: 1, Actor: "model", Payload: map[string]any{"tool": "search_api", "input": map[string]any{"query": "first query"}}},
+		{ID: "e3", Type: trajectory.EventToolCompleted, RunID: runID, Step: 1, Actor: "tool:search_api", Payload: map[string]any{"tool": "search_api", "status": "ok"}},
+		{ID: "e4", Type: trajectory.EventActionParsed, RunID: runID, Step: 1, Actor: "runtime", Payload: map[string]any{"type": "tool_call", "tool": "search_api"}},
+		{ID: "e5", Type: trajectory.EventToolRequested, RunID: runID, Step: 1, Actor: "model", Payload: map[string]any{"tool": "search_api", "input": map[string]any{"query": "second query"}}},
+		{ID: "e6", Type: trajectory.EventToolCompleted, RunID: runID, Step: 1, Actor: "tool:search_api", Payload: map[string]any{"tool": "search_api", "status": "ok"}},
+		{ID: "e7", Type: trajectory.EventStepCompleted, RunID: runID, Step: 1, Actor: "runtime", Payload: map[string]any{"status": "running"}},
+	}
+
+	steps := buildStepViews(events, map[string]artifactView{}, "")
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(steps))
+	}
+	step := steps[0]
+	if step.Kind != "tool" {
+		t.Fatalf("expected step kind tool, got %q", step.Kind)
+	}
+	if len(step.ToolCalls) != 2 {
+		t.Fatalf("expected 2 tool calls, got %d", len(step.ToolCalls))
+	}
+	if step.Title != "search_api × 2" {
+		t.Fatalf("unexpected step title: %q", step.Title)
+	}
+	if step.Status != "completed" {
+		t.Fatalf("expected aggregate status completed, got %q", step.Status)
+	}
+	if !strings.Contains(step.ToolCalls[0].Input, "first query") || !strings.Contains(step.ToolCalls[1].Input, "second query") {
+		t.Fatalf("tool call inputs not captured: %+v", step.ToolCalls)
+	}
+}
+
 func writeTrajectory(path string, events []trajectory.Event) error {
 	file, err := os.Create(path)
 	if err != nil {

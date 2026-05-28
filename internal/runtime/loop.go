@@ -197,17 +197,15 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 }
 
 func (r *Runtime) buildModelRequest(agent *compiler.CompiledAgent, state *RunState, cfg model.ProviderConfig) model.Request {
-	systemPrompt := agent.SystemPrompt()
+	messages := agent.PromptMessages(cfg.ToolCalling)
 	var requestTools []model.ToolDefinition
 	var responseFormat *model.ResponseFormat
 	if cfg.ToolCalling {
-		systemPrompt = agent.NativeSystemPrompt()
 		requestTools = nativeToolDefinitions(agent.Tools.Specs(), cfg)
 		if len(requestTools) == 0 {
 			responseFormat = finalResponseFormat(cfg)
 		}
 	}
-	messages := []model.Message{{Role: "system", Content: systemPrompt}}
 	messages = append(messages, state.Messages...)
 	return model.Request{
 		Model:          cfg.Model,
@@ -288,8 +286,8 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 			ReasoningContent: resp.ReasoningContent,
 			ToolCalls:        resp.ToolCalls,
 		})
-		call := resp.ToolCalls[0]
-		if call.Name == "ask_user" {
+		if len(resp.ToolCalls) == 1 && resp.ToolCalls[0].Name == "ask_user" {
+			call := resp.ToolCalls[0]
 			action := Action{Type: ActionAskUser}
 			var input struct {
 				Question string `json:"question"`
@@ -311,7 +309,8 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 			r.handleAskUser(ctx, recorder, state, action)
 			return nil
 		}
-		if call.Name == "final_answer" {
+		if len(resp.ToolCalls) == 1 && resp.ToolCalls[0].Name == "final_answer" {
+			call := resp.ToolCalls[0]
 			var input struct {
 				Content string `json:"content"`
 			}
@@ -341,30 +340,46 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 			state.Status = StatusCompleted
 			return nil
 		}
-		action := Action{
-			Type:  ActionToolCall,
-			Tool:  call.Name,
-			Input: call.Arguments,
+
+		for _, call := range resp.ToolCalls {
+			if call.Name == "ask_user" || call.Name == "final_answer" {
+				err := fmt.Errorf("control tool %q must be the only native tool call", call.Name)
+				state.AddError("action_parse", err)
+				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
+					"error": err.Error(),
+				})
+				state.AddObservation("Return ask_user or final_answer as a single function tool call.")
+				return nil
+			}
 		}
-		if len(action.Input) == 0 {
-			action.Input = json.RawMessage(`{}`)
-		}
-		recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
-			"type": action.Type,
-			"tool": action.Tool,
-		})
-		messageCount := len(state.Messages)
-		r.handleToolCall(ctx, agent, recorder, state, action)
-		if len(state.Messages) > messageCount {
-			state.Messages = state.Messages[:messageCount]
-		}
-		state.Messages = append(state.Messages, model.Message{
-			Role:       "tool",
-			ToolCallID: call.ID,
-			Content:    lastObservation(state),
-		})
-		if len(resp.ToolCalls) > 1 {
-			state.AddObservation(fmt.Sprintf("Model returned %d tool calls; Jeju executed the first one.", len(resp.ToolCalls)))
+
+		for _, call := range resp.ToolCalls {
+			action := Action{
+				Type:       ActionToolCall,
+				Tool:       call.Name,
+				Input:      call.Arguments,
+				ToolCallID: call.ID,
+			}
+			if len(action.Input) == 0 {
+				action.Input = json.RawMessage(`{}`)
+			}
+			recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
+				"type": action.Type,
+				"tool": action.Tool,
+			})
+			messageCount := len(state.Messages)
+			r.handleToolCall(ctx, agent, recorder, state, action)
+			if len(state.Messages) > messageCount {
+				state.Messages = state.Messages[:messageCount]
+			}
+			state.Messages = append(state.Messages, model.Message{
+				Role:       "tool",
+				ToolCallID: call.ID,
+				Content:    lastObservation(state),
+			})
+			if state.IsTerminal() {
+				return nil
+			}
 		}
 		return nil
 	}
@@ -503,7 +518,11 @@ func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAg
 	state.ResetErrors()
 	state.ToolCalls++
 	outputData, _ := json.MarshalIndent(result, "", "  ")
-	outputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "tool_output", action.Tool, "json"), outputData, "tool_output")
+	artifactSuffix := action.Tool
+	if action.ToolCallID != "" {
+		artifactSuffix += "_" + sanitizeArtifactSuffix(action.ToolCallID)
+	}
+	outputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "tool_output", artifactSuffix, "json"), outputData, "tool_output")
 	recorder.Emit(ctx, trajectory.EventToolCompleted, state.RunID, state.Step, "tool:"+action.Tool, map[string]any{
 		"tool":       action.Tool,
 		"input":      compactToolInput(action.Input),
@@ -640,6 +659,21 @@ func stepArtifactName(step int, typ string, suffix string, ext string) string {
 		name += "." + ext
 	}
 	return name
+}
+
+func sanitizeArtifactSuffix(text string) string {
+	var b strings.Builder
+	for _, r := range text {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('_')
+	}
+	if b.Len() == 0 {
+		return "call"
+	}
+	return b.String()
 }
 
 func compactToolInput(input json.RawMessage) map[string]any {

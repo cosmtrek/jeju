@@ -13,6 +13,7 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
+	"gopkg.in/yaml.v3"
 
 	"jeju/internal/evaluate"
 	"jeju/internal/runs"
@@ -150,13 +151,38 @@ type artifactView struct {
 
 type stepView struct {
 	Number    int
-	Kind      string // write | shell_ok | shell_failed | parse_failed | final | other
+	Kind      string // tool | parse_failed | final | other
 	Title     string
-	Status    string // ok | failed | running
+	Status    string // completed | failed | running
 	TypeLabel string // "TOOL" | "MODEL"
 	TypeClass string // "tool" | "model"
 	Thought   string
-	Error     string
+	Error     string // parse_failed error
+
+	// Tool calls executed within this step. A single model turn may emit more
+	// than one tool call, so each is tracked and rendered independently.
+	ToolCalls []toolCallView
+
+	// model thinking
+	ReasoningRef         string
+	ReasoningPreview     string
+	ReasoningContent     string
+	ReasoningContentType string
+	ReasoningContentNote string
+
+	// debug-only
+	InputRef       string
+	OutputRef      string
+	DebugArtifacts []artifactRefView
+	Events         []eventView
+}
+
+type toolCallView struct {
+	Kind   string // write | shell_ok | shell_failed | other
+	Title  string
+	Status string // completed | failed | running
+	Tool   string
+	Error  string
 
 	// shell tool
 	Command         string
@@ -175,21 +201,9 @@ type stepView struct {
 	FileContentNote string
 
 	// generic tool fallback
-	Tool       string
+	Input      string
 	ToolOutput string
-
-	// model thinking
-	ReasoningRef         string
-	ReasoningPreview     string
-	ReasoningContent     string
-	ReasoningContentType string
-	ReasoningContentNote string
-
-	// debug-only
-	InputRef       string
-	OutputRef      string
-	DebugArtifacts []artifactRefView
-	Events         []eventView
+	OutputRef  string
 }
 
 type artifactRefView struct {
@@ -248,7 +262,7 @@ func buildRunReport(store *runs.Store, runDir *runs.RunDir) (runReport, error) {
 		return runReport{}, err
 	}
 	artifactByPath := mapArtifacts(artifacts)
-	workspaceRoot := findWorkspaceRoot(runDir.Path, meta.Agent)
+	workspaceRoot := findWorkspaceRoot(runDir.Path, meta.Agent, workspacePathFromConfig(configSnapshot))
 	steps := buildStepViews(events, artifactByPath, workspaceRoot)
 	blocks := groupSteps(steps)
 	metadataJSON, err := marshalIndented(meta)
@@ -384,18 +398,48 @@ func readArtifactPreview(path string, size int64) (string, string, string) {
 	return content, ext, ""
 }
 
-// findWorkspaceRoot returns the absolute path to the workspace directory used by
-// the run, or "" if it cannot be located. By convention, the runs directory and
-// the workspace directory are siblings under the project working dir.
-func findWorkspaceRoot(runDirPath, agent string) string {
-	if agent == "" {
+// workspacePathFromConfig extracts workspace.path from a config snapshot. The
+// directory name often differs from the agent name (e.g. agent "deep-research"
+// using workspace "research"), so the snapshot is the authoritative source.
+func workspacePathFromConfig(snapshot string) string {
+	if snapshot == "" {
 		return ""
+	}
+	var cfg struct {
+		Workspace struct {
+			Path string `yaml:"path"`
+		} `yaml:"workspace"`
+	}
+	if err := yaml.Unmarshal([]byte(snapshot), &cfg); err != nil {
+		return ""
+	}
+	return cfg.Workspace.Path
+}
+
+// findWorkspaceRoot returns the absolute path to the workspace directory used by
+// the run, or "" if it cannot be located. It prefers the path recorded in the
+// config snapshot, then falls back to a sibling of the runs directory keyed by
+// the workspace directory name (so relocated runs still resolve) or the agent.
+func findWorkspaceRoot(runDirPath, agent, configWorkspacePath string) string {
+	if configWorkspacePath != "" {
+		if info, err := os.Stat(configWorkspacePath); err == nil && info.IsDir() {
+			return configWorkspacePath
+		}
 	}
 	runsDir := filepath.Dir(runDirPath)
 	root := filepath.Dir(runsDir)
-	ws := filepath.Join(root, "workspace", agent)
-	if info, err := os.Stat(ws); err == nil && info.IsDir() {
-		return ws
+	var names []string
+	if configWorkspacePath != "" {
+		names = append(names, filepath.Base(configWorkspacePath))
+	}
+	if agent != "" {
+		names = append(names, agent)
+	}
+	for _, name := range names {
+		ws := filepath.Join(root, "workspace", name)
+		if info, err := os.Stat(ws); err == nil && info.IsDir() {
+			return ws
+		}
 	}
 	return ""
 }
@@ -489,14 +533,21 @@ func buildStepViews(events []trajectory.Event, artifacts map[string]artifactView
 	return steps
 }
 
+// currentToolCall returns the tool call most recently started within the step,
+// allocating one if the trajectory emits a completion/failure without a prior
+// request (defensive — the runtime always emits tool.requested first).
+func currentToolCall(step *stepView) *toolCallView {
+	if len(step.ToolCalls) == 0 {
+		step.ToolCalls = append(step.ToolCalls, toolCallView{Status: "running"})
+	}
+	return &step.ToolCalls[len(step.ToolCalls)-1]
+}
+
 func applyEventToStep(step *stepView, event trajectory.Event, artifacts map[string]artifactView, workspaceRoot string) {
 	switch event.Type {
 	case trajectory.EventActionParsed:
 		if thought := stringPayload(event.Payload, "thought"); thought != "" {
 			step.Thought = thought
-		}
-		if tool := stringPayload(event.Payload, "tool"); tool != "" {
-			step.Tool = tool
 		}
 		if stringPayload(event.Payload, "type") == "final" {
 			step.Kind = "final"
@@ -519,43 +570,54 @@ func applyEventToStep(step *stepView, event trajectory.Event, artifacts map[stri
 			step.ReasoningContentNote = artifact.ContentNote
 		}
 	case trajectory.EventToolRequested:
+		tc := toolCallView{Status: "running"}
 		if tool := stringPayload(event.Payload, "tool"); tool != "" {
-			step.Tool = tool
+			tc.Tool = tool
 		}
 		if input, ok := event.Payload["input"].(map[string]any); ok {
 			if cmd := stringPayload(input, "command"); cmd != "" {
-				step.Command = cmd
+				tc.Command = cmd
 			}
-			if path := stringPayload(input, "path"); path != "" && step.Tool == "write" {
-				step.FilePath = path
+			if path := stringPayload(input, "path"); path != "" && tc.Tool == "write" {
+				tc.FilePath = path
+			}
+			if len(input) > 0 {
+				if pretty, err := marshalIndented(input); err == nil {
+					tc.Input = pretty
+				}
 			}
 		}
+		step.ToolCalls = append(step.ToolCalls, tc)
 	case trajectory.EventToolCompleted:
-		step.Status = "completed"
+		tc := currentToolCall(step)
+		tc.Status = "completed"
 		if tool := stringPayload(event.Payload, "tool"); tool != "" {
-			step.Tool = tool
+			tc.Tool = tool
 		}
 		if ref := stringPayload(event.Payload, "output_ref"); ref != "" {
-			step.OutputRef = ref
-			applyToolOutput(step, artifacts[ref])
+			tc.OutputRef = ref
+			applyToolOutput(tc, artifacts[ref])
 		}
-		switch step.Tool {
+		switch tc.Tool {
 		case "shell":
-			step.Kind = "shell_ok"
+			tc.Kind = "shell_ok"
 		case "write":
-			step.Kind = "write"
-			if step.FilePath != "" {
-				step.FileContent, step.FileContentType, step.FileContentNote, _ = readWorkspaceFile(workspaceRoot, step.FilePath)
+			tc.Kind = "write"
+			if tc.FilePath != "" {
+				tc.FileContent, tc.FileContentType, tc.FileContentNote, _ = readWorkspaceFile(workspaceRoot, tc.FilePath)
 			}
 		}
 	case trajectory.EventToolFailed:
-		step.Status = "failed"
-		step.Error = stringPayload(event.Payload, "error")
+		tc := currentToolCall(step)
+		tc.Status = "failed"
+		tc.Error = stringPayload(event.Payload, "error")
 		if tool := stringPayload(event.Payload, "tool"); tool != "" {
-			step.Tool = tool
+			tc.Tool = tool
 		}
-		if step.Tool == "shell" {
-			step.Kind = "shell_failed"
+		if tc.Tool == "shell" {
+			tc.Kind = "shell_failed"
+		} else {
+			tc.Kind = "other"
 		}
 	case trajectory.EventStepCompleted:
 		status := stringPayload(event.Payload, "status")
@@ -581,7 +643,7 @@ func applyEventToStep(step *stepView, event trajectory.Event, artifacts map[stri
 	}
 }
 
-func applyToolOutput(step *stepView, artifact artifactView) {
+func applyToolOutput(tc *toolCallView, artifact artifactView) {
 	if artifact.Content == "" {
 		return
 	}
@@ -594,8 +656,8 @@ func applyToolOutput(step *stepView, artifact artifactView) {
 	if err := json.Unmarshal([]byte(artifact.Content), &wrapper); err == nil && wrapper.Output != "" {
 		inner = wrapper.Output
 	}
-	step.ToolOutput = inner
-	switch step.Tool {
+	tc.ToolOutput = inner
+	switch tc.Tool {
 	case "shell":
 		var shell struct {
 			DurationMS int    `json:"duration_ms"`
@@ -604,10 +666,10 @@ func applyToolOutput(step *stepView, artifact artifactView) {
 			Stderr     string `json:"stderr"`
 		}
 		if err := json.Unmarshal([]byte(inner), &shell); err == nil {
-			step.ShellExitCode = fmt.Sprintf("%d", shell.ExitCode)
-			step.ShellDurationMS = fmt.Sprintf("%d", shell.DurationMS)
-			step.ShellStdout = shell.Stdout
-			step.ShellStderr = shell.Stderr
+			tc.ShellExitCode = fmt.Sprintf("%d", shell.ExitCode)
+			tc.ShellDurationMS = fmt.Sprintf("%d", shell.DurationMS)
+			tc.ShellStdout = shell.Stdout
+			tc.ShellStderr = shell.Stderr
 		}
 	case "write":
 		var fw struct {
@@ -615,10 +677,10 @@ func applyToolOutput(step *stepView, artifact artifactView) {
 			Path  string `json:"path"`
 		}
 		if err := json.Unmarshal([]byte(inner), &fw); err == nil {
-			step.FileBytes = fw.Bytes
-			step.FileBytesLabel = formatBytes(fw.Bytes)
+			tc.FileBytes = fw.Bytes
+			tc.FileBytesLabel = formatBytes(fw.Bytes)
 			if fw.Path != "" {
-				step.FilePath = fw.Path
+				tc.FilePath = fw.Path
 			}
 		}
 	}
@@ -636,25 +698,58 @@ func formatBytes(n int64) string {
 }
 
 func finalizeStep(step *stepView) {
+	for i := range step.ToolCalls {
+		finalizeToolCall(&step.ToolCalls[i])
+	}
 	if step.Kind == "" {
-		step.Kind = "other"
+		if len(step.ToolCalls) > 0 {
+			step.Kind = "tool"
+		} else {
+			step.Kind = "other"
+		}
+	}
+	if step.Kind == "tool" {
+		step.Status = aggregateToolStatus(step.ToolCalls)
 	}
 	if step.Status == "" {
 		step.Status = "running"
 	}
 	step.Title = stepTitle(step)
 	step.TypeLabel, step.TypeClass = stepType(step)
-	if step.FileContent != "" {
-		step.FileLineCount = strings.Count(step.FileContent, "\n")
-		if !strings.HasSuffix(step.FileContent, "\n") && step.FileContent != "" {
-			step.FileLineCount++
+}
+
+func finalizeToolCall(tc *toolCallView) {
+	if tc.Kind == "" {
+		tc.Kind = "other"
+	}
+	if tc.Status == "" {
+		tc.Status = "running"
+	}
+	tc.Title = toolCallTitle(tc)
+	if tc.FileContent != "" {
+		tc.FileLineCount = strings.Count(tc.FileContent, "\n")
+		if !strings.HasSuffix(tc.FileContent, "\n") {
+			tc.FileLineCount++
 		}
 	}
 }
 
+func aggregateToolStatus(calls []toolCallView) string {
+	status := "completed"
+	for _, tc := range calls {
+		if tc.Status == "failed" {
+			return "failed"
+		}
+		if tc.Status != "completed" {
+			status = "running"
+		}
+	}
+	return status
+}
+
 func stepType(step *stepView) (label, class string) {
 	switch step.Kind {
-	case "write", "shell_ok", "shell_failed", "other":
+	case "tool", "other":
 		return "TOOL", "tool"
 	case "final", "parse_failed":
 		return "MODEL", "model"
@@ -665,33 +760,60 @@ func stepType(step *stepView) (label, class string) {
 
 func stepTitle(step *stepView) string {
 	switch step.Kind {
-	case "write":
-		if step.FilePath != "" && step.FileBytesLabel != "" {
-			return fmt.Sprintf("wrote %s · %s", step.FilePath, step.FileBytesLabel)
-		}
-		if step.FilePath != "" {
-			return fmt.Sprintf("wrote %s", step.FilePath)
-		}
-		return "write"
-	case "shell_ok":
-		if step.Command != "" {
-			return fmt.Sprintf("$ %s", truncate(step.Command, 120))
-		}
-		return "shell"
-	case "shell_failed":
-		if step.Command != "" {
-			return fmt.Sprintf("$ %s", truncate(step.Command, 120))
-		}
-		return "shell"
 	case "parse_failed":
 		return "model returned invalid JSON"
 	case "final":
 		return "Final answer"
-	default:
-		if step.Tool != "" {
-			return step.Tool
+	case "tool":
+		if len(step.ToolCalls) == 1 {
+			return step.ToolCalls[0].Title
 		}
+		return multiToolTitle(step.ToolCalls)
+	default:
 		return fmt.Sprintf("Step %d", step.Number)
+	}
+}
+
+func multiToolTitle(calls []toolCallView) string {
+	name := ""
+	for _, tc := range calls {
+		if tc.Tool == "" {
+			name = ""
+			break
+		}
+		if name == "" {
+			name = tc.Tool
+		} else if name != tc.Tool {
+			name = ""
+			break
+		}
+	}
+	if name != "" {
+		return fmt.Sprintf("%s × %d", name, len(calls))
+	}
+	return fmt.Sprintf("%d tool calls", len(calls))
+}
+
+func toolCallTitle(tc *toolCallView) string {
+	switch tc.Kind {
+	case "write":
+		if tc.FilePath != "" && tc.FileBytesLabel != "" {
+			return fmt.Sprintf("wrote %s · %s", tc.FilePath, tc.FileBytesLabel)
+		}
+		if tc.FilePath != "" {
+			return fmt.Sprintf("wrote %s", tc.FilePath)
+		}
+		return "write"
+	case "shell_ok", "shell_failed":
+		if tc.Command != "" {
+			return fmt.Sprintf("$ %s", truncate(tc.Command, 120))
+		}
+		return "shell"
+	default:
+		if tc.Tool != "" {
+			return tc.Tool
+		}
+		return "tool"
 	}
 }
 
@@ -1036,6 +1158,38 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
     }
     .step-meta { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; flex-shrink: 0; }
     .step-body { display: grid; gap: 10px; padding-left: 48px; }
+
+    /* ---------- Multiple tool calls within one step ---------- */
+    .toolcall {
+      min-width: 0;
+      display: grid;
+      gap: 8px;
+      padding: 10px 0 0;
+      border-top: 1px dashed var(--line);
+    }
+    .toolcall:first-child { border-top: 0; padding-top: 0; }
+    .toolcall-head {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      min-width: 0;
+    }
+    .toolcall-title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .toolcall-title code, .toolcall-title .cmd-inline {
+      background: var(--soft);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .toolcall-body { display: grid; gap: 8px; min-width: 0; }
     .thought {
       color: var(--muted);
       font-style: italic;
@@ -1376,7 +1530,7 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
     {{if eq .Status "failed"}}<span class="step-icon bad" aria-label="failed">✗</span>{{else if eq .Kind "final"}}<span class="step-icon" aria-label="final">→</span>{{else if eq .Status "completed"}}<span class="step-icon ok" aria-label="ok">✓</span>{{else}}<span class="step-icon" aria-label="{{.Status}}">·</span>{{end}}
     <span class="step-title">{{.Title}}</span>
     <span class="step-meta">
-      {{if eq .Kind "shell_ok"}}{{if .ShellExitCode}}exit {{.ShellExitCode}}{{end}}{{if .ShellDurationMS}} · {{.ShellDurationMS}} ms{{end}}{{end}}
+      {{if eq (len .ToolCalls) 1}}{{with index .ToolCalls 0}}{{if eq .Kind "shell_ok"}}{{if .ShellExitCode}}exit {{.ShellExitCode}}{{end}}{{if .ShellDurationMS}} · {{.ShellDurationMS}} ms{{end}}{{end}}{{end}}{{end}}
     </span>
   </div>
   <div class="step-body">
@@ -1394,39 +1548,61 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
       </details>
     {{end}}
 
-    {{if eq .Kind "write"}}
-      {{if .FileContent}}
-        <details class="file-block">
-          <summary>{{if .FilePath}}{{.FilePath}}{{else}}file{{end}}<span class="file-meta">{{if .FileLineCount}} · {{.FileLineCount}} lines{{end}}{{if .FileBytesLabel}} · {{.FileBytesLabel}}{{end}}</span></summary>
-          <pre class="light">{{.FileContent}}</pre>
-        </details>
-      {{else if .FilePath}}
-        <div>File: <a class="artifact-link" href="#" data-target="a-{{.FilePath}}">{{.FilePath}}</a>{{if .FileContentNote}} <span class="subtle">— {{.FileContentNote}}</span>{{end}}</div>
-      {{end}}
-    {{end}}
-
-    {{if eq .Kind "shell_ok"}}
-      {{if .Command}}<pre class="cmd">$ {{.Command}}</pre>{{end}}
-      {{if .ShellStdout}}<div><h3>stdout</h3><pre>{{.ShellStdout}}</pre></div>{{end}}
-      {{if .ShellStderr}}<div><h3>stderr</h3><pre>{{.ShellStderr}}</pre></div>{{end}}
-    {{end}}
-
-    {{if eq .Kind "shell_failed"}}
-      {{if .Command}}<pre class="cmd">$ {{.Command}}</pre>{{end}}
-      {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
-    {{end}}
-
     {{if eq .Kind "parse_failed"}}
       {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
       {{if .OutputRef}}<div class="subtle">Raw model output: <a class="artifact-link" href="#" data-target="a-{{.OutputRef}}">{{.OutputRef}}</a></div>{{end}}
     {{end}}
 
-    {{if eq .Kind "other"}}
-      {{if .Tool}}<div class="subtle">tool: {{.Tool}}</div>{{end}}
-      {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
-      {{if .ToolOutput}}<details class="collapsible"><summary>Tool output</summary><pre class="light">{{.ToolOutput}}</pre></details>{{end}}
+    {{if eq .Kind "tool"}}
+      {{if eq (len .ToolCalls) 1}}
+        {{with index .ToolCalls 0}}{{template "toolcallbody" .}}{{end}}
+      {{else}}
+        {{range .ToolCalls}}{{template "toolcallrow" .}}{{end}}
+      {{end}}
     {{end}}
   </div>
 </div>
+{{end}}
+
+{{define "toolcallrow"}}
+<div class="toolcall {{if eq .Status "failed"}}failed{{end}}">
+  <div class="toolcall-head">
+    {{if eq .Status "failed"}}<span class="step-icon bad" aria-label="failed">✗</span>{{else if eq .Status "completed"}}<span class="step-icon ok" aria-label="ok">✓</span>{{else}}<span class="step-icon" aria-label="{{.Status}}">·</span>{{end}}
+    <span class="toolcall-title">{{.Title}}</span>
+    <span class="step-meta">{{if eq .Kind "shell_ok"}}{{if .ShellExitCode}}exit {{.ShellExitCode}}{{end}}{{if .ShellDurationMS}} · {{.ShellDurationMS}} ms{{end}}{{end}}</span>
+  </div>
+  <div class="toolcall-body">{{template "toolcallbody" .}}</div>
+</div>
+{{end}}
+
+{{define "toolcallbody"}}
+  {{if eq .Kind "write"}}
+    {{if .FileContent}}
+      <details class="file-block">
+        <summary>{{if .FilePath}}{{.FilePath}}{{else}}file{{end}}<span class="file-meta">{{if .FileLineCount}} · {{.FileLineCount}} lines{{end}}{{if .FileBytesLabel}} · {{.FileBytesLabel}}{{end}}</span></summary>
+        <pre class="light">{{.FileContent}}</pre>
+      </details>
+    {{else if .FilePath}}
+      <div>File: <code>{{.FilePath}}</code>{{if .FileBytesLabel}} <span class="subtle">· {{.FileBytesLabel}}</span>{{end}}{{if .FileContentNote}} <span class="subtle">— {{.FileContentNote}}</span>{{end}}</div>
+    {{end}}
+  {{end}}
+
+  {{if eq .Kind "shell_ok"}}
+    {{if .Command}}<pre class="cmd">$ {{.Command}}</pre>{{end}}
+    {{if .ShellStdout}}<div><h3>stdout</h3><pre>{{.ShellStdout}}</pre></div>{{end}}
+    {{if .ShellStderr}}<div><h3>stderr</h3><pre>{{.ShellStderr}}</pre></div>{{end}}
+  {{end}}
+
+  {{if eq .Kind "shell_failed"}}
+    {{if .Command}}<pre class="cmd">$ {{.Command}}</pre>{{end}}
+    {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
+  {{end}}
+
+  {{if eq .Kind "other"}}
+    {{if .Tool}}<div class="subtle">tool: {{.Tool}}</div>{{end}}
+    {{if .Input}}<details class="collapsible" open><summary>Input</summary><pre class="light">{{.Input}}</pre></details>{{end}}
+    {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
+    {{if .ToolOutput}}<details class="collapsible"><summary>Tool output</summary><pre class="light">{{.ToolOutput}}</pre></details>{{end}}
+  {{end}}
 {{end}}
 `))

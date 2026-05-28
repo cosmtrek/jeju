@@ -207,9 +207,33 @@ func TestAgentFixtures(t *testing.T) {
 		if _, ok := agent.Skills.Get("deep-research"); !ok {
 			t.Fatal("deep-research skill missing")
 		}
+		instructions, err := os.ReadFile(filepath.Join(workdir, "prompts", "deep-research.md"))
+		if err != nil {
+			t.Fatalf("read deep research instructions failed: %v", err)
+		}
+		if strings.Contains(string(instructions), "Workflow:") || strings.Contains(string(instructions), "reports/deep-research.md") {
+			t.Fatalf("deep research system instructions should delegate workflow to skill:\n%s", instructions)
+		}
 		prompt := agent.SystemPrompt()
-		if !strings.Contains(prompt, `"name":"search_api"`) || !strings.Contains(prompt, "reports/deep-research.md") {
-			t.Fatalf("system prompt does not include deep research tool/report instructions:\n%s", prompt)
+		if !strings.Contains(prompt, `"name":"search_api"`) {
+			t.Fatalf("system prompt does not include search_api tool:\n%s", prompt)
+		}
+		if !strings.Contains(prompt, "# Active Skill Instructions") ||
+			!strings.Contains(prompt, "## Skill: deep-research") ||
+			!strings.Contains(prompt, "reports/deep-research.md") {
+			t.Fatalf("system prompt does not include loaded deep research skill workflow:\n%s", prompt)
+		}
+		messages := agent.PromptMessages(true)
+		if len(messages) < 5 {
+			t.Fatalf("expected layered prompt messages, got %+v", messages)
+		}
+		if messages[0].Role != "system" || !strings.Contains(messages[0].Content, "Jeju, a config-defined agent runtime") {
+			t.Fatalf("first prompt layer should be runtime system protocol: %+v", messages[0])
+		}
+		last := messages[len(messages)-1]
+		if last.Role != "user" || !strings.Contains(last.Content, "# Active Skill Instructions") ||
+			!strings.Contains(last.Content, "reports/deep-research.md") {
+			t.Fatalf("active skill instructions should be the final contextual user layer before task input: %+v", last)
 		}
 	})
 }
