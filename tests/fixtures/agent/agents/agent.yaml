@@ -6,137 +6,85 @@ metadata:
   description: "Full fixture agent for local runtime tests"
 
 models:
-  default: primary
   providers:
     primary:
-      provider: mock
+      type: mock
       model: mock-react
       temperature: 0.2
-      max_output_tokens: 4096
-      timeout_sec: 120
+      maxOutputTokens: 4096
+      timeoutSec: 120
 
 instructions:
-  system: ./prompts/agent.md
+  system: ../prompts/agent.md
 
 runtime:
-  mode: react
+  model: primary
+  loop:
+    type: react
   limits:
-    max_steps: 8
-    max_duration_sec: 300
-    max_tool_calls: 10
-    max_consecutive_errors: 3
-  interactive:
-    enabled: true
-    pause_on:
-      - permission_required
-      - agent_question
+    maxSteps: 8
+    maxDurationSec: 300
+    maxToolCalls: 10
+    maxConsecutiveErrors: 3
 
 workspace:
-  path: ./workspace/agent
+  path: ../workspace/agent
 
 tools:
-  - name: file_write
-    type: builtin
-    description: "Write files to workspace"
-    permission: ask
-    risk: [write]
-    side_effect: true
+  - write
+
   - name: keyword_count
-    type: command
+    uses: command
     description: "Example custom command tool that counts keyword occurrences in text"
-    command: ./tools/keyword_count.py
-    args:
-      - --text
-      - "{{.text}}"
-      - --keyword
-      - "{{.keyword}}"
-      - --case-sensitive
-      - "{{.case_sensitive}}"
-    schema: |
-      {
-        "type": "object",
-        "required": ["text", "keyword"],
-        "properties": {
-          "text": {
-            "type": "string",
-            "description": "Text to search"
-          },
-          "keyword": {
-            "type": "string",
-            "description": "Keyword to count"
-          },
-          "case_sensitive": {
-            "type": "boolean",
-            "description": "Whether matching should be case sensitive",
-            "default": false
-          }
-        }
-      }
-    permission: allow
-    risk: [read]
-    side_effect: false
-    timeout_sec: 10
+    capabilities:
+      - workspaceRead
+    command:
+      run: ../workspace/agent/tools/keyword_count.py
+      args:
+        - --text
+        - "{{text}}"
+        - --keyword
+        - "{{keyword}}"
+        - --case-sensitive
+        - "{{case_sensitive}}"
+      timeoutSec: 10
+    input:
+      schema:
+        type: object
+        required:
+          - text
+          - keyword
+        properties:
+          text:
+            type: string
+            description: "Text to search"
+          keyword:
+            type: string
+            description: "Keyword to count"
+          case_sensitive:
+            type: boolean
+            description: "Whether matching should be case sensitive"
+            default: false
 
 skills:
-  mode: disclose
-  paths:
-    - ./skills/agent_writer
-  disclosure:
-    include: [name, description, when_to_use, capabilities, inputs, outputs, requires, risk]
-  activation:
-    policy: manual
-    active:
-      - agent_writer
-    max_active: 1
-  loading:
-    strategy: lazy
+  dirs:
+    - ../skills
+  active:
+    - agent-writer
 
-memory:
-  enabled: false
-
-sandbox:
-  type: local
-  workdir: ./workspace/agent
-
-policy:
-  default_permission: ask
-  rules:
-    - match:
-        risk: write
-      permission: ask
-    - match:
-        risk: read
-      permission: allow
-    - match:
-        risk: destructive
-      permission: deny
-
-trajectory:
-  enabled: true
-  format: jsonl
-  store:
-    type: file
-    path: ./runs
-  sinks:
-    - type: console
-      level: info
-    - type: file
-      path: ./runs
+permissions:
+  access: workspace
+  approval: onRequest
 
 evaluate:
   enabled: true
-  on_run_complete: true
   evaluators:
     - name: basic_trajectory
-      type: rule
+      uses: rules
       rules:
-        - final_answer_exists
-        - no_model_error
-        - no_tool_error
-        - max_steps_not_exceeded
-        - max_tool_calls_not_exceeded
-        - no_permission_denied
-        - run_completed
-  outputs:
-    path: ./runs
-    file: evaluation.json
+        - finalAnswerExists
+        - noModelError
+        - maxStepsNotExceeded
+        - maxToolCallsNotExceeded
+        - noPermissionDenied
+        - runCompleted

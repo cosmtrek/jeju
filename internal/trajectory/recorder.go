@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"jeju/internal/config"
 	"jeju/internal/runs"
 )
 
@@ -18,27 +17,14 @@ type Recorder struct {
 	counter         uint64
 }
 
-func NewRecorder(cfg config.TrajectoryConfig, runDir string) (*Recorder, error) {
-	recorder := &Recorder{FailOnSinkError: cfg.FailOnSinkError}
-	for _, sink := range cfg.Sinks {
-		switch sink.Type {
-		case "console":
-			recorder.Sinks = append(recorder.Sinks, NewConsoleSink())
-		case "file":
-			fileSink, err := NewFileSink(filepath.Join(runDir, runs.TrajectoryFile))
-			if err != nil {
-				return nil, err
-			}
-			recorder.Sinks = append(recorder.Sinks, fileSink)
-		}
+func NewRecorder(runDir string) (*Recorder, error) {
+	recorder := &Recorder{}
+	recorder.Sinks = append(recorder.Sinks, NewConsoleSink())
+	fileSink, err := NewFileSink(filepath.Join(runDir, runs.TrajectoryFile))
+	if err != nil {
+		return nil, err
 	}
-	if len(recorder.Sinks) == 0 {
-		fileSink, err := NewFileSink(filepath.Join(runDir, runs.TrajectoryFile))
-		if err != nil {
-			return nil, err
-		}
-		recorder.Sinks = append(recorder.Sinks, fileSink)
-	}
+	recorder.Sinks = append(recorder.Sinks, fileSink)
 	return recorder, nil
 }
 

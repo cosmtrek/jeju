@@ -2,6 +2,8 @@ package skills
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"jeju/internal/config"
 )
@@ -16,21 +18,26 @@ func NewRegistry() *Registry {
 }
 
 func LoadRegistry(cfg config.SkillsConfig, availableTools map[string]bool) (*Registry, error) {
+	_ = availableTools
 	registry := NewRegistry()
-	for _, path := range cfg.Paths {
-		skill, err := Load(path)
+	for _, dir := range cfg.Dirs {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return nil, err
 		}
-		for _, required := range skill.Manifest.Disclosure.Requires.Tools {
-			if !availableTools[required] {
-				return nil, fmt.Errorf("skill %q requires missing tool %q", skill.Manifest.Metadata.Name, required)
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
 			}
+			skill, err := Load(filepath.Join(dir, entry.Name()))
+			if err != nil {
+				return nil, err
+			}
+			registry.Add(skill)
 		}
-		registry.Add(skill)
 	}
 	active := map[string]bool{}
-	for _, name := range cfg.Activation.Active {
+	for _, name := range cfg.Active {
 		active[name] = true
 	}
 	for name := range active {

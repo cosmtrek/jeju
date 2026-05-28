@@ -24,7 +24,7 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 	if err := agent.RunStore.WriteConfigSnapshot(runDir.RunID, agent.ConfigSnapshot); err != nil {
 		return nil, err
 	}
-	recorder, err := trajectory.NewRecorder(agent.Config.Trajectory, runDir.Path)
+	recorder, err := trajectory.NewRecorder(runDir.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 			break
 		}
 		state.Step++
-		modelName := agent.Config.Runtime.Models.Reasoning
+		modelName := agent.Config.Runtime.Model
 		recorder.Emit(ctx, trajectory.EventStepStarted, state.RunID, state.Step, "runtime", map[string]any{
 			"model": modelName,
 		})
@@ -87,7 +87,7 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 		return nil, err
 	}
 
-	if agent.Config.Evaluate.Enabled && agent.Config.Evaluate.OnRunComplete {
+	if agent.Config.Evaluate.Enabled {
 		r.runEvaluation(ctx, agent, recorder, state)
 	}
 
@@ -137,18 +137,37 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 		return err
 	}
 	state.ResetErrors()
-	outputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "model_output", "", "txt"), []byte(resp.Text), "model_output")
+	reasoningRef := ""
+	if resp.ReasoningContent != "" {
+		reasoningRef, _ = writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "model_reasoning", "", "txt"), []byte(resp.ReasoningContent), "model_reasoning")
+	}
+	outputData := []byte(resp.Text)
+	outputExt := "txt"
+	if len(outputData) == 0 && len(resp.ToolCalls) > 0 {
+		outputData, _ = json.MarshalIndent(resp.ToolCalls, "", "  ")
+		outputExt = "json"
+	}
+	outputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "model_output", "", outputExt), outputData, "model_output")
 	recorder.Emit(ctx, trajectory.EventModelCompleted, state.RunID, state.Step, "model:"+modelName, map[string]any{
-		"provider":     resp.Provider,
-		"model":        resp.Model,
-		"input_ref":    inputRef,
-		"output_ref":   outputRef,
-		"latency_ms":   resp.LatencyMS,
-		"tokens_in":    resp.Usage.InputTokens,
-		"tokens_out":   resp.Usage.OutputTokens,
-		"tokens_total": resp.Usage.TotalTokens,
+		"provider":          resp.Provider,
+		"model":             resp.Model,
+		"input_ref":         inputRef,
+		"output_ref":        outputRef,
+		"latency_ms":        resp.LatencyMS,
+		"tokens_in":         resp.Usage.InputTokens,
+		"tokens_out":        resp.Usage.OutputTokens,
+		"tokens_total":      resp.Usage.TotalTokens,
+		"reasoning_ref":     reasoningRef,
+		"reasoning_preview": reasoningPreview(resp.ReasoningContent),
 	})
-	state.Messages = append(state.Messages, model.Message{Role: "assistant", Content: resp.Text})
+	if cfg.ToolCalling {
+		return r.handleNativeModelResponse(ctx, agent, recorder, state, resp)
+	}
+	state.Messages = append(state.Messages, model.Message{
+		Role:             "assistant",
+		Content:          resp.Text,
+		ReasoningContent: resp.ReasoningContent,
+	})
 
 	action, err := ParseAction(resp.Text)
 	if err != nil {
@@ -178,19 +197,228 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 }
 
 func (r *Runtime) buildModelRequest(agent *compiler.CompiledAgent, state *RunState, cfg model.ProviderConfig) model.Request {
-	messages := []model.Message{{Role: "system", Content: agent.SystemPrompt()}}
+	systemPrompt := agent.SystemPrompt()
+	var requestTools []model.ToolDefinition
+	var responseFormat *model.ResponseFormat
+	if cfg.ToolCalling {
+		systemPrompt = agent.NativeSystemPrompt()
+		requestTools = nativeToolDefinitions(agent.Tools.Specs(), cfg)
+		if len(requestTools) == 0 {
+			responseFormat = finalResponseFormat(cfg)
+		}
+	}
+	messages := []model.Message{{Role: "system", Content: systemPrompt}}
 	messages = append(messages, state.Messages...)
 	return model.Request{
-		Model:       cfg.Model,
-		Messages:    messages,
-		Temperature: cfg.Temperature,
-		MaxTokens:   cfg.MaxOutputTokens,
+		Model:          cfg.Model,
+		Messages:       messages,
+		Temperature:    cfg.Temperature,
+		MaxTokens:      cfg.MaxOutputTokens,
+		Tools:          requestTools,
+		ResponseFormat: responseFormat,
 		Metadata: map[string]any{
 			"task":         state.Input,
 			"step":         state.Step,
 			"observations": strings.Join(state.Observations, "\n"),
 		},
 	}
+}
+
+func nativeToolDefinitions(specs []tools.Spec, cfg model.ProviderConfig) []model.ToolDefinition {
+	defs := make([]model.ToolDefinition, 0, len(specs)+2)
+	for _, spec := range specs {
+		defs = append(defs, model.ToolDefinition{
+			Name:        spec.Name,
+			Description: spec.Description,
+			Parameters:  spec.InputSchema,
+			Strict:      false,
+		})
+	}
+	defs = append(defs, model.ToolDefinition{
+		Name:        "ask_user",
+		Description: "Ask the user for required missing information before continuing.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"question": map[string]any{"type": "string"},
+			},
+			"required":             []string{"question"},
+			"additionalProperties": false,
+		},
+		Strict: cfg.JSONSchemaMode,
+	})
+	defs = append(defs, model.ToolDefinition{
+		Name:        "final_answer",
+		Description: "Finish the run with the final answer after required tool work is complete.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"content": map[string]any{"type": "string"},
+			},
+			"required":             []string{"content"},
+			"additionalProperties": false,
+		},
+		Strict: cfg.JSONSchemaMode,
+	})
+	return defs
+}
+
+func finalResponseFormat(cfg model.ProviderConfig) *model.ResponseFormat {
+	return &model.ResponseFormat{
+		Type:   "jsonSchema",
+		Name:   "jeju_final_response",
+		Strict: cfg.JSONSchemaMode,
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"thought": map[string]any{"type": "string"},
+				"content": map[string]any{"type": "string"},
+			},
+			"required":             []string{"content"},
+			"additionalProperties": false,
+		},
+	}
+}
+
+func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, resp model.Response) error {
+	if len(resp.ToolCalls) > 0 {
+		state.Messages = append(state.Messages, model.Message{
+			Role:             "assistant",
+			Content:          resp.Text,
+			ReasoningContent: resp.ReasoningContent,
+			ToolCalls:        resp.ToolCalls,
+		})
+		call := resp.ToolCalls[0]
+		if call.Name == "ask_user" {
+			action := Action{Type: ActionAskUser}
+			var input struct {
+				Question string `json:"question"`
+			}
+			if err := json.Unmarshal(call.Arguments, &input); err != nil {
+				state.AddError("action_parse", err)
+				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
+					"error": err.Error(),
+				})
+				state.AddObservation("Invalid ask_user tool arguments.")
+				return nil
+			}
+			action.Question = input.Question
+			state.Messages[len(state.Messages)-1] = model.Message{Role: "assistant", Content: input.Question, ReasoningContent: resp.ReasoningContent}
+			recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
+				"type": action.Type,
+				"tool": "ask_user",
+			})
+			r.handleAskUser(ctx, recorder, state, action)
+			return nil
+		}
+		if call.Name == "final_answer" {
+			var input struct {
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(call.Arguments, &input); err != nil {
+				state.AddError("action_parse", err)
+				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
+					"error": err.Error(),
+				})
+				state.AddObservation("Invalid final_answer tool arguments.")
+				return nil
+			}
+			if strings.TrimSpace(input.Content) == "" {
+				err := fmt.Errorf("final_answer missing content")
+				state.AddError("action_parse", err)
+				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
+					"error": err.Error(),
+				})
+				state.AddObservation("final_answer requires a non-empty content string.")
+				return nil
+			}
+			state.Messages[len(state.Messages)-1] = model.Message{Role: "assistant", Content: input.Content, ReasoningContent: resp.ReasoningContent}
+			recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
+				"type": ActionFinal,
+				"tool": "final_answer",
+			})
+			state.Final = input.Content
+			state.Status = StatusCompleted
+			return nil
+		}
+		action := Action{
+			Type:  ActionToolCall,
+			Tool:  call.Name,
+			Input: call.Arguments,
+		}
+		if len(action.Input) == 0 {
+			action.Input = json.RawMessage(`{}`)
+		}
+		recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
+			"type": action.Type,
+			"tool": action.Tool,
+		})
+		messageCount := len(state.Messages)
+		r.handleToolCall(ctx, agent, recorder, state, action)
+		if len(state.Messages) > messageCount {
+			state.Messages = state.Messages[:messageCount]
+		}
+		state.Messages = append(state.Messages, model.Message{
+			Role:       "tool",
+			ToolCallID: call.ID,
+			Content:    lastObservation(state),
+		})
+		if len(resp.ToolCalls) > 1 {
+			state.AddObservation(fmt.Sprintf("Model returned %d tool calls; Jeju executed the first one.", len(resp.ToolCalls)))
+		}
+		return nil
+	}
+
+	state.Messages = append(state.Messages, model.Message{Role: "assistant", Content: resp.Text, ReasoningContent: resp.ReasoningContent})
+	content, err := parseFinalContent(resp.Text)
+	if err != nil {
+		state.AddError("action_parse", err)
+		recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
+			"error": err.Error(),
+		})
+		state.AddObservation("Final response must be a JSON object with a non-empty content string. Use function tools for tool calls; do not simulate tool calls in text.")
+		return nil
+	}
+	if strings.TrimSpace(content) == "" {
+		err := fmt.Errorf("native model response missing final content")
+		state.AddError("action_parse", err)
+		recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
+			"error": err.Error(),
+		})
+		state.AddObservation("Return a final response with a non-empty content field.")
+		return nil
+	}
+	recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
+		"type": ActionFinal,
+	})
+	state.Final = content
+	state.Status = StatusCompleted
+	return nil
+}
+
+func parseFinalContent(text string) (string, error) {
+	var envelope struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(text), &envelope); err == nil && envelope.Content != "" {
+		return envelope.Content, nil
+	}
+	return "", fmt.Errorf("native final response is not valid structured JSON")
+}
+
+func lastObservation(state *RunState) string {
+	if len(state.Observations) == 0 {
+		return ""
+	}
+	return state.Observations[len(state.Observations)-1]
+}
+
+func reasoningPreview(text string) string {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\n", " "))
+	if len(text) <= 320 {
+		return text
+	}
+	return text[:320] + "..."
 }
 
 func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, action Action) {
@@ -216,14 +444,13 @@ func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAg
 		Step:  state.Step,
 		Tool:  action.Tool,
 		Input: action.Input,
-		Risks: spec.Risks,
 	}
 	decision := agent.Policy.Check(req, spec)
 	recorder.Emit(ctx, trajectory.EventPermissionChecked, state.RunID, state.Step, "policy", map[string]any{
-		"tool":     action.Tool,
-		"risks":    spec.Risks,
-		"decision": decision.Action,
-		"reason":   decision.Reason,
+		"tool":         action.Tool,
+		"capabilities": spec.Capabilities,
+		"decision":     decision.Action,
+		"reason":       decision.Reason,
 	})
 	if decision.Action == policy.DecisionDeny {
 		state.PermissionDenied++
@@ -234,16 +461,8 @@ func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAg
 		state.AddObservation(fmt.Sprintf("Tool %s denied by policy: %s", action.Tool, decision.Reason))
 		return
 	}
-	if decision.Action == policy.DecisionDryRun {
-		recorder.Emit(ctx, trajectory.EventPermissionDenied, state.RunID, state.Step, "policy", map[string]any{
-			"tool":   action.Tool,
-			"reason": "dry_run is reserved but not implemented in V0",
-		})
-		state.AddObservation(fmt.Sprintf("Tool %s skipped: dry_run is not implemented in V0.", action.Tool))
-		return
-	}
 	if decision.Action == policy.DecisionAsk {
-		approved, stop := r.askApproval(action.Tool, spec.Risks)
+		approved, stop := r.askApproval(action.Tool, spec.Capabilities)
 		if stop {
 			state.Status = StatusCancelled
 			state.AddObservation("User stopped the run.")
@@ -324,6 +543,7 @@ func (r *Runtime) runEvaluation(ctx context.Context, agent *compiler.CompiledAge
 	recorder.Emit(ctx, trajectory.EventEvaluationStarted, state.RunID, state.Step, "evaluate", nil)
 	result, err := evaluate.Run(ctx, state.RunID, agent.Evaluators, evaluate.Context{
 		RunID:            state.RunID,
+		Input:            state.Input,
 		Status:           string(state.Status),
 		Final:            state.Final,
 		Steps:            state.Step,
@@ -379,8 +599,8 @@ func runToolWithTimeout(ctx context.Context, tool tools.Tool, spec tools.Spec, i
 	return tool.Run(ctx, input)
 }
 
-func (r *Runtime) askApproval(tool string, risks []string) (approved bool, stop bool) {
-	fmt.Printf("? Permission required  tool=%s risk=%v approve? [y/N] ", tool, risks)
+func (r *Runtime) askApproval(tool string, capabilities []string) (approved bool, stop bool) {
+	fmt.Printf("? Permission required  tool=%s capabilities=%v approve? [y/N] ", tool, capabilities)
 	answer := strings.TrimSpace(strings.ToLower(r.readLine()))
 	fmt.Println()
 	switch answer {

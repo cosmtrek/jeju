@@ -1,42 +1,73 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 var validNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 
-var validPermissions = map[string]bool{
-	"allow":   true,
-	"ask":     true,
-	"deny":    true,
-	"dry_run": true,
+var validModelTypes = map[string]bool{
+	"mock":             true,
+	"openaiCompatible": true,
 }
 
-var validRisks = map[string]bool{
-	"read":        true,
-	"write":       true,
-	"execute":     true,
-	"network":     true,
-	"credential":  true,
-	"external":    true,
-	"destructive": true,
-	"production":  true,
-	"payment":     true,
-	"message":     true,
+var validPresets = map[string]bool{
+	"":         true,
+	"deepseek": true,
+	"mimo":     true,
+}
+
+var validThinkingTypes = map[string]bool{
+	"":         true,
+	"auto":     true,
+	"disabled": true,
+	"enabled":  true,
+}
+
+var validThinkingEfforts = map[string]bool{
+	"":        true,
+	"none":    true,
+	"minimal": true,
+	"low":     true,
+	"medium":  true,
+	"high":    true,
+	"xhigh":   true,
+	"max":     true,
+}
+
+var validAccess = map[string]bool{
+	"readOnly":  true,
+	"workspace": true,
+	"full":      true,
+}
+
+var validApproval = map[string]bool{
+	"never":     true,
+	"onRequest": true,
+	"always":    true,
+}
+
+var validCapabilities = map[string]bool{
+	"workspaceRead":  true,
+	"workspaceWrite": true,
+	"command":        true,
+	"networkRead":    true,
+	"networkWrite":   true,
 }
 
 var validEvalRules = map[string]bool{
-	"final_answer_exists":         true,
-	"no_model_error":              true,
-	"no_tool_error":               true,
-	"max_steps_not_exceeded":      true,
-	"max_tool_calls_not_exceeded": true,
-	"no_permission_denied":        true,
-	"run_completed":               true,
+	"finalAnswerExists":       true,
+	"noModelError":            true,
+	"maxStepsNotExceeded":     true,
+	"maxToolCallsNotExceeded": true,
+	"noPermissionDenied":      true,
+	"runCompleted":            true,
 }
 
 func Validate(m *AgentManifest) error {
@@ -49,41 +80,37 @@ func Validate(m *AgentManifest) error {
 	if !validNameRe.MatchString(m.Metadata.Name) {
 		return fmt.Errorf("metadata.name must match %s", validNameRe.String())
 	}
-	if m.Models.Default == "" {
-		return fmt.Errorf("models.default is required")
-	}
 	if len(m.Models.Providers) == 0 {
 		return fmt.Errorf("models.providers is required")
 	}
-	if _, ok := m.Models.Providers[m.Models.Default]; !ok {
-		return fmt.Errorf("models.default %q is not defined in providers", m.Models.Default)
-	}
 	for name, provider := range m.Models.Providers {
-		if provider.Provider == "" {
-			return fmt.Errorf("models.providers.%s.provider is required", name)
+		if provider.Type == "" {
+			return fmt.Errorf("models.providers.%s.type is required", name)
+		}
+		if !validModelTypes[provider.Type] {
+			return fmt.Errorf("models.providers.%s.type %q is not supported", name, provider.Type)
+		}
+		if !validPresets[provider.Preset] {
+			return fmt.Errorf("models.providers.%s.preset %q is not supported", name, provider.Preset)
 		}
 		if provider.Model == "" {
 			return fmt.Errorf("models.providers.%s.model is required", name)
 		}
-		if provider.Provider != "mock" && provider.Provider != "openai_compatible" && provider.Provider != "deepseek" && provider.Provider != "mimo" {
-			return fmt.Errorf("models.providers.%s.provider %q is not supported in V0", name, provider.Provider)
+		if !validThinkingTypes[provider.Thinking.Type] {
+			return fmt.Errorf("models.providers.%s.thinking.type %q is invalid", name, provider.Thinking.Type)
+		}
+		if !validThinkingEfforts[provider.Thinking.Effort] {
+			return fmt.Errorf("models.providers.%s.thinking.effort %q is invalid", name, provider.Thinking.Effort)
 		}
 	}
-	for role, modelName := range m.ModelRoles {
-		if _, ok := m.Models.Providers[modelName]; !ok {
-			return fmt.Errorf("model_roles.%s references unknown provider %q", role, modelName)
-		}
+	if m.Runtime.Model == "" {
+		return fmt.Errorf("runtime.model is required when more than one provider is configured")
 	}
-	for role, modelName := range map[string]string{
-		"runtime.models.reasoning":  m.Runtime.Models.Reasoning,
-		"runtime.models.utility":    m.Runtime.Models.Utility,
-		"runtime.models.evaluation": m.Runtime.Models.Evaluation,
-	} {
-		if modelName != "" {
-			if _, ok := m.Models.Providers[modelName]; !ok {
-				return fmt.Errorf("%s references unknown provider %q", role, modelName)
-			}
-		}
+	if _, ok := m.Models.Providers[m.Runtime.Model]; !ok {
+		return fmt.Errorf("runtime.model %q is not defined in models.providers", m.Runtime.Model)
+	}
+	if m.Runtime.Loop.Type != "react" {
+		return fmt.Errorf("runtime.loop.type %q is not supported", m.Runtime.Loop.Type)
 	}
 	if m.Instructions.System == "" {
 		return fmt.Errorf("instructions.system is required")
@@ -91,54 +118,26 @@ func Validate(m *AgentManifest) error {
 	if _, err := os.Stat(m.Instructions.System); err != nil {
 		return fmt.Errorf("instructions.system %q: %w", m.Instructions.System, err)
 	}
-	if m.Runtime.Mode != "react" {
-		return fmt.Errorf("runtime.mode %q is not supported in V0", m.Runtime.Mode)
-	}
-	if m.Runtime.React.ActionMode != "combined" {
-		return fmt.Errorf("runtime.react.action_mode %q is not supported in V0", m.Runtime.React.ActionMode)
-	}
 	if m.Workspace.Path == "" {
 		return fmt.Errorf("workspace.path is required")
 	}
 	if err := ensureCreatableDir(m.Workspace.Path); err != nil {
 		return fmt.Errorf("workspace.path %q is not creatable: %w", m.Workspace.Path, err)
 	}
-	if m.Sandbox.Type != "local" {
-		return fmt.Errorf("sandbox.type %q is not supported in V0", m.Sandbox.Type)
+	if !validAccess[m.Permissions.Access] {
+		return fmt.Errorf("permissions.access %q is invalid", m.Permissions.Access)
 	}
-	if m.Trajectory.Format != "jsonl" {
-		return fmt.Errorf("trajectory.format %q is not supported in V0", m.Trajectory.Format)
-	}
-	if m.Trajectory.Store.Type != "file" {
-		return fmt.Errorf("trajectory.store.type %q is not supported in V0", m.Trajectory.Store.Type)
-	}
-	if err := ensureCreatableDir(m.Trajectory.Store.Path); err != nil {
-		return fmt.Errorf("trajectory.store.path %q is not creatable: %w", m.Trajectory.Store.Path, err)
+	if !validApproval[m.Permissions.Approval] {
+		return fmt.Errorf("permissions.approval %q is invalid", m.Permissions.Approval)
 	}
 	if err := validateTools(m.Tools); err != nil {
 		return err
 	}
-	for _, path := range m.Skills.Paths {
-		info, err := os.Stat(path)
-		if err != nil {
-			return fmt.Errorf("skills path %q: %w", path, err)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("skills path %q is not a directory", path)
-		}
-		if _, err := os.Stat(filepath.Join(path, "skill.yaml")); err != nil {
-			return fmt.Errorf("skill %q missing skill.yaml: %w", path, err)
-		}
+	if err := validateSkills(m.Skills); err != nil {
+		return err
 	}
-	for _, evaluator := range m.Evaluate.Evaluators {
-		if evaluator.Type != "rule" {
-			return fmt.Errorf("evaluate evaluator %q type %q is not supported in V0", evaluator.Name, evaluator.Type)
-		}
-		for _, rule := range evaluator.Rules {
-			if !validEvalRules[rule] {
-				return fmt.Errorf("evaluate evaluator %q has unknown rule %q", evaluator.Name, rule)
-			}
-		}
+	if err := validateEvaluators(m.Evaluate, m.Models.Providers, m.Runtime.Model); err != nil {
+		return err
 	}
 	return nil
 }
@@ -153,23 +152,129 @@ func validateTools(tools []ToolConfig) error {
 			return fmt.Errorf("duplicate tool name %q", tool.Name)
 		}
 		seen[tool.Name] = true
-		switch tool.Type {
-		case "builtin", "cli", "command":
+		if tool.Uses == "" {
+			return fmt.Errorf("tool %q uses is required", tool.Name)
+		}
+		switch tool.Uses {
+		case "builtin:read", "builtin:write", "builtin:edit", "builtin:search", "builtin:shell", "command", "http":
 		default:
-			return fmt.Errorf("tool %q type %q is not supported in V0", tool.Name, tool.Type)
+			return fmt.Errorf("tool %q uses %q is not supported", tool.Name, tool.Uses)
 		}
-		if tool.Type == "cli" || tool.Type == "command" {
-			if tool.Command == "" {
-				return fmt.Errorf("tool %q command is required", tool.Name)
+		if tool.Uses == "command" && tool.Command.Run == "" {
+			return fmt.Errorf("tool %q command.run is required", tool.Name)
+		}
+		if tool.Uses == "http" {
+			if err := validateHTTPTool(tool); err != nil {
+				return err
 			}
 		}
-		if tool.Permission != "" && !validPermissions[tool.Permission] {
-			return fmt.Errorf("tool %q permission %q is invalid", tool.Name, tool.Permission)
-		}
-		for _, risk := range tool.Risk {
-			if !validRisks[risk] {
-				return fmt.Errorf("tool %q risk %q is invalid", tool.Name, risk)
+		for _, capability := range tool.Capabilities {
+			if !validCapabilities[capability] {
+				return fmt.Errorf("tool %q capability %q is invalid", tool.Name, capability)
 			}
+		}
+		if err := validateSchema(tool.Name, tool.Input.Schema); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateHTTPTool(tool ToolConfig) error {
+	if tool.HTTP.Method == "" {
+		return fmt.Errorf("tool %q http.method is required", tool.Name)
+	}
+	if tool.HTTP.URL == "" {
+		return fmt.Errorf("tool %q http.url is required", tool.Name)
+	}
+	if strings.Contains(tool.HTTP.URL, "{{") {
+		return fmt.Errorf("tool %q http.url must keep scheme and host static; template query values separately", tool.Name)
+	}
+	parsed, err := url.Parse(tool.HTTP.URL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("tool %q http.url must be an absolute URL", tool.Name)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("tool %q http.url scheme %q is not supported", tool.Name, parsed.Scheme)
+	}
+	return nil
+}
+
+func validateSchema(toolName string, schema any) error {
+	if schema == nil {
+		return nil
+	}
+	switch raw := schema.(type) {
+	case string:
+		data, err := os.ReadFile(raw)
+		if err != nil {
+			return fmt.Errorf("tool %q input.schema %q: %w", toolName, raw, err)
+		}
+		var parsed any
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			return fmt.Errorf("tool %q input.schema %q is invalid JSON: %w", toolName, raw, err)
+		}
+	default:
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return fmt.Errorf("tool %q input.schema is invalid: %w", toolName, err)
+		}
+		var parsed any
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			return fmt.Errorf("tool %q input.schema is invalid JSON: %w", toolName, err)
+		}
+	}
+	return nil
+}
+
+func validateSkills(cfg SkillsConfig) error {
+	for _, dir := range cfg.Dirs {
+		info, err := os.Stat(dir)
+		if err != nil {
+			return fmt.Errorf("skills dir %q: %w", dir, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("skills dir %q is not a directory", dir)
+		}
+	}
+	return nil
+}
+
+func validateEvaluators(cfg EvaluateConfig, providers map[string]ModelConfig, runtimeModel string) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	for _, evaluator := range cfg.Evaluators {
+		if evaluator.Name == "" {
+			return fmt.Errorf("evaluate evaluator name is required")
+		}
+		switch evaluator.Uses {
+		case "rules":
+			for _, rule := range evaluator.Rules {
+				if !validEvalRules[rule] {
+					return fmt.Errorf("evaluate evaluator %q has unknown rule %q", evaluator.Name, rule)
+				}
+			}
+		case "llm":
+			modelName := evaluator.Model
+			if modelName == "" {
+				modelName = runtimeModel
+			}
+			if _, ok := providers[modelName]; !ok {
+				return fmt.Errorf("evaluate evaluator %q model %q is not defined in models.providers", evaluator.Name, modelName)
+			}
+			if evaluator.Prompt == "" {
+				return fmt.Errorf("evaluate evaluator %q prompt is required for llm", evaluator.Name)
+			}
+			if _, err := os.Stat(evaluator.Prompt); err != nil {
+				return fmt.Errorf("evaluate evaluator %q prompt %q: %w", evaluator.Name, evaluator.Prompt, err)
+			}
+		case "command":
+			if evaluator.Command.Run == "" {
+				return fmt.Errorf("evaluate evaluator %q command.run is required", evaluator.Name)
+			}
+		default:
+			return fmt.Errorf("evaluate evaluator %q uses %q is not supported", evaluator.Name, evaluator.Uses)
 		}
 	}
 	return nil

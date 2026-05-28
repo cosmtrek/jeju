@@ -52,11 +52,11 @@ cp -R "$repo_root/tests/fixtures/$fixture/." "$workdir/"
 
 if [[ "$provider" != "mock" ]]; then
   JEJU_SCRIPT_PROVIDER="$provider" JEJU_SCRIPT_MODEL="$model" JEJU_SCRIPT_ENV_KEY="$env_key" JEJU_SCRIPT_BASE_URL="${base_url:-}" perl -0pi -e '
-    s/provider: mock/"provider: ".$ENV{JEJU_SCRIPT_PROVIDER}/e;
+    s/type: mock/"type: openaiCompatible\n      preset: ".$ENV{JEJU_SCRIPT_PROVIDER}/e;
     s/model: mock-react/"model: ".$ENV{JEJU_SCRIPT_MODEL}/e;
-    s/(model: .+\n)/$1      env_key: $ENV{JEJU_SCRIPT_ENV_KEY}\n/;
+    s/(model: .+\n)/$1      envKey: $ENV{JEJU_SCRIPT_ENV_KEY}\n/;
     if ($ENV{JEJU_SCRIPT_BASE_URL}) {
-      s/(env_key: .+\n)/$1      base_url: $ENV{JEJU_SCRIPT_BASE_URL}\n/;
+      s/(envKey: .+\n)/$1      baseUrl: $ENV{JEJU_SCRIPT_BASE_URL}\n/;
     }
   ' "$workdir/$manifest"
 fi

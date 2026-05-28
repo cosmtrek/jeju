@@ -149,14 +149,14 @@ type artifactView struct {
 }
 
 type stepView struct {
-	Number     int
-	Kind       string // file_write | shell_ok | shell_failed | parse_failed | final | other
-	Title      string
-	Status     string // ok | failed | running
-	TypeLabel  string // "TOOL" | "MODEL"
-	TypeClass  string // "tool" | "model"
-	Thought    string
-	Error      string
+	Number    int
+	Kind      string // write | shell_ok | shell_failed | parse_failed | final | other
+	Title     string
+	Status    string // ok | failed | running
+	TypeLabel string // "TOOL" | "MODEL"
+	TypeClass string // "tool" | "model"
+	Thought   string
+	Error     string
 
 	// shell tool
 	Command         string
@@ -165,7 +165,7 @@ type stepView struct {
 	ShellStdout     string
 	ShellStderr     string
 
-	// file_write tool
+	// write tool
 	FilePath        string
 	FileBytes       int64
 	FileBytesLabel  string
@@ -177,6 +177,13 @@ type stepView struct {
 	// generic tool fallback
 	Tool       string
 	ToolOutput string
+
+	// model thinking
+	ReasoningRef         string
+	ReasoningPreview     string
+	ReasoningContent     string
+	ReasoningContentType string
+	ReasoningContentNote string
 
 	// debug-only
 	InputRef       string
@@ -503,6 +510,14 @@ func applyEventToStep(step *stepView, event trajectory.Event, artifacts map[stri
 		step.InputRef = stringPayload(event.Payload, "input_ref")
 	case trajectory.EventModelCompleted:
 		step.OutputRef = stringPayload(event.Payload, "output_ref")
+		if ref := stringPayload(event.Payload, "reasoning_ref"); ref != "" {
+			step.ReasoningRef = ref
+			step.ReasoningPreview = stringPayload(event.Payload, "reasoning_preview")
+			artifact := artifacts[ref]
+			step.ReasoningContent = artifact.Content
+			step.ReasoningContentType = artifact.ContentType
+			step.ReasoningContentNote = artifact.ContentNote
+		}
 	case trajectory.EventToolRequested:
 		if tool := stringPayload(event.Payload, "tool"); tool != "" {
 			step.Tool = tool
@@ -511,7 +526,7 @@ func applyEventToStep(step *stepView, event trajectory.Event, artifacts map[stri
 			if cmd := stringPayload(input, "command"); cmd != "" {
 				step.Command = cmd
 			}
-			if path := stringPayload(input, "path"); path != "" && step.Tool == "file_write" {
+			if path := stringPayload(input, "path"); path != "" && step.Tool == "write" {
 				step.FilePath = path
 			}
 		}
@@ -527,8 +542,8 @@ func applyEventToStep(step *stepView, event trajectory.Event, artifacts map[stri
 		switch step.Tool {
 		case "shell":
 			step.Kind = "shell_ok"
-		case "file_write":
-			step.Kind = "file_write"
+		case "write":
+			step.Kind = "write"
 			if step.FilePath != "" {
 				step.FileContent, step.FileContentType, step.FileContentNote, _ = readWorkspaceFile(workspaceRoot, step.FilePath)
 			}
@@ -594,7 +609,7 @@ func applyToolOutput(step *stepView, artifact artifactView) {
 			step.ShellStdout = shell.Stdout
 			step.ShellStderr = shell.Stderr
 		}
-	case "file_write":
+	case "write":
 		var fw struct {
 			Bytes int64  `json:"bytes"`
 			Path  string `json:"path"`
@@ -639,7 +654,7 @@ func finalizeStep(step *stepView) {
 
 func stepType(step *stepView) (label, class string) {
 	switch step.Kind {
-	case "file_write", "shell_ok", "shell_failed", "other":
+	case "write", "shell_ok", "shell_failed", "other":
 		return "TOOL", "tool"
 	case "final", "parse_failed":
 		return "MODEL", "model"
@@ -650,14 +665,14 @@ func stepType(step *stepView) (label, class string) {
 
 func stepTitle(step *stepView) string {
 	switch step.Kind {
-	case "file_write":
+	case "write":
 		if step.FilePath != "" && step.FileBytesLabel != "" {
 			return fmt.Sprintf("wrote %s · %s", step.FilePath, step.FileBytesLabel)
 		}
 		if step.FilePath != "" {
 			return fmt.Sprintf("wrote %s", step.FilePath)
 		}
-		return "file_write"
+		return "write"
 	case "shell_ok":
 		if step.Command != "" {
 			return fmt.Sprintf("$ %s", truncate(step.Command, 120))
@@ -1028,6 +1043,62 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
     }
     .thought::before { content: "“ "; opacity: .6; font-style: normal; }
     .thought::after { content: " ”"; opacity: .6; font-style: normal; }
+    /* ---------- Model thinking (collapsible reasoning) ---------- */
+    details.thinking {
+      min-width: 0;
+      border-radius: 6px;
+      background: #faf5ff;
+      border: 1px solid #f0e6fb;
+    }
+    details.thinking > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      padding: 7px 10px;
+      min-width: 0;
+    }
+    details.thinking > summary::-webkit-details-marker { display: none; }
+    details.thinking > summary::before {
+      content: "▸";
+      color: #a855f7;
+      flex-shrink: 0;
+      transition: transform .15s;
+    }
+    details.thinking[open] > summary::before { transform: rotate(90deg); }
+    details.thinking[open] > summary { border-bottom: 1px solid #f0e6fb; }
+    .thinking-label {
+      flex-shrink: 0;
+      color: #6b21a8;
+      font: 650 11px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+    }
+    .thinking-preview {
+      flex: 1;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12.5px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .thinking-body {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+      padding: 10px;
+    }
+    .thinking-text {
+      min-width: 0;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .thinking-body .ref { font-size: 12px; overflow-wrap: anywhere; }
     .err-line {
       color: var(--bad);
       font-size: 13px;
@@ -1310,8 +1381,20 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
   </div>
   <div class="step-body">
     {{if .Thought}}<div class="thought">{{.Thought}}</div>{{end}}
+    {{if .ReasoningRef}}
+      <details class="thinking">
+        <summary>
+          <span class="thinking-label">Thinking</span>
+          {{if .ReasoningPreview}}<span class="thinking-preview">{{.ReasoningPreview}}</span>{{end}}
+        </summary>
+        <div class="thinking-body">
+          {{if .ReasoningContent}}<div class="thinking-text">{{.ReasoningContent}}</div>{{else}}<div class="subtle ref">{{if .ReasoningContentNote}}{{.ReasoningContentNote}}{{else}}No embedded reasoning.{{end}}</div>{{end}}
+          <div class="subtle ref">Full reasoning: <a class="artifact-link" href="#" data-target="a-{{.ReasoningRef}}">{{.ReasoningRef}}</a></div>
+        </div>
+      </details>
+    {{end}}
 
-    {{if eq .Kind "file_write"}}
+    {{if eq .Kind "write"}}
       {{if .FileContent}}
         <details class="file-block">
           <summary>{{if .FilePath}}{{.FilePath}}{{else}}file{{end}}<span class="file-meta">{{if .FileLineCount}} · {{.FileLineCount}} lines{{end}}{{if .FileBytesLabel}} · {{.FileBytesLabel}}{{end}}</span></summary>

@@ -1,24 +1,24 @@
 package config
 
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
 type AgentManifest struct {
 	APIVersion string   `yaml:"apiVersion"`
 	Kind       string   `yaml:"kind"`
 	Metadata   Metadata `yaml:"metadata"`
 
-	Models     ModelsConfig      `yaml:"models"`
-	ModelRoles map[string]string `yaml:"model_roles,omitempty"`
-
+	Models       ModelsConfig       `yaml:"models"`
 	Instructions InstructionsConfig `yaml:"instructions"`
 	Runtime      RuntimeConfig      `yaml:"runtime"`
 	Workspace    WorkspaceConfig    `yaml:"workspace"`
-
-	Tools      []ToolConfig     `yaml:"tools,omitempty"`
-	Skills     SkillsConfig     `yaml:"skills,omitempty"`
-	Memory     MemoryConfig     `yaml:"memory,omitempty"`
-	Sandbox    SandboxConfig    `yaml:"sandbox,omitempty"`
-	Policy     PolicyConfig     `yaml:"policy,omitempty"`
-	Trajectory TrajectoryConfig `yaml:"trajectory,omitempty"`
-	Evaluate   EvaluateConfig   `yaml:"evaluate,omitempty"`
+	Tools        []ToolConfig       `yaml:"tools,omitempty"`
+	Skills       SkillsConfig       `yaml:"skills,omitempty"`
+	Permissions  PermissionsConfig  `yaml:"permissions,omitempty"`
+	Evaluate     EvaluateConfig     `yaml:"evaluate,omitempty"`
 }
 
 type Metadata struct {
@@ -28,19 +28,24 @@ type Metadata struct {
 }
 
 type ModelsConfig struct {
-	Default   string                 `yaml:"default"`
 	Providers map[string]ModelConfig `yaml:"providers"`
-	Fallback  []string               `yaml:"fallback,omitempty"`
 }
 
 type ModelConfig struct {
-	Provider        string   `yaml:"provider"`
-	Model           string   `yaml:"model"`
-	BaseURL         string   `yaml:"base_url,omitempty"`
-	EnvKey          string   `yaml:"env_key,omitempty"`
-	Temperature     *float64 `yaml:"temperature,omitempty"`
-	MaxOutputTokens int      `yaml:"max_output_tokens,omitempty"`
-	TimeoutSec      int      `yaml:"timeout_sec,omitempty"`
+	Type            string         `yaml:"type"`
+	Preset          string         `yaml:"preset,omitempty"`
+	Model           string         `yaml:"model"`
+	BaseURL         string         `yaml:"baseUrl,omitempty"`
+	EnvKey          string         `yaml:"envKey,omitempty"`
+	Temperature     *float64       `yaml:"temperature,omitempty"`
+	Thinking        ThinkingConfig `yaml:"thinking,omitempty"`
+	MaxOutputTokens int            `yaml:"maxOutputTokens,omitempty"`
+	TimeoutSec      int            `yaml:"timeoutSec,omitempty"`
+}
+
+type ThinkingConfig struct {
+	Type   string `yaml:"type,omitempty"`
+	Effort string `yaml:"effort,omitempty"`
 }
 
 type InstructionsConfig struct {
@@ -48,36 +53,20 @@ type InstructionsConfig struct {
 }
 
 type RuntimeConfig struct {
-	Mode        string            `yaml:"mode"`
-	MaxSteps    int               `yaml:"max_steps,omitempty"`
-	Limits      RuntimeLimits     `yaml:"limits,omitempty"`
-	Models      RuntimeModels     `yaml:"models,omitempty"`
-	React       ReactConfig       `yaml:"react,omitempty"`
-	Interactive InteractiveConfig `yaml:"interactive,omitempty"`
+	Model  string        `yaml:"model,omitempty"`
+	Loop   LoopConfig    `yaml:"loop,omitempty"`
+	Limits RuntimeLimits `yaml:"limits,omitempty"`
+}
+
+type LoopConfig struct {
+	Type string `yaml:"type,omitempty"`
 }
 
 type RuntimeLimits struct {
-	MaxSteps             int `yaml:"max_steps,omitempty"`
-	MaxDurationSec       int `yaml:"max_duration_sec,omitempty"`
-	MaxToolCalls         int `yaml:"max_tool_calls,omitempty"`
-	MaxConsecutiveErrors int `yaml:"max_consecutive_errors,omitempty"`
-}
-
-type RuntimeModels struct {
-	Reasoning  string `yaml:"reasoning,omitempty"`
-	Utility    string `yaml:"utility,omitempty"`
-	Evaluation string `yaml:"evaluation,omitempty"`
-}
-
-type ReactConfig struct {
-	ActionMode string `yaml:"action_mode,omitempty"`
-	Reflection string `yaml:"reflection,omitempty"`
-	Compaction string `yaml:"compaction,omitempty"`
-}
-
-type InteractiveConfig struct {
-	Enabled bool     `yaml:"enabled,omitempty"`
-	PauseOn []string `yaml:"pause_on,omitempty"`
+	MaxSteps             int `yaml:"maxSteps,omitempty"`
+	MaxDurationSec       int `yaml:"maxDurationSec,omitempty"`
+	MaxToolCalls         int `yaml:"maxToolCalls,omitempty"`
+	MaxConsecutiveErrors int `yaml:"maxConsecutiveErrors,omitempty"`
 }
 
 type WorkspaceConfig struct {
@@ -85,115 +74,84 @@ type WorkspaceConfig struct {
 }
 
 type ToolConfig struct {
-	Name            string            `yaml:"name"`
-	Type            string            `yaml:"type"`
-	Description     string            `yaml:"description,omitempty"`
-	Command         string            `yaml:"command,omitempty"`
-	Args            []string          `yaml:"args,omitempty"`
-	Schema          string            `yaml:"schema,omitempty"`
-	Permission      string            `yaml:"permission,omitempty"`
-	Risk            []string          `yaml:"risk,omitempty"`
-	TimeoutSec      int               `yaml:"timeout_sec,omitempty"`
-	SandboxRequired bool              `yaml:"sandbox_required,omitempty"`
-	SideEffect      bool              `yaml:"side_effect,omitempty"`
-	Env             map[string]string `yaml:"env,omitempty"`
+	Name         string            `yaml:"name,omitempty"`
+	Uses         string            `yaml:"uses,omitempty"`
+	Description  string            `yaml:"description,omitempty"`
+	Capabilities []string          `yaml:"capabilities,omitempty"`
+	Command      CommandConfig     `yaml:"command,omitempty"`
+	HTTP         HTTPConfig        `yaml:"http,omitempty"`
+	Input        ToolInputConfig   `yaml:"input,omitempty"`
+	Env          map[string]string `yaml:"env,omitempty"`
+}
+
+func (t *ToolConfig) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var name string
+		if err := value.Decode(&name); err != nil {
+			return err
+		}
+		t.Name = name
+		t.Uses = "builtin:" + name
+		return nil
+	case yaml.MappingNode:
+		type rawToolConfig ToolConfig
+		var raw rawToolConfig
+		if err := value.Decode(&raw); err != nil {
+			return err
+		}
+		*t = ToolConfig(raw)
+		return nil
+	default:
+		return fmt.Errorf("tool must be a string or object")
+	}
+}
+
+type CommandConfig struct {
+	Run        string   `yaml:"run,omitempty"`
+	Args       []string `yaml:"args,omitempty"`
+	TimeoutSec int      `yaml:"timeoutSec,omitempty"`
+}
+
+type HTTPConfig struct {
+	Method     string            `yaml:"method,omitempty"`
+	URL        string            `yaml:"url,omitempty"`
+	Query      map[string]string `yaml:"query,omitempty"`
+	Headers    map[string]string `yaml:"headers,omitempty"`
+	Body       HTTPBodyConfig    `yaml:"body,omitempty"`
+	TimeoutSec int               `yaml:"timeoutSec,omitempty"`
+}
+
+type HTTPBodyConfig struct {
+	JSON any    `yaml:"json,omitempty"`
+	Text string `yaml:"text,omitempty"`
+}
+
+type ToolInputConfig struct {
+	Schema any `yaml:"schema,omitempty"`
 }
 
 type SkillsConfig struct {
-	Mode       string                `yaml:"mode,omitempty"`
-	Paths      []string              `yaml:"paths,omitempty"`
-	Disclosure SkillDisclosureConfig `yaml:"disclosure,omitempty"`
-	Activation SkillActivationConfig `yaml:"activation,omitempty"`
-	Loading    SkillLoadingConfig    `yaml:"loading,omitempty"`
+	Dirs   []string `yaml:"dirs,omitempty"`
+	Active []string `yaml:"active,omitempty"`
 }
 
-type SkillDisclosureConfig struct {
-	Include []string `yaml:"include,omitempty"`
-}
-
-type SkillActivationConfig struct {
-	Policy    string   `yaml:"policy,omitempty"`
-	Active    []string `yaml:"active,omitempty"`
-	MaxActive int      `yaml:"max_active,omitempty"`
-}
-
-type SkillLoadingConfig struct {
-	Strategy string `yaml:"strategy,omitempty"`
-}
-
-type MemoryConfig struct {
-	Enabled bool `yaml:"enabled,omitempty"`
-}
-
-type SandboxConfig struct {
-	Type       string         `yaml:"type,omitempty"`
-	Workdir    string         `yaml:"workdir,omitempty"`
-	Network    string         `yaml:"network,omitempty"`
-	Image      string         `yaml:"image,omitempty"`
-	Endpoint   string         `yaml:"endpoint,omitempty"`
-	APIKeyEnv  string         `yaml:"api_key_env,omitempty"`
-	TimeoutSec int            `yaml:"timeout_sec,omitempty"`
-	Mounts     []SandboxMount `yaml:"mounts,omitempty"`
-}
-
-type SandboxMount struct {
-	Source string `yaml:"source"`
-	Target string `yaml:"target"`
-}
-
-type PolicyConfig struct {
-	DefaultPermission  string       `yaml:"default_permission,omitempty"`
-	SandboxRequiredFor []string     `yaml:"sandbox_required_for,omitempty"`
-	Rules              []PolicyRule `yaml:"rules,omitempty"`
-}
-
-type PolicyRule struct {
-	Match      PolicyMatch `yaml:"match"`
-	Permission string      `yaml:"permission"`
-}
-
-type PolicyMatch struct {
-	Risk string `yaml:"risk,omitempty"`
-	Tool string `yaml:"tool,omitempty"`
-}
-
-type TrajectoryConfig struct {
-	Enabled         bool         `yaml:"enabled,omitempty"`
-	Format          string       `yaml:"format,omitempty"`
-	Store           StoreConfig  `yaml:"store,omitempty"`
-	Sinks           []SinkConfig `yaml:"sinks,omitempty"`
-	FailOnSinkError bool         `yaml:"fail_on_sink_error,omitempty"`
-}
-
-type StoreConfig struct {
-	Type string `yaml:"type,omitempty"`
-	Path string `yaml:"path,omitempty"`
-}
-
-type SinkConfig struct {
-	Type      string `yaml:"type"`
-	Level     string `yaml:"level,omitempty"`
-	Path      string `yaml:"path,omitempty"`
-	Endpoint  string `yaml:"endpoint,omitempty"`
-	APIKeyEnv string `yaml:"api_key_env,omitempty"`
+type PermissionsConfig struct {
+	Access   string `yaml:"access,omitempty"`
+	Approval string `yaml:"approval,omitempty"`
 }
 
 type EvaluateConfig struct {
-	Enabled       bool              `yaml:"enabled,omitempty"`
-	OnRunComplete bool              `yaml:"on_run_complete,omitempty"`
-	Evaluators    []EvaluatorConfig `yaml:"evaluators,omitempty"`
-	Outputs       EvalOutputConfig  `yaml:"outputs,omitempty"`
+	Enabled    bool              `yaml:"enabled,omitempty"`
+	Evaluators []EvaluatorConfig `yaml:"evaluators,omitempty"`
 }
 
 type EvaluatorConfig struct {
-	Name   string   `yaml:"name"`
-	Type   string   `yaml:"type"`
-	Rules  []string `yaml:"rules,omitempty"`
-	Model  string   `yaml:"model,omitempty"`
-	Rubric string   `yaml:"rubric,omitempty"`
-}
-
-type EvalOutputConfig struct {
-	Path string `yaml:"path,omitempty"`
-	File string `yaml:"file,omitempty"`
+	Name      string        `yaml:"name"`
+	Uses      string        `yaml:"uses"`
+	Rules     []string      `yaml:"rules,omitempty"`
+	Model     string        `yaml:"model,omitempty"`
+	Prompt    string        `yaml:"prompt,omitempty"`
+	Threshold *float64      `yaml:"threshold,omitempty"`
+	Command   CommandConfig `yaml:"command,omitempty"`
 }

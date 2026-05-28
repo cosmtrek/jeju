@@ -59,7 +59,7 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve report path failed: %v", err)
 	}
-	if !strings.Contains(runOutput, "report: "+expectedReportOutput) {
+	if !strings.Contains(runOutput, "report "+expectedReportOutput) {
 		t.Fatalf("run output did not include report path %q:\n%s", expectedReportOutput, runOutput)
 	}
 

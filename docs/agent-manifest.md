@@ -1,16 +1,14 @@
-# Agent Manifest Reference
+# Agent Manifest
 
-The Agent Manifest is Jeju's source of truth for an agent. It declares what the agent is, which model it uses, where instructions live, what runtime limits apply, which tools and skills are available, how tool calls are gated, where run data is stored, and how completed runs are evaluated.
-
-Jeju loads a manifest through this path:
+Jeju loads an agent manifest through:
 
 ```text
 config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run
 ```
 
-The runtime receives a compiled agent. It does not read YAML directly.
+The runtime receives a compiled agent, not raw YAML. Relative paths are resolved from the manifest file location.
 
-## Minimal Shape
+## Example
 
 ```yaml
 apiVersion: jeju/v1alpha1
@@ -18,493 +16,330 @@ kind: Agent
 
 metadata:
   name: research
+  description: "Local research agent"
+  labels:
+    team: agent-platform
 
 models:
-  default: primary
   providers:
     primary:
-      provider: mock
-      model: mock-react
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-chat
+      baseUrl: https://api.deepseek.com
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.2
+      thinking:
+        type: disabled
+      maxOutputTokens: 2048
+      timeoutSec: 60
 
 instructions:
-  system: ./prompts/research.md
+  system: ../prompts/research.md
 
 runtime:
-  mode: react
+  model: primary
+  loop:
+    type: react
+  limits:
+    maxSteps: 20
+    maxDurationSec: 900
+    maxToolCalls: 50
+    maxConsecutiveErrors: 3
 
 workspace:
-  path: ./workspace/research
-```
+  path: ../workspace/research
 
-Defaults fill in runtime limits, React settings, skill loading policy, local sandbox settings, trajectory storage, and default permissions.
+tools:
+  - read
+  - write
+  - edit
+  - search
+  - shell
+
+  - name: keyword_count
+    uses: command
+    capabilities: [workspaceRead]
+    command:
+      run: ../workspace/research/tools/keyword_count.py
+      args: ["{{text}}", "{{keyword}}"]
+      timeoutSec: 30
+    input:
+      schema:
+        type: object
+        properties:
+          text: { type: string }
+          keyword: { type: string }
+        required: [text, keyword]
+
+  - name: search_api
+    uses: http
+    capabilities: [networkRead]
+    http:
+      method: POST
+      url: https://api.exa.ai/search
+      headers:
+        content-type: application/json
+        x-api-key: ${EXA_API_KEY}
+      body:
+        json:
+          query: "{{query}}"
+          numResults: 10
+          type: auto
+          contents:
+            highlights: true
+      timeoutSec: 30
+    input:
+      schema:
+        type: object
+        properties:
+          query: { type: string }
+        required: [query]
+
+skills:
+  dirs:
+    - ../skills
+  active:
+    - web-research
+
+permissions:
+  access: workspace
+  approval: onRequest
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules:
+        - finalAnswerExists
+        - runCompleted
+
+    - name: quality
+      uses: llm
+      model: primary
+      prompt: ../eval/quality_judge.md
+      threshold: 0.7
+
+    - name: custom_status
+      uses: command
+      command:
+        run: python3
+        args: [../eval/status_judge.py]
+        timeoutSec: 30
+```
 
 ## Top-Level Fields
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `apiVersion` | yes | Manifest API version. Must be `jeju/v1alpha1`. |
-| `kind` | yes | Resource kind. Must be `Agent`. |
-| `metadata` | yes | Agent identity and labels. |
-| `models` | yes | Model providers and default provider selection. |
-| `model_roles` | no | Optional role-to-provider mapping. |
-| `instructions` | yes | System instruction file path. |
-| `runtime` | no | Runtime mode, limits, model roles, ReAct settings, and interactivity. Defaults to ReAct settings. |
-| `workspace` | yes | Workspace path for file-oriented agent work. |
-| `tools` | no | Tools exposed to the runtime. |
-| `skills` | no | Skill discovery, disclosure, activation, and loading config. |
-| `memory` | no | Memory toggle. Currently disabled in scaffolded agents. |
-| `sandbox` | no | Execution sandbox config. Defaults to local workspace sandbox. |
-| `policy` | no | Permission defaults and risk/tool-specific rules. |
-| `trajectory` | no | JSONL trajectory storage and sinks. |
-| `evaluate` | no | Optional rule-based evaluation after run completion. |
+| `apiVersion` | yes | Must be `jeju/v1alpha1`. |
+| `kind` | yes | Must be `Agent`. |
+| `metadata` | yes | Agent identity. |
+| `models` | yes | Model provider registry. |
+| `instructions` | yes | Agent instruction paths. |
+| `runtime` | yes | Runtime model, loop, and limits. |
+| `workspace` | yes | Local workspace boundary for file and shell tools. |
+| `tools` | no | Tool capabilities exposed to the agent. |
+| `skills` | no | Skill directories and active skills. |
+| `permissions` | no | Access and approval profile. |
+| `evaluate` | no | Optional evaluators run after completion. |
 
-## `metadata`
-
-```yaml
-metadata:
-  name: research
-  description: "Local research agent"
-  labels:
-    team: agent-platform
-```
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `name` | yes | Agent name. Must match `^[a-zA-Z][a-zA-Z0-9_-]*$`. |
-| `description` | no | Human-readable agent description. |
-| `labels` | no | String key/value labels for organization. |
-
-## `models`
+## Models
 
 ```yaml
 models:
-  default: primary
   providers:
     primary:
-      provider: openai_compatible
+      type: openaiCompatible
+      preset: deepseek
       model: deepseek-chat
-      base_url: https://api.deepseek.com
-      env_key: DEEPSEEK_API_KEY
-      temperature: 0.2
-      max_output_tokens: 2048
-      timeout_sec: 60
-  fallback:
-    - backup
+      baseUrl: https://api.deepseek.com
+      envKey: DEEPSEEK_API_KEY
+      thinking:
+        type: disabled
 ```
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `default` | yes | Provider key used as the default model. Must exist under `providers`. |
-| `providers` | yes | Map of provider names to provider config. |
-| `fallback` | no | Ordered fallback provider names. |
 
 Provider fields:
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `provider` | yes | Supported values: `mock`, `openai_compatible`, `deepseek`, `mimo`. |
-| `model` | yes | Provider model name. Supports `${ENV_VAR}` expansion. |
-| `base_url` | no | API base URL. Supports `${ENV_VAR}` expansion. |
-| `env_key` | no | Environment variable name that contains the API key. Supports `${ENV_VAR}` expansion. |
+| `type` | yes | `mock` or `openaiCompatible`. |
+| `preset` | no | `deepseek` or `mimo`; fills default `baseUrl`, `envKey`, and JSON mode. |
+| `model` | yes | Provider model name. |
+| `baseUrl` | no | API base URL. |
+| `envKey` | no | Environment variable name that contains the API key. |
 | `temperature` | no | Sampling temperature. |
-| `max_output_tokens` | no | Maximum model output tokens. |
-| `timeout_sec` | no | Model call timeout in seconds. |
+| `thinking.type` | no | `auto`, `disabled`, or `enabled`. DeepSeek and MiMo presets default to `disabled`; when enabled, Jeju records provider reasoning content and replays it on later tool turns. |
+| `thinking.effort` | no | Provider-specific reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
+| `maxOutputTokens` | no | Maximum output tokens. |
+| `timeoutSec` | no | Model request timeout. |
 
-`deepseek` defaults:
+`runtime.model` selects the provider used by the agent loop. If omitted, Jeju uses the single configured provider; with multiple providers it must be explicit.
 
-- `base_url`: `https://api.deepseek.com`
-- `env_key`: `DEEPSEEK_API_KEY`
+Jeju keeps the manifest model fields provider-neutral and maps them in the model adapter. OpenAI-style structured output and function calling are protocol capabilities, not user-facing loop-format knobs: the runtime prefers native tool/function calling when the provider supports it, and uses structured outputs or JSON mode for final/evaluator outputs. Provider presets are where API spelling differences live, such as OpenAI `reasoning_effort`, DeepSeek/MiMo `thinking.type`, and MiMo `max_completion_tokens`.
 
-`mimo` defaults:
+For `openaiCompatible` providers, Jeju sends tools as function definitions by default. It asks for final answers with a structured response schema when the provider supports JSON Schema response formats, and falls back to JSON object mode for providers such as DeepSeek where the documented structured-output surface is JSON mode rather than schema-strict response format.
 
-- `base_url`: `https://api.xiaomimimo.com/v1`
-- `env_key`: `MIMO_API_KEY`
+When `thinking.type: enabled` is used with providers that return `reasoning_content` such as DeepSeek and MiMo, Jeju writes the full thinking text to the run artifacts, shows a short console preview, and keeps the assistant `reasoning_content` in message history so the next tool-call turn can pass it back to the API. OpenAI Responses reasoning items and Gemini thought signatures follow the same preservation principle, but require provider-specific adapters.
 
-## `model_roles`
-
-```yaml
-model_roles:
-  reasoning: primary
-  utility: primary
-  evaluation: primary
-```
-
-Optional map from logical role names to configured provider names. Every referenced provider must exist in `models.providers`.
-
-Runtime-specific model roles can also be set under `runtime.models`.
-
-## `instructions`
-
-```yaml
-instructions:
-  system: ./prompts/research.md
-```
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `system` | yes | Path to the system instruction file. The file must exist when the manifest is validated. |
-
-## `runtime`
+## Runtime
 
 ```yaml
 runtime:
-  mode: react
+  model: primary
+  loop:
+    type: react
   limits:
-    max_steps: 8
-    max_duration_sec: 300
-    max_tool_calls: 10
-    max_consecutive_errors: 3
-  models:
-    reasoning: primary
-    utility: primary
-    evaluation: primary
-  react:
-    action_mode: combined
-    reflection: off
-    compaction: off
-  interactive:
-    enabled: true
-    pause_on:
-      - permission_required
-      - agent_question
+    maxSteps: 20
+    maxDurationSec: 900
+    maxToolCalls: 50
+    maxConsecutiveErrors: 3
 ```
 
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `mode` | no | `react` | Runtime mode. Only `react` is currently supported. |
-| `max_steps` | no | unset | Legacy top-level max step field. Used only when `limits.max_steps` is omitted. |
-| `limits.max_steps` | no | `20` | Maximum ReAct loop steps. |
-| `limits.max_duration_sec` | no | `900` | Maximum run duration in seconds. |
-| `limits.max_tool_calls` | no | `50` | Maximum tool calls in one run. |
-| `limits.max_consecutive_errors` | no | `3` | Maximum consecutive runtime errors before stopping. |
-| `models.reasoning` | no | `models.default` | Provider used for reasoning. |
-| `models.utility` | no | `models.default` | Provider used for utility work. |
-| `models.evaluation` | no | `models.default` | Provider used for evaluation. |
-| `react.action_mode` | no | `combined` | ReAct action format. Only `combined` is currently supported. |
-| `react.reflection` | no | `off` | Reflection mode. |
-| `react.compaction` | no | `off` | Context compaction mode. |
-| `interactive.enabled` | no | `false` | Whether interactive pauses are enabled. |
-| `interactive.pause_on` | no | `permission_required`, `agent_question` | Pause reasons. |
+`loop.type` currently supports `react`. The action protocol is selected internally from the model provider and capabilities; it is not a manifest field.
 
-## `workspace`
+## Tools
 
-```yaml
-workspace:
-  path: ./workspace/research
-```
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `path` | yes | Local workspace path. It must be an existing directory or have a creatable ancestor. |
-
-File tools stay inside this workspace. The default local sandbox workdir also points here.
-
-## `tools`
+Built-in tools can be listed as strings:
 
 ```yaml
 tools:
-  - name: file_write
-    type: builtin
-    description: "Write files to workspace"
-    permission: ask
-    risk: [write]
-    side_effect: true
-
-  - name: shell
-    type: cli
-    description: "Run shell commands in workspace"
-    command: bash
-    args: []
-    permission: ask
-    risk: [execute, write]
-    timeout_sec: 30
-    sandbox_required: true
-    side_effect: true
-    env:
-      EXAMPLE: value
+  - read
+  - write
+  - edit
+  - search
+  - shell
 ```
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `name` | yes | Unique tool name. |
-| `type` | yes | Supported values: `builtin`, `cli`, `command`. |
-| `description` | no | Tool description shown to the model/runtime. |
-| `command` | required for `cli` and `command` | Command executable. |
-| `args` | no | Static command arguments. |
-| `schema` | no | Tool input schema reference or inline schema string. |
-| `permission` | no | Tool permission override. Supported values: `allow`, `ask`, `deny`, `dry_run`. |
-| `risk` | no | Risk labels used by policy rules. |
-| `timeout_sec` | no | Tool timeout in seconds. |
-| `sandbox_required` | no | Whether sandboxing is required for this tool. |
-| `side_effect` | no | Whether the tool can change external or workspace state. |
-| `env` | no | Environment variables for command tools. |
+String entries are shorthand for `uses: builtin:<name>`.
 
-Supported risk labels:
+Custom command tools:
 
-- `read`
-- `write`
-- `execute`
-- `network`
-- `credential`
-- `external`
-- `destructive`
-- `production`
-- `payment`
-- `message`
+```yaml
+tools:
+  - name: keyword_count
+    uses: command
+    capabilities: [workspaceRead]
+    command:
+      run: ../workspace/agent/tools/keyword_count.py
+      args: ["{{text}}", "{{keyword}}"]
+      timeoutSec: 30
+    input:
+      schema: ../schemas/keyword_count.json
+```
 
-Tools used by the scaffold are:
+HTTP tools:
 
-- `file_read` (`builtin`)
-- `file_write` (`builtin`)
-- `shell` (`cli`)
+```yaml
+tools:
+  - name: search_api
+    uses: http
+    capabilities: [networkRead]
+    http:
+      method: POST
+      url: https://api.exa.ai/search
+      headers:
+        content-type: application/json
+        x-api-key: ${EXA_API_KEY}
+      body:
+        json:
+          query: "{{query}}"
+          numResults: 10
+          type: auto
+          contents:
+            highlights: true
+```
 
-All tool calls pass through `policy.Gate` before execution.
+HTTP scheme and host must be static. Template values use `{{field}}` and are intended for query, path-like values, headers, and body fields.
 
-## `skills`
+Known capabilities are `workspaceRead`, `workspaceWrite`, `command`, `networkRead`, and `networkWrite`. Built-in tools infer capabilities automatically; custom tools can declare them for permission decisions.
+
+## Skills
 
 ```yaml
 skills:
-  mode: disclose
-  paths:
-    - ./skills/web_research
-    - ./skills/report_writer
-  disclosure:
-    include: [name, description, when_to_use, capabilities, inputs, outputs, requires, risk]
-  activation:
-    policy: manual
-    active:
-      - web_research
-      - report_writer
-    max_active: 3
-  loading:
-    strategy: lazy
+  dirs:
+    - ../skills
+  active:
+    - web-research
 ```
 
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `mode` | no | `disclose` | Skill mode. The current implementation uses disclosure plus manual activation. |
-| `paths` | no | empty | Skill directories. Each path must exist and contain `skill.yaml`. |
-| `disclosure.include` | no | empty | Skill metadata fields to disclose. |
-| `activation.policy` | no | `manual` | Skill activation policy. |
-| `activation.active` | no | empty | Skill names to load as active skills. |
-| `activation.max_active` | no | `3` | Maximum active skills. |
-| `loading.strategy` | no | `lazy` | Skill instruction loading strategy. |
+Each skill is a directory under a listed `dirs` root and must contain `SKILL.md`. Jeju follows the Agent Skills `SKILL.md` format: required `name` and `description`, optional `license`, `compatibility`, `metadata`, and `allowed-tools`. The skill `name` must match the parent directory. Jeju reads frontmatter for disclosure and injects the full `SKILL.md` only for active skills.
 
-Skills are disclosed first. Active skills load instructions manually; Jeju does not inject all skill assets by default.
+Example:
 
-## `memory`
+```markdown
+---
+name: web-research
+description: Research web sources and summarize findings. Use when current external information is needed.
+metadata:
+  jeju.capabilities: source_collection,summarization
+allowed-tools: search_api
+---
 
-```yaml
-memory:
-  enabled: false
+# Web Research
+
+Use `search_api` for web search. It calls Exa with `EXA_API_KEY` from the environment and returns highlighted results. Use primary sources and summarize with links.
 ```
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `enabled` | no | Memory toggle. Scaffolded agents set this to `false`. |
-
-## `sandbox`
+## Permissions
 
 ```yaml
-sandbox:
-  type: local
-  workdir: ./workspace/research
-  network: unrestricted
-  timeout_sec: 300
+permissions:
+  access: workspace
+  approval: onRequest
 ```
 
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `type` | no | `local` | Sandbox type. Only `local` is currently supported. |
-| `workdir` | no | `workspace.path` | Working directory for shell execution. |
-| `network` | no | unset | Network policy marker. |
-| `image` | no | unset | Reserved for non-local sandbox modes. |
-| `endpoint` | no | unset | Reserved for remote sandbox modes. |
-| `api_key_env` | no | unset | Reserved API key environment variable for remote sandbox modes. |
-| `timeout_sec` | no | unset | Sandbox timeout in seconds. |
-| `mounts` | no | empty | Reserved mount config. |
+`access` controls the resource boundary:
 
-Mount shape:
+- `readOnly`: read-only workspace access.
+- `workspace`: workspace read/write plus configured tools, with approval policy applied.
+- `full`: full local access.
 
-```yaml
-mounts:
-  - source: ./data
-    target: /data
-```
+`approval` controls when Jeju asks the user:
 
-File tools and shell execution must remain inside the configured local workspace/sandbox boundaries.
+- `never`: allowed calls run, blocked calls fail.
+- `onRequest`: sensitive calls such as writes, command execution, and network access ask first.
+- `always`: all side-effecting calls ask first.
 
-## `policy`
+## Evaluate
 
 ```yaml
-policy:
-  default_permission: ask
-  sandbox_required_for:
-    - execute
-  rules:
-    - match:
-        risk: read
-      permission: allow
-    - match:
-        risk: write
-      permission: ask
-    - match:
-        tool: shell
-      permission: ask
-    - match:
-        risk: destructive
-      permission: deny
-```
-
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `default_permission` | no | `ask` | Fallback permission when no rule matches. |
-| `sandbox_required_for` | no | empty | Risk labels that require sandbox execution. |
-| `rules` | no | empty | Ordered permission rules. |
-
-Rule fields:
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `match.risk` | no | Match tool calls by risk label. |
-| `match.tool` | no | Match tool calls by tool name. |
-| `permission` | yes | Supported values: `allow`, `ask`, `deny`, `dry_run`. |
-
-## `trajectory`
-
-```yaml
-trajectory:
+evaluate:
   enabled: true
-  format: jsonl
-  store:
-    type: file
-    path: ./runs
-  sinks:
-    - type: console
-      level: info
-    - type: file
-      path: ./runs
-  fail_on_sink_error: false
+  evaluators:
+    - name: basic
+      uses: rules
+      rules: [finalAnswerExists, runCompleted]
 ```
 
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `enabled` | no | `true` | Trajectory is always enabled by defaults. |
-| `format` | no | `jsonl` | Trajectory format. Only `jsonl` is currently supported. |
-| `store.type` | no | `file` | Run store type. Only `file` is currently supported. |
-| `store.path` | no | `./runs` | Run directory root. Must be creatable. |
-| `sinks` | no | console and file sinks | Additional event sinks. |
-| `fail_on_sink_error` | no | `false` | Whether sink failures fail the run. |
+Evaluator backends:
 
-Sink fields:
+- `rules`: deterministic built-in rules.
+- `llm`: model-based judge. Requires `prompt`; `model` defaults to `runtime.model`.
+- `command`: local command judge. Jeju runs `command.run` with `command.args`, sends evaluation context as JSON on stdin, and expects JSON with `score` and `passed`.
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `type` | yes | Sink type, for example `console` or `file`. |
-| `level` | no | Console verbosity level. |
-| `path` | no | File sink path. |
-| `endpoint` | no | Reserved endpoint for external sinks. |
-| `api_key_env` | no | Reserved API key environment variable for external sinks. |
+Built-in rules:
 
-Every run creates a run directory and writes:
+- `finalAnswerExists`
+- `noModelError`
+- `maxStepsNotExceeded`
+- `maxToolCallsNotExceeded`
+- `noPermissionDenied`
+- `runCompleted`
+
+Evaluation results are written to `runs/<run_id>/evaluation.json`.
+
+## Run Output
+
+Every run writes to `./runs/<run_id>/`:
 
 - `metadata.json`
 - `config.snapshot.yaml`
 - `trajectory.jsonl`
 - `final.md`
+- `artifacts/`
 - `evaluation.json` when evaluation is enabled
-- `artifacts/` for large model/tool payloads
 
-## `evaluate`
-
-```yaml
-evaluate:
-  enabled: true
-  on_run_complete: true
-  evaluators:
-    - name: basic_trajectory
-      type: rule
-      rules:
-        - final_answer_exists
-        - no_model_error
-        - no_tool_error
-        - max_steps_not_exceeded
-        - max_tool_calls_not_exceeded
-        - no_permission_denied
-        - run_completed
-  outputs:
-    path: ./runs
-    file: evaluation.json
-```
-
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `enabled` | no | `false` | Enables evaluation. |
-| `on_run_complete` | no | `true` when enabled | Runs evaluation after completion. |
-| `evaluators` | no | empty | Evaluation configs. |
-| `outputs.path` | no | `trajectory.store.path` when enabled | Evaluation output root. |
-| `outputs.file` | no | `evaluation.json` when enabled | Evaluation output file name. |
-
-Evaluator fields:
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `name` | yes | Evaluator name. |
-| `type` | yes | Only `rule` is currently supported. |
-| `rules` | no | Rule names for rule evaluators. |
-| `model` | no | Reserved model field. |
-| `rubric` | no | Reserved rubric field. |
-
-Supported rule names:
-
-- `final_answer_exists`
-- `no_model_error`
-- `no_tool_error`
-- `max_steps_not_exceeded`
-- `max_tool_calls_not_exceeded`
-- `no_permission_denied`
-- `run_completed`
-
-## Environment Expansion
-
-`ResolveEnv` expands `${ENV_VAR}` references in these model provider fields:
-
-- `models.providers.<name>.base_url`
-- `models.providers.<name>.model`
-- `models.providers.<name>.env_key`
-
-Example:
-
-```yaml
-models:
-  default: primary
-  providers:
-    primary:
-      provider: openai_compatible
-      model: ${JEJU_MODEL}
-      base_url: ${JEJU_BASE_URL}
-      env_key: JEJU_API_KEY
-```
-
-## Validation Summary
-
-`jeju validate <agent.yaml>` checks the current manifest constraints, including:
-
-- `apiVersion` is `jeju/v1alpha1`.
-- `kind` is `Agent`.
-- `metadata.name` matches `^[a-zA-Z][a-zA-Z0-9_-]*$`.
-- `models.default` exists in `models.providers`.
-- Model providers are `mock`, `openai_compatible`, `deepseek`, or `mimo`.
-- Referenced model roles point at known providers.
-- `instructions.system` exists.
-- `runtime.mode` is `react`.
-- `runtime.react.action_mode` is `combined`.
-- `workspace.path` is creatable.
-- `sandbox.type` is `local`.
-- `trajectory.format` is `jsonl`.
-- `trajectory.store.type` is `file`.
-- Tool names are unique.
-- `cli` and `command` tools define `command`.
-- Tool permissions and risks use supported values.
-- Skill paths exist and contain `skill.yaml`.
-- Evaluators use `type: rule` and known rule names.
+The run output location is a Jeju runtime convention, not an agent manifest field.

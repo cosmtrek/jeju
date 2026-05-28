@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -36,59 +37,70 @@ func (s *ConsoleSink) Close() error {
 func formatConsole(event Event) string {
 	switch event.Type {
 	case EventRunStarted:
-		return fmt.Sprintf("\nRun %s\n  agent: %v\n  task: %v", event.RunID, payload(event, "agent"), payload(event, "input"))
+		return fmt.Sprintf("\nJeju Run %s\nAgent   %v\nTask    %v", event.RunID, payload(event, "agent"), payload(event, "input"))
 	case EventRunCompleted:
-		return fmt.Sprintf("\nRun completed\n  id: %s\n  status: %v\n  dir: %v", event.RunID, payload(event, "status"), payload(event, "run_dir"))
+		return fmt.Sprintf("\nCompleted\n  run    %v\n  status %v", payload(event, "run_dir"), payload(event, "status"))
 	case EventRunFailed:
-		return fmt.Sprintf("\nRun failed\n  id: %s\n  status: %v\n  dir: %v", event.RunID, payload(event, "status"), payload(event, "run_dir"))
+		return fmt.Sprintf("\nFailed\n  run    %v\n  status %v", payload(event, "run_dir"), payload(event, "status"))
 	case EventRunCancelled:
-		return fmt.Sprintf("\nRun cancelled\n  id: %s\n  dir: %v", event.RunID, payload(event, "run_dir"))
+		return fmt.Sprintf("\nCancelled\n  run    %v", payload(event, "run_dir"))
 	case EventSkillDisclosed:
-		return fmt.Sprintf("  skills: disclosed count=%v names=%v", payload(event, "count"), payload(event, "names"))
+		return fmt.Sprintf("\nSkills\n  loaded  %s", formatNames(payload(event, "names")))
 	case EventSkillLoaded:
-		return fmt.Sprintf("  skill loaded: %v", payload(event, "name"))
+		return ""
 	case EventStepStarted:
-		return fmt.Sprintf("\nStep %d\n  model: %v", event.Step, payload(event, "model"))
+		return fmt.Sprintf("\nStep %d", event.Step)
 	case EventStepCompleted:
-		return fmt.Sprintf("  step: completed status=%v", payload(event, "status"))
+		status := fmt.Sprint(payload(event, "status"))
+		if status == "" || status == "running" {
+			return ""
+		}
+		return fmt.Sprintf("  status %s", status)
 	case EventModelStarted:
-		return fmt.Sprintf("  model: started provider=%v model=%v input=%v", payload(event, "provider"), payload(event, "model"), payload(event, "input_ref"))
+		return ""
 	case EventModelCompleted:
-		return fmt.Sprintf("  model: completed latency=%vms tokens=%v/%v output=%v", payload(event, "latency_ms"), payload(event, "tokens_in"), payload(event, "tokens_out"), payload(event, "output_ref"))
+		line := fmt.Sprintf("  model  %v/%v  %s  tokens %v->%v\n         output %v", payload(event, "provider"), payload(event, "model"), formatLatency(payload(event, "latency_ms")), payload(event, "tokens_in"), payload(event, "tokens_out"), payload(event, "output_ref"))
+		if ref := payload(event, "reasoning_ref"); ref != "" {
+			line += fmt.Sprintf("\n         thinking %v", ref)
+			if preview := payload(event, "reasoning_preview"); preview != "" {
+				line += fmt.Sprintf("\n         thought  %v", preview)
+			}
+		}
+		return line
 	case EventModelFailed:
-		return fmt.Sprintf("  model: failed error=%v", payload(event, "error"))
+		return fmt.Sprintf("  model  failed  error=%v", payload(event, "error"))
 	case EventActionParsed:
 		return formatAction(event)
 	case EventActionParseFailed:
-		return fmt.Sprintf("  action: parse_failed error=%v", payload(event, "error"))
+		return fmt.Sprintf("  action parse_failed  error=%v", payload(event, "error"))
 	case EventToolRequested:
-		return fmt.Sprintf("  tool: requested name=%v input=%s", payload(event, "tool"), formatAny(payload(event, "input")))
+		return fmt.Sprintf("  tool   %v\n         input  %s", payload(event, "tool"), formatAny(payload(event, "input")))
 	case EventToolStarted:
-		return fmt.Sprintf("  tool: started name=%v", payload(event, "tool"))
+		return ""
 	case EventPermissionChecked:
-		return fmt.Sprintf("  permission: checked tool=%v decision=%v risks=%v", payload(event, "tool"), payload(event, "decision"), payload(event, "risks"))
+		return fmt.Sprintf("  gate   %v  %s", payload(event, "decision"), formatNames(payload(event, "capabilities")))
 	case EventPermissionApproved:
-		return fmt.Sprintf("  permission: approved tool=%v", payload(event, "tool"))
+		return ""
 	case EventPermissionDenied:
-		return fmt.Sprintf("  permission: denied tool=%v reason=%v", payload(event, "tool"), payload(event, "reason"))
+		return fmt.Sprintf("  gate   deny  tool=%v reason=%v", payload(event, "tool"), payload(event, "reason"))
 	case EventToolCompleted:
-		return fmt.Sprintf("  tool: completed name=%v latency=%vms output=%v", payload(event, "tool"), payload(event, "latency_ms"), payload(event, "output_ref"))
+		return fmt.Sprintf("  tool   %v  %s  ok\n         output %v", payload(event, "tool"), formatLatency(payload(event, "latency_ms")), payload(event, "output_ref"))
 	case EventToolFailed:
-		return fmt.Sprintf("  tool: failed name=%v latency=%vms error=%v", payload(event, "tool"), payload(event, "latency_ms"), payload(event, "error"))
+		return fmt.Sprintf("  tool   %v  %s  failed\n         error  %v", payload(event, "tool"), formatLatency(payload(event, "latency_ms")), payload(event, "error"))
 	case EventArtifactCreated:
 		return ""
 	case EventUserInputRequested:
-		return fmt.Sprintf("  user: input requested question=%v", payload(event, "question"))
+		return fmt.Sprintf("  user   input requested  question=%v", payload(event, "question"))
 	case EventUserInputReceived:
-		return "  user: input received"
+		return "  user   input received"
 	case EventEvaluationStarted:
-		return "\nEvaluation\n  status: started"
+		return "\nEvaluation"
 	case EventEvaluationCompleted:
-		return fmt.Sprintf("  status: completed passed=%v score=%v", payload(event, "passed"), payload(event, "score"))
+		return fmt.Sprintf("  passed %v  score=%v", payload(event, "passed"), payload(event, "score"))
 	case EventEvaluationFailed:
-		return fmt.Sprintf("  status: failed error=%v", payload(event, "error"))
+		return fmt.Sprintf("  failed error=%v", payload(event, "error"))
 	default:
-		return fmt.Sprintf("  event: %s", event.Type)
+		return fmt.Sprintf("  event  %s", event.Type)
 	}
 }
 
@@ -106,16 +118,23 @@ func formatAction(event Event) string {
 	actionType := payload(event, "type")
 	tool := payload(event, "tool")
 	if tool != "" {
-		return fmt.Sprintf("  action: %v tool=%v", actionType, tool)
+		return fmt.Sprintf("  action %v  %v", actionType, tool)
 	}
-	return fmt.Sprintf("  action: %v", actionType)
+	return fmt.Sprintf("  action %v", actionType)
 }
 
 func formatAny(value any) string {
 	switch typed := value.(type) {
 	case map[string]any:
 		parts := make([]string, 0, len(typed))
+		keys := make([]string, 0, len(typed))
 		for key, val := range typed {
+			keys = append(keys, key)
+			_ = val
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			val := typed[key]
 			parts = append(parts, fmt.Sprintf("%s=%v", key, val))
 		}
 		return strings.Join(parts, " ")
@@ -123,5 +142,47 @@ func formatAny(value any) string {
 		return ""
 	default:
 		return fmt.Sprint(value)
+	}
+}
+
+func formatLatency(value any) string {
+	ms := int64Value(value)
+	if ms >= 1000 {
+		return fmt.Sprintf("%.2fs", float64(ms)/1000)
+	}
+	return fmt.Sprintf("%dms", ms)
+}
+
+func int64Value(value any) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case int32:
+		return int64(typed)
+	case float64:
+		return int64(typed)
+	case float32:
+		return int64(typed)
+	default:
+		return 0
+	}
+}
+
+func formatNames(value any) string {
+	switch typed := value.(type) {
+	case []string:
+		return strings.Join(typed, ", ")
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			parts = append(parts, fmt.Sprint(item))
+		}
+		return strings.Join(parts, ", ")
+	case nil:
+		return ""
+	default:
+		return strings.Trim(fmt.Sprint(typed), "[]")
 	}
 }

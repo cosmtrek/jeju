@@ -25,13 +25,10 @@ func runAgent(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("run_id: %s\n", result.RunID)
-	if agent.Config.Trajectory.Enabled {
-		reportPath, err := writeDefaultRunReport(agent.RunStore, result.RunID)
-		if err != nil {
-			return fmt.Errorf("write run report: %w", err)
-		}
-		fmt.Printf("report: %s\n", reportPath)
+	reportPath, err := writeDefaultRunReport(agent.RunStore, result.RunID)
+	if err != nil {
+		return fmt.Errorf("write run report: %w", err)
 	}
+	fmt.Printf("\nOutputs\n  run_id %s\n  report %s\n", result.RunID, reportPath)
 	return nil
 }

@@ -55,19 +55,17 @@ func (e *RuleEvaluator) Evaluate(ctx context.Context, input Context) (EvaluatorR
 func evalRule(rule string, input Context) RuleResult {
 	result := RuleResult{Rule: rule, Passed: true}
 	switch rule {
-	case "final_answer_exists":
+	case "finalAnswerExists":
 		result.Passed = input.Final != ""
-	case "no_model_error":
+	case "noModelError":
 		result.Passed = input.ModelErrors == 0
-	case "no_tool_error":
-		result.Passed = input.ToolErrors == 0
-	case "max_steps_not_exceeded":
+	case "maxStepsNotExceeded":
 		result.Passed = input.MaxSteps == 0 || input.Steps <= input.MaxSteps
-	case "max_tool_calls_not_exceeded":
+	case "maxToolCallsNotExceeded":
 		result.Passed = input.MaxToolCalls == 0 || input.ToolCalls <= input.MaxToolCalls
-	case "no_permission_denied":
+	case "noPermissionDenied":
 		result.Passed = input.PermissionDenied == 0
-	case "run_completed":
+	case "runCompleted":
 		result.Passed = input.Status == "completed"
 	default:
 		result.Passed = false

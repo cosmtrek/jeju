@@ -12,15 +12,12 @@ type Tool interface {
 }
 
 type Spec struct {
-	Name            string
-	Description     string
-	InputSchema     any
-	Args            []string
-	Permission      string
-	Risks           []string
-	TimeoutSec      int
-	SideEffect      bool
-	SandboxRequired bool
+	Name         string
+	Description  string
+	InputSchema  any
+	Args         []string
+	Capabilities []string
+	TimeoutSec   int
 }
 
 type Result struct {

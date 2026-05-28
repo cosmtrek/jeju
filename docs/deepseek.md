@@ -6,17 +6,19 @@ For Jeju, use:
 
 ```yaml
 models:
-  default: primary
   providers:
     primary:
-      provider: deepseek
+      type: openaiCompatible
+      preset: deepseek
       model: deepseek-v4-flash
-      env_key: DEEPSEEK_API_KEY
+      envKey: DEEPSEEK_API_KEY
+      thinking:
+        type: disabled
 ```
 
-`provider: deepseek` defaults `base_url` to `https://api.deepseek.com` and sends requests to `/chat/completions`. `env_key` is the name of the environment variable that contains the API key.
+`preset: deepseek` defaults `baseUrl` to `https://api.deepseek.com` and sends requests to `/chat/completions`. `envKey` is the name of the environment variable that contains the API key.
 
-The DeepSeek provider enables JSON response mode by default because Jeju V0 expects model output to be a JSON action.
+The DeepSeek preset enables JSON response mode by default for non-native fallback output. It also defaults `thinking.type` to `disabled`. If you set `thinking.type: enabled`, Jeju records the returned `reasoning_content`, shows a short console preview, and replays it on subsequent tool-call turns as required by DeepSeek thinking mode.
 
 Run the shared local fixture with DeepSeek:
 

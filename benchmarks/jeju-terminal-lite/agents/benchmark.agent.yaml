@@ -6,117 +6,50 @@ metadata:
   description: "Jeju Terminal Lite benchmark agent"
 
 models:
-  default: primary
   providers:
     primary:
-      provider: deepseek
+      type: openaiCompatible
+      preset: deepseek
       model: deepseek-v4-flash
-      env_key: DEEPSEEK_API_KEY
+      envKey: DEEPSEEK_API_KEY
       temperature: 0.1
-      max_output_tokens: 4096
-      timeout_sec: 180
+      maxOutputTokens: 4096
+      timeoutSec: 180
 
 instructions:
-  system: ./prompts/benchmark.md
+  system: ../prompts/benchmark.md
 
 runtime:
-  mode: react
+  model: primary
+  loop:
+    type: react
   limits:
-    max_steps: 18
-    max_duration_sec: 600
-    max_tool_calls: 16
-    max_consecutive_errors: 4
-  interactive:
-    enabled: true
-    pause_on:
-      - permission_required
-      - agent_question
+    maxSteps: 18
+    maxDurationSec: 600
+    maxToolCalls: 16
+    maxConsecutiveErrors: 4
 
 workspace:
-  path: ./workspace/app
+  path: ../workspace/app
 
 tools:
-  - name: file_read
-    type: builtin
-    description: "Read files from the benchmark workspace"
-    permission: allow
-    risk: [read]
-    side_effect: false
-  - name: file_write
-    type: builtin
-    description: "Write files to the benchmark workspace"
-    permission: ask
-    risk: [write]
-    side_effect: true
-  - name: shell
-    type: cli
-    description: "Run shell commands inside the benchmark workspace"
-    command: bash
-    permission: ask
-    risk: [execute, write]
-    timeout_sec: 120
-    side_effect: true
+  - read
+  - write
+  - shell
 
-skills:
-  mode: disclose
-  disclosure:
-    include: [name, description, when_to_use, capabilities, inputs, outputs, requires, risk]
-  activation:
-    policy: manual
-    max_active: 0
-  loading:
-    strategy: lazy
-
-memory:
-  enabled: false
-
-sandbox:
-  type: local
-  workdir: ./workspace/app
-  timeout_sec: 120
-
-policy:
-  default_permission: ask
-  rules:
-    - match:
-        risk: read
-      permission: allow
-    - match:
-        risk: write
-      permission: ask
-    - match:
-        risk: execute
-      permission: ask
-    - match:
-        risk: destructive
-      permission: deny
-
-trajectory:
-  enabled: true
-  format: jsonl
-  store:
-    type: file
-    path: ./runs
-  sinks:
-    - type: console
-      level: info
-    - type: file
-      path: ./runs
+permissions:
+  access: workspace
+  approval: onRequest
 
 evaluate:
   enabled: true
-  on_run_complete: true
   evaluators:
     - name: terminal_lite_runtime
-      type: rule
+      uses: rules
       rules:
-        - final_answer_exists
-        - no_model_error
-        - no_tool_error
-        - max_steps_not_exceeded
-        - max_tool_calls_not_exceeded
-        - no_permission_denied
-        - run_completed
-  outputs:
-    path: ./runs
-    file: evaluation.json
+        - finalAnswerExists
+        - noModelError
+        - maxStepsNotExceeded
+        - maxToolCallsNotExceeded
+        - noPermissionDenied
+        - runCompleted

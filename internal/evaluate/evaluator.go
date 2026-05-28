@@ -10,6 +10,7 @@ type Evaluator interface {
 
 type Context struct {
 	RunID            string
+	Input            string
 	Status           string
 	Final            string
 	Steps            int

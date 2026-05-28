@@ -14,6 +14,22 @@ func (a *CompiledAgent) SystemPrompt() string {
 	return a.systemPrompt
 }
 
+func (a *CompiledAgent) NativeSystemPrompt() string {
+	var b strings.Builder
+	b.WriteString(`You are running inside Jeju, a config-defined agent runtime.
+
+Use the provided function tools when they are needed. Ask the user for more information by calling ask_user. When the task is complete, call final_answer.
+
+Do not simulate tool calls in text. Do not write fake <tool_result> blocks. If a tool is needed, call the actual function tool and wait for Jeju to return the result.
+`)
+	a.writeSharedPromptSections(&b)
+	b.WriteString(`
+# Runtime Protocol
+This run uses native function calling. If any agent or skill instruction mentions Jeju action JSON, ignore that output format and use the API function tools instead. Final answers must use the final_answer function tool.
+`)
+	return b.String()
+}
+
 func (a *CompiledAgent) renderSystemPrompt() string {
 	var b strings.Builder
 	b.WriteString(`You are running inside Jeju, a config-defined agent runtime.
@@ -34,6 +50,11 @@ Ask user format:
 Final format:
 {"type":"final","thought":"...","content":"..."}
 `)
+	a.writeSharedPromptSections(&b)
+	return b.String()
+}
+
+func (a *CompiledAgent) writeSharedPromptSections(b *strings.Builder) {
 	b.WriteString("\n# Agent Instructions\n")
 	b.WriteString(a.Instructions)
 	if !strings.HasSuffix(a.Instructions, "\n") {
@@ -48,9 +69,7 @@ Final format:
 			"name":         spec.Name,
 			"description":  spec.Description,
 			"input_schema": spec.InputSchema,
-			"permission":   spec.Permission,
-			"risks":        spec.Risks,
-			"side_effect":  spec.SideEffect,
+			"capabilities": spec.Capabilities,
 		})
 		b.WriteString("- ")
 		b.Write(data)
@@ -63,5 +82,4 @@ Final format:
 		b.WriteString("\n# Active Skill Instructions\n")
 		b.WriteString(active)
 	}
-	return b.String()
 }

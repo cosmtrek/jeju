@@ -118,17 +118,17 @@ func TestAgentFixtures(t *testing.T) {
 				t.Fatalf("Validate failed: %v", err)
 			}
 			provider := manifest.Models.Providers["primary"]
-			if provider.Provider != tc.name {
-				t.Fatalf("expected %s provider, got %q", tc.name, provider.Provider)
+			if provider.Preset != tc.name {
+				t.Fatalf("expected %s preset, got %q", tc.name, provider.Preset)
 			}
 			if provider.Model != tc.model {
 				t.Fatalf("expected %s, got %q", tc.model, provider.Model)
 			}
 			if provider.BaseURL != tc.baseURL {
-				t.Fatalf("unexpected base_url %q", provider.BaseURL)
+				t.Fatalf("unexpected baseUrl %q", provider.BaseURL)
 			}
 			if provider.EnvKey != tc.envKey {
-				t.Fatalf("expected env_key %s, got %q", tc.envKey, provider.EnvKey)
+				t.Fatalf("expected envKey %s, got %q", tc.envKey, provider.EnvKey)
 			}
 
 			agent, err := compiler.Compile("agents/agent.yaml")
@@ -141,6 +141,9 @@ func TestAgentFixtures(t *testing.T) {
 			}
 			if !compiledProvider.JSONMode {
 				t.Fatalf("%s provider should enable JSON mode", tc.name)
+			}
+			if !compiledProvider.ToolCalling {
+				t.Fatalf("%s provider should enable native tool calling", tc.name)
 			}
 			prompt := agent.SystemPrompt()
 			if !strings.Contains(prompt, `"name":"keyword_count"`) || !strings.Contains(prompt, `"input_schema"`) {
@@ -167,6 +170,48 @@ func TestAgentFixtures(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("deep research fixture compiles", func(t *testing.T) {
+		tmp := t.TempDir()
+		workdir := filepath.Join(tmp, "deep-research")
+		copyDir(t, fixturePath(t, "deep-research"), workdir)
+
+		restoreCWD := chdir(t, workdir)
+		defer restoreCWD()
+
+		manifest, _, err := config.LoadFile("agents/deep-research.yaml")
+		if err != nil {
+			t.Fatalf("LoadFile failed: %v", err)
+		}
+		if err := config.Validate(manifest); err != nil {
+			t.Fatalf("Validate failed: %v", err)
+		}
+		provider := manifest.Models.Providers["primary"]
+		if provider.Preset != "mimo" || provider.Model != "mimo-v2.5-pro" || provider.EnvKey != "MIMO_API_KEY" {
+			t.Fatalf("unexpected provider config: %+v", provider)
+		}
+
+		agent, err := compiler.Compile("agents/deep-research.yaml")
+		if err != nil {
+			t.Fatalf("Compile failed: %v", err)
+		}
+		if _, _, ok := agent.Models.Get("primary"); !ok {
+			t.Fatal("compiled primary provider missing")
+		}
+		if _, ok := agent.Tools.Get("search_api"); !ok {
+			t.Fatal("search_api tool missing")
+		}
+		if _, ok := agent.Tools.Get("write"); !ok {
+			t.Fatal("write tool missing")
+		}
+		if _, ok := agent.Skills.Get("deep-research"); !ok {
+			t.Fatal("deep-research skill missing")
+		}
+		prompt := agent.SystemPrompt()
+		if !strings.Contains(prompt, `"name":"search_api"`) || !strings.Contains(prompt, "reports/deep-research.md") {
+			t.Fatalf("system prompt does not include deep research tool/report instructions:\n%s", prompt)
+		}
+	})
 }
 
 func copyAgentFixtureWithProvider(t *testing.T, provider, model, envKey string) string {
@@ -180,8 +225,8 @@ func copyAgentFixtureWithProvider(t *testing.T, provider, model, envKey string) 
 		t.Fatalf("read manifest failed: %v", err)
 	}
 	manifest := string(data)
-	manifest = strings.ReplaceAll(manifest, "provider: mock", "provider: "+provider)
-	manifest = strings.ReplaceAll(manifest, "model: mock-react", "model: "+model+"\n      env_key: "+envKey)
+	manifest = strings.ReplaceAll(manifest, "type: mock", "type: openaiCompatible\n      preset: "+provider)
+	manifest = strings.ReplaceAll(manifest, "model: mock-react", "model: "+model+"\n      envKey: "+envKey)
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write manifest failed: %v", err)
 	}

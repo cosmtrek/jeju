@@ -28,8 +28,8 @@ func runInit(args []string) error {
 		filepath.Join(outputDir, "prompts"),
 		filepath.Join(outputDir, "workspace", name),
 		filepath.Join(outputDir, "runs"),
-		filepath.Join(outputDir, "skills", "web_research"),
-		filepath.Join(outputDir, "skills", "report_writer"),
+		filepath.Join(outputDir, "skills", "web-research"),
+		filepath.Join(outputDir, "skills", "report-writer"),
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -38,14 +38,12 @@ func runInit(args []string) error {
 	}
 
 	files := map[string]string{
-		filepath.Join(outputDir, "agents", name+".agent.yaml"):                 manifestTemplate(name),
-		filepath.Join(outputDir, "prompts", name+".md"):                        promptTemplate(name),
-		filepath.Join(outputDir, "skills", "web_research", "skill.yaml"):       webResearchSkill(),
-		filepath.Join(outputDir, "skills", "web_research", "instructions.md"):  "Collect concise, source-grounded notes. In V0, use available local tools only.\n",
-		filepath.Join(outputDir, "skills", "report_writer", "skill.yaml"):      reportWriterSkill(),
-		filepath.Join(outputDir, "skills", "report_writer", "instructions.md"): "Write structured Markdown with clear sections and direct conclusions.\n",
-		filepath.Join(outputDir, "workspace", ".gitkeep"):                      "",
-		filepath.Join(outputDir, "runs", ".gitkeep"):                           "",
+		filepath.Join(outputDir, "agents", name+".agent.yaml"):          manifestTemplate(name),
+		filepath.Join(outputDir, "prompts", name+".md"):                 promptTemplate(name),
+		filepath.Join(outputDir, "skills", "web-research", "SKILL.md"):  webResearchSkill(),
+		filepath.Join(outputDir, "skills", "report-writer", "SKILL.md"): reportWriterSkill(),
+		filepath.Join(outputDir, "workspace", ".gitkeep"):               "",
+		filepath.Join(outputDir, "runs", ".gitkeep"):                    "",
 	}
 	for path, content := range files {
 		if _, err := os.Stat(path); err == nil {
@@ -115,124 +113,83 @@ metadata:
   description: "Local %[1]s agent"
 
 models:
-  default: primary
   providers:
     primary:
-      provider: mock
+      type: mock
       model: mock-react
 
 instructions:
-  system: ./prompts/%[1]s.md
+  system: ../prompts/%[1]s.md
 
 runtime:
-  mode: react
+  model: primary
+  loop:
+    type: react
   limits:
-    max_steps: 8
-    max_duration_sec: 300
-    max_tool_calls: 10
-    max_consecutive_errors: 3
-  interactive:
-    enabled: true
-    pause_on:
-      - permission_required
-      - agent_question
+    maxSteps: 8
+    maxDurationSec: 300
+    maxToolCalls: 10
+    maxConsecutiveErrors: 3
 
 workspace:
-  path: ./workspace/%[1]s
+  path: ../workspace/%[1]s
 
 tools:
-  - name: file_read
-    type: builtin
-    description: "Read files from workspace"
-    permission: allow
-    risk: [read]
-    side_effect: false
+  - read
+  - write
+  - edit
+  - search
+  - shell
 
-  - name: file_write
-    type: builtin
-    description: "Write files to workspace"
-    permission: ask
-    risk: [write]
-    side_effect: true
-
-  - name: shell
-    type: cli
-    description: "Run shell commands in workspace"
-    command: bash
-    permission: ask
-    risk: [execute, write]
-    side_effect: true
-    timeout_sec: 30
+  - name: search_api
+    uses: http
+    description: "Search the web with Exa"
+    capabilities: [networkRead]
+    http:
+      method: POST
+      url: https://api.exa.ai/search
+      headers:
+        content-type: application/json
+        x-api-key: ${EXA_API_KEY}
+      body:
+        json:
+          query: "{{query}}"
+          numResults: 10
+          type: auto
+          contents:
+            highlights: true
+      timeoutSec: 30
+    input:
+      schema:
+        type: object
+        required: [query]
+        properties:
+          query:
+            type: string
+            description: "Search query"
 
 skills:
-  mode: disclose
-  paths:
-    - ./skills/web_research
-    - ./skills/report_writer
-  disclosure:
-    include: [name, description, when_to_use, capabilities, inputs, outputs, requires, risk]
-  activation:
-    policy: manual
-    active:
-      - web_research
-      - report_writer
-    max_active: 3
-  loading:
-    strategy: lazy
+  dirs:
+    - ../skills
+  active:
+    - web-research
+    - report-writer
 
-memory:
-  enabled: false
-
-sandbox:
-  type: local
-  workdir: ./workspace/%[1]s
-  network: unrestricted
-
-policy:
-  default_permission: ask
-  sandbox_required_for:
-    - execute
-  rules:
-    - match:
-        risk: read
-      permission: allow
-    - match:
-        risk: write
-      permission: ask
-    - match:
-        risk: execute
-      permission: ask
-    - match:
-        risk: destructive
-      permission: deny
-
-trajectory:
-  enabled: true
-  format: jsonl
-  store:
-    type: file
-    path: ./runs
-  sinks:
-    - type: console
-      level: info
-    - type: file
-      path: ./runs
+permissions:
+  access: workspace
+  approval: onRequest
 
 evaluate:
   enabled: true
-  on_run_complete: true
   evaluators:
     - name: basic_trajectory
-      type: rule
+      uses: rules
       rules:
-        - final_answer_exists
-        - no_model_error
-        - max_steps_not_exceeded
-        - max_tool_calls_not_exceeded
-        - run_completed
-  outputs:
-    path: ./runs
-    file: evaluation.json
+        - finalAnswerExists
+        - noModelError
+        - maxStepsNotExceeded
+        - maxToolCallsNotExceeded
+        - runCompleted
 `, name)
 }
 
@@ -241,61 +198,31 @@ func promptTemplate(name string) string {
 }
 
 func webResearchSkill() string {
-	return `apiVersion: jeju/v1alpha1
-kind: Skill
+	return `---
+name: web-research
+description: Research a topic and produce grounded notes. Use when source-grounded research notes are needed.
 metadata:
-  name: web_research
-  description: "Research a topic and produce grounded notes"
-disclosure:
-  when_to_use:
-    - "Need source-grounded research notes"
-  capabilities:
-    - source_collection
-    - note_synthesis
-  inputs:
-    topic:
-      type: string
-      required: true
-  outputs:
-    notes:
-      type: markdown
-  requires:
-    tools:
-      - file_write
-  risk:
-    level: read
-    notes: "Reads available context"
-instructions:
-  file: ./instructions.md
+  jeju.capabilities: source_collection,note_synthesis
+allowed-tools: search_api write
+---
+
+# Web Research
+
+Use search_api for web search. It calls Exa with EXA_API_KEY from the environment and returns highlighted results. Collect concise, source-grounded notes and write results when the task asks for saved output.
 `
 }
 
 func reportWriterSkill() string {
-	return `apiVersion: jeju/v1alpha1
-kind: Skill
+	return `---
+name: report-writer
+description: Write concise structured Markdown reports. Use when the task needs a clear written report.
 metadata:
-  name: report_writer
-  description: "Write concise structured Markdown reports"
-disclosure:
-  when_to_use:
-    - "Need a clear written report"
-  capabilities:
-    - markdown_report
-    - structured_summary
-  inputs:
-    notes:
-      type: markdown
-      required: false
-  outputs:
-    report:
-      type: markdown
-  requires:
-    tools:
-      - file_write
-  risk:
-    level: write
-    notes: "May write report files"
-instructions:
-  file: ./instructions.md
+  jeju.capabilities: markdown_report,structured_summary
+allowed-tools: write
+---
+
+# Report Writer
+
+Write structured Markdown with clear sections and direct conclusions.
 `
 }

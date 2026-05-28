@@ -27,7 +27,7 @@
 ## Generated Files
 
 - `jeju init <name>` is allowed to scaffold into the current directory, but tests and local quick-start runs should use `jeju init <name> --dir <workdir>`.
-- Do not leave temporary scaffold output such as `agents/research.agent.yaml`, `prompts/research.md`, `skills/web_research`, `runs/<run_id>`, or `workspace/<agent>` in the repo root unless the task explicitly asks to add source fixtures.
+- Do not leave temporary scaffold output such as `agents/research.agent.yaml`, `prompts/research.md`, `skills/web-research`, `runs/<run_id>`, or `workspace/<agent>` in the repo root unless the task explicitly asks to add source fixtures.
 - `.jeju-dev/` is the preferred ignored local quick-start directory.
 
 ## Verification

@@ -5,10 +5,9 @@ import "encoding/json"
 type DecisionAction string
 
 const (
-	DecisionAllow  DecisionAction = "allow"
-	DecisionAsk    DecisionAction = "ask"
-	DecisionDeny   DecisionAction = "deny"
-	DecisionDryRun DecisionAction = "dry_run"
+	DecisionAllow DecisionAction = "allow"
+	DecisionAsk   DecisionAction = "ask"
+	DecisionDeny  DecisionAction = "deny"
 )
 
 type PermissionRequest struct {
@@ -16,7 +15,6 @@ type PermissionRequest struct {
 	Step  int
 	Tool  string
 	Input json.RawMessage
-	Risks []string
 }
 
 type PermissionDecision struct {

@@ -14,7 +14,9 @@ type FileRead struct {
 }
 
 func NewFileRead(spec tools.Spec, box sandbox.Sandbox) *FileRead {
-	spec.Name = "file_read"
+	if spec.Name == "" {
+		spec.Name = "read"
+	}
 	return &FileRead{spec: spec, box: box}
 }
 

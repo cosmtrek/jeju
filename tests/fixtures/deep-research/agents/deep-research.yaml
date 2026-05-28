@@ -1,0 +1,89 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: deep-research
+  description: "MiMo-powered deep research agent using Exa web search"
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: mimo
+      model: mimo-v2.5-pro
+      envKey: MIMO_API_KEY
+      temperature: 0.2
+      thinking:
+        type: disabled
+      maxOutputTokens: 128000
+      timeoutSec: 180
+
+instructions:
+  system: ../prompts/deep-research.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  limits:
+    maxSteps: 20
+    maxDurationSec: 900
+    maxToolCalls: 50
+    maxConsecutiveErrors: 4
+
+workspace:
+  path: ../workspace/research
+
+tools:
+  - write
+
+  - name: search_api
+    uses: http
+    description: "Search the web with Exa and return highlighted results"
+    capabilities: [networkRead]
+    http:
+      method: POST
+      url: https://api.exa.ai/search
+      headers:
+        content-type: application/json
+        x-api-key: ${EXA_API_KEY}
+      body:
+        json:
+          query: "{{query}}"
+          numResults: 10
+          type: auto
+          contents:
+            highlights: true
+      timeoutSec: 30
+    input:
+      schema:
+        type: object
+        required:
+          - query
+        properties:
+          query:
+            type: string
+            description: "Research query to send to Exa"
+
+skills:
+  dirs:
+    - ../skills
+  active:
+    - deep-research
+
+permissions:
+  access: full
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: research_run
+      uses: rules
+      rules:
+        - finalAnswerExists
+        - noModelError
+        - maxStepsNotExceeded
+        - maxToolCallsNotExceeded
+        - noPermissionDenied
+        - runCompleted

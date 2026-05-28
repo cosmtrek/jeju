@@ -56,9 +56,16 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 	if _, err := store.WriteArtifact(runDir.RunID, "step001_model_output.txt", []byte("output")); err != nil {
 		t.Fatalf("WriteArtifact failed: %v", err)
 	}
+	if _, err := store.WriteArtifact(runDir.RunID, "step001_model_reasoning.txt", []byte("thinking through the task")); err != nil {
+		t.Fatalf("WriteArtifact reasoning failed: %v", err)
+	}
 	if err := writeTrajectory(filepath.Join(runDir.Path, runs.TrajectoryFile), []trajectory.Event{
 		{ID: "evt_000001", Type: trajectory.EventRunStarted, RunID: runDir.RunID, TS: time.Now(), Actor: "runtime", Payload: map[string]any{"agent": "agent"}},
-		{ID: "evt_000002", Type: trajectory.EventModelCompleted, RunID: runDir.RunID, Step: 1, TS: time.Now(), Actor: "model:mock"},
+		{ID: "evt_000002", Type: trajectory.EventModelCompleted, RunID: runDir.RunID, Step: 1, TS: time.Now(), Actor: "model:mock", Payload: map[string]any{
+			"output_ref":        "artifacts/step001_model_output.txt",
+			"reasoning_ref":     "artifacts/step001_model_reasoning.txt",
+			"reasoning_preview": "thinking through the task",
+		}},
 	}); err != nil {
 		t.Fatalf("writeTrajectory failed: %v", err)
 	}
@@ -67,8 +74,11 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildRunReport failed: %v", err)
 	}
-	if report.Summary.ModelCompleted != 1 || len(report.Artifacts) != 1 || !report.EvaluationExists {
+	if report.Summary.ModelCompleted != 1 || len(report.Artifacts) != 2 || !report.EvaluationExists {
 		t.Fatalf("unexpected report: %#v", report)
+	}
+	if len(report.Steps) != 1 || report.Steps[0].ReasoningRef != "artifacts/step001_model_reasoning.txt" || report.Steps[0].ReasoningContent == "" {
+		t.Fatalf("reasoning was not attached to step: %#v", report.Steps)
 	}
 
 	out := filepath.Join(tmp, "report.html")
@@ -80,7 +90,7 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 		t.Fatalf("read report failed: %v", err)
 	}
 	html := string(data)
-	for _, want := range []string{"Jeju Run", "write notes", "Final Output", "step001_model_output.txt"} {
+	for _, want := range []string{"Jeju Run", "write notes", "Final Output", "step001_model_output.txt", "Thinking", "thinking through the task"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected html to contain %q", want)
 		}

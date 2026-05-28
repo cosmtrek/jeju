@@ -8,56 +8,58 @@ import (
 )
 
 type Gate struct {
-	defaultPermission DecisionAction
-	rules             []Rule
+	access   string
+	approval string
 }
 
-func NewGate(cfg config.PolicyConfig) *Gate {
-	defaultPermission := DecisionAsk
-	if cfg.DefaultPermission != "" {
-		defaultPermission = DecisionAction(cfg.DefaultPermission)
-	}
-	rules := make([]Rule, 0, len(cfg.Rules))
-	for _, rule := range cfg.Rules {
-		rules = append(rules, Rule{
-			Risk:       rule.Match.Risk,
-			Tool:       rule.Match.Tool,
-			Permission: DecisionAction(rule.Permission),
-		})
-	}
-	return &Gate{defaultPermission: defaultPermission, rules: rules}
+func NewGate(cfg config.PermissionsConfig) *Gate {
+	return &Gate{access: cfg.Access, approval: cfg.Approval}
 }
 
 func (g *Gate) Check(req PermissionRequest, spec tools.Spec) PermissionDecision {
-	action := g.defaultPermission
-	reason := fmt.Sprintf("default permission is %s", action)
-	if spec.Permission != "" {
-		action = DecisionAction(spec.Permission)
-		reason = fmt.Sprintf("tool %s declares permission %s", spec.Name, action)
+	if denied := g.deniedByAccess(spec); denied != "" {
+		return PermissionDecision{Action: DecisionDeny, Reason: denied}
 	}
-	for _, rule := range g.rules {
-		if rule.Tool != "" && rule.Tool == req.Tool {
-			action = rule.Permission
-			reason = fmt.Sprintf("policy rule matched tool %s", rule.Tool)
-			if action == DecisionDeny {
-				return PermissionDecision{Action: action, Reason: reason}
-			}
-		}
-		if rule.Risk != "" && contains(req.Risks, rule.Risk) {
-			action = rule.Permission
-			reason = fmt.Sprintf("policy rule matched risk %s", rule.Risk)
-			if action == DecisionDeny {
-				return PermissionDecision{Action: action, Reason: reason}
-			}
-		}
+	if g.approval == "never" {
+		return PermissionDecision{Action: DecisionAllow, Reason: "approval policy is never"}
 	}
-	return PermissionDecision{Action: action, Reason: reason}
+	if g.approval == "always" && hasSideEffect(spec.Capabilities) {
+		return PermissionDecision{Action: DecisionAsk, Reason: "approval policy requires approval for side effects"}
+	}
+	if g.approval == "onRequest" && requiresApproval(spec.Capabilities) {
+		return PermissionDecision{Action: DecisionAsk, Reason: fmt.Sprintf("tool %s requires approval", spec.Name)}
+	}
+	return PermissionDecision{Action: DecisionAllow, Reason: "allowed by permissions"}
 }
 
-func contains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
+func (g *Gate) deniedByAccess(spec tools.Spec) string {
+	switch g.access {
+	case "readOnly":
+		if hasAnyCapability(spec.Capabilities, "workspaceWrite", "command", "networkRead", "networkWrite") {
+			return fmt.Sprintf("permissions.access readOnly blocks tool %s", spec.Name)
+		}
+	case "workspace":
+		return ""
+	case "full":
+		return ""
+	}
+	return ""
+}
+
+func requiresApproval(capabilities []string) bool {
+	return hasAnyCapability(capabilities, "workspaceWrite", "command", "networkRead", "networkWrite")
+}
+
+func hasSideEffect(capabilities []string) bool {
+	return hasAnyCapability(capabilities, "workspaceWrite", "command", "networkWrite")
+}
+
+func hasAnyCapability(capabilities []string, wants ...string) bool {
+	for _, capability := range capabilities {
+		for _, want := range wants {
+			if capability == want {
+				return true
+			}
 		}
 	}
 	return false

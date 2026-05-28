@@ -51,7 +51,7 @@ func (t *Tool) Run(ctx context.Context, input json.RawMessage) (tools.Result, er
 	cmd.Dir = t.workdir
 	cmd.Env = os.Environ()
 	for key, value := range t.env {
-		cmd.Env = append(cmd.Env, key+"="+value)
+		cmd.Env = append(cmd.Env, key+"="+os.ExpandEnv(value))
 	}
 	cmd.Stdin = bytes.NewReader(nil)
 	var stdout, stderr bytes.Buffer
@@ -80,7 +80,7 @@ func expandArgs(templates []string, input json.RawMessage, defaults map[string]a
 	for _, tmpl := range templates {
 		arg := tmpl
 		for {
-			start := strings.Index(arg, "{{.")
+			start := strings.Index(arg, "{{")
 			if start < 0 {
 				break
 			}
@@ -89,7 +89,8 @@ func expandArgs(templates []string, input json.RawMessage, defaults map[string]a
 				return nil, fmt.Errorf("unterminated arg template %q", tmpl)
 			}
 			end += start
-			key := strings.TrimSpace(arg[start+3 : end])
+			key := strings.TrimSpace(arg[start+2 : end])
+			key = strings.TrimPrefix(key, ".")
 			value, ok := values[key]
 			if !ok {
 				return nil, fmt.Errorf("missing input key %q for arg template %q", key, tmpl)

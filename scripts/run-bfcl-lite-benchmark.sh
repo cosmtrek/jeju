@@ -5,12 +5,19 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 suite_root="$repo_root/benchmarks/jeju-bfcl-lite"
 work_root="$repo_root/.jeju-dev/bfcl-lite"
 task_filter=""
+provider="${JEJU_BENCHMARK_PROVIDER:-${PROVIDER:-deepseek}}"
+model=""
+env_key=""
+base_url=""
 
 usage() {
   cat <<'USAGE'
 Usage: ./scripts/run-bfcl-lite-benchmark.sh [--task TASK_NAME] [--workdir DIR]
 
 Runs the Jeju BFCL Lite benchmark.
+
+Environment:
+  PROVIDER=deepseek|mimo
 USAGE
 }
 
@@ -36,8 +43,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
-  echo "DEEPSEEK_API_KEY is required for the default bfcl-lite benchmark agent." >&2
+case "$provider" in
+  deepseek)
+    model="${JEJU_DEEPSEEK_MODEL:-deepseek-v4-flash}"
+    env_key="${JEJU_DEEPSEEK_ENV_KEY:-DEEPSEEK_API_KEY}"
+    ;;
+  mimo)
+    model="${JEJU_MIMO_MODEL:-mimo-v2.5-pro}"
+    env_key="${JEJU_MIMO_ENV_KEY:-MIMO_API_KEY}"
+    base_url="${JEJU_MIMO_BASE_URL:-https://api.xiaomimimo.com/v1}"
+    ;;
+  *)
+    echo "supported benchmark providers: deepseek, mimo" >&2
+    exit 2
+    ;;
+esac
+
+if [[ -z "${!env_key:-}" ]]; then
+  echo "$env_key is required for the $provider bfcl-lite benchmark agent." >&2
   exit 2
 fi
 
@@ -77,6 +100,18 @@ for task in "${tasks[@]}"; do
 
   cp -R "$suite_root/agents" "$run_dir/agents"
   cp -R "$suite_root/prompts" "$run_dir/prompts"
+  JEJU_SCRIPT_PROVIDER="$provider" JEJU_SCRIPT_MODEL="$model" JEJU_SCRIPT_ENV_KEY="$env_key" JEJU_SCRIPT_BASE_URL="$base_url" perl -0pi -e '
+    s/preset: \w+/preset: $ENV{JEJU_SCRIPT_PROVIDER}/;
+    s/model: [^\n]+/model: $ENV{JEJU_SCRIPT_MODEL}/;
+    s/envKey: [^\n]+/envKey: $ENV{JEJU_SCRIPT_ENV_KEY}/;
+    if ($ENV{JEJU_SCRIPT_BASE_URL}) {
+      if (/baseUrl:/) {
+        s/baseUrl: [^\n]+/baseUrl: $ENV{JEJU_SCRIPT_BASE_URL}/;
+      } else {
+        s/(envKey: [^\n]+\n)/$1      baseUrl: $ENV{JEJU_SCRIPT_BASE_URL}\n/;
+      }
+    }
+  ' "$run_dir/agents/benchmark.agent.yaml"
   mkdir -p "$run_dir/workspace"
   cp -R "$suite_root/workspace" "$run_dir/workspace/app"
 

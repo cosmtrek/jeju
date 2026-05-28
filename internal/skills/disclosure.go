@@ -13,14 +13,12 @@ func DisclosureText(registry *Registry) string {
 	for _, skill := range registry.All() {
 		m := skill.Manifest
 		payload := map[string]any{
-			"name":         m.Metadata.Name,
-			"description":  m.Metadata.Description,
-			"when_to_use":  m.Disclosure.WhenToUse,
-			"capabilities": m.Disclosure.Capabilities,
-			"inputs":       m.Disclosure.Inputs,
-			"outputs":      m.Disclosure.Outputs,
-			"requires":     m.Disclosure.Requires,
-			"risk":         m.Disclosure.Risk,
+			"name":          m.Metadata.Name,
+			"description":   m.Metadata.Description,
+			"license":       m.Metadata.License,
+			"compatibility": m.Metadata.Compatibility,
+			"metadata":      m.Metadata.Metadata,
+			"allowed_tools": m.Metadata.AllowedTools,
 		}
 		data, _ := json.Marshal(payload)
 		b.WriteString("- ")

@@ -9,11 +9,11 @@ You must respond with exactly one Jeju action JSON object and no surrounding
 Markdown:
 
 ```json
-{"type":"tool_call","thought":"...","tool":"file_read","input":{"path":"relative/path"}}
+{"type":"tool_call","thought":"...","tool":"read","input":{"path":"relative/path"}}
 ```
 
 ```json
-{"type":"tool_call","thought":"...","tool":"file_write","input":{"path":"relative/path","content":"..."}}
+{"type":"tool_call","thought":"...","tool":"write","input":{"path":"relative/path","content":"..."}}
 ```
 
 ```json

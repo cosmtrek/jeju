@@ -33,7 +33,7 @@ func (c *MockClient) Generate(ctx context.Context, req Request) (Response, error
 		payload = map[string]any{
 			"type":    "tool_call",
 			"thought": "The task asks for a saved file, so I will write the requested notes into the workspace.",
-			"tool":    "file_write",
+			"tool":    "write",
 			"input": map[string]any{
 				"path":    mockWritePath(taskLower),
 				"content": mockReport(task),
@@ -42,7 +42,7 @@ func (c *MockClient) Generate(ctx context.Context, req Request) (Response, error
 	} else {
 		payload = map[string]any{
 			"type":    "final",
-			"thought": "The V0 mock model has enough information to finish.",
+			"thought": "The mock model has enough information to finish.",
 			"content": mockReport(task),
 		}
 	}
@@ -61,7 +61,7 @@ func (c *MockClient) Generate(ctx context.Context, req Request) (Response, error
 }
 
 func shouldMockWrite(taskLower, observations string) bool {
-	if strings.Contains(observations, "tool file_write completed") || strings.Contains(observations, "file_write ok") {
+	if strings.Contains(observations, "tool write completed") || strings.Contains(observations, "write ok") {
 		return false
 	}
 	return strings.Contains(taskLower, "notes.md") ||
@@ -86,7 +86,7 @@ func mockReport(task string) string {
 
 Task: %s
 
-This is a deterministic V0 mock response. It demonstrates the full Jeju run lifecycle: model action parsing, permission checking, tool execution, trajectory recording, final output, and rule-based evaluation.
+This is a deterministic mock response. It demonstrates the full Jeju run lifecycle: model action parsing, permission checking, tool execution, trajectory recording, final output, and rule-based evaluation.
 `, task)
 }
 

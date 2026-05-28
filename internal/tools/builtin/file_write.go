@@ -14,7 +14,9 @@ type FileWrite struct {
 }
 
 func NewFileWrite(spec tools.Spec, box sandbox.Sandbox) *FileWrite {
-	spec.Name = "file_write"
+	if spec.Name == "" {
+		spec.Name = "write"
+	}
 	return &FileWrite{spec: spec, box: box}
 }
 

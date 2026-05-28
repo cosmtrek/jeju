@@ -1,6 +1,6 @@
 PROVIDER ?= mock
 
-.PHONY: build test vet test-agent benchmark-terminal-lite benchmark-bfcl-lite
+.PHONY: build test vet test-agent build-deep-research-agent benchmark-terminal-lite benchmark-bfcl-lite
 
 build:
 	mkdir -p .jeju-dev/bin
@@ -14,6 +14,11 @@ vet:
 
 test-agent:
 	./scripts/run-agent.sh $(PROVIDER)
+
+build-deep-research-agent:
+	rm -rf .jeju-dev/deep-research-agent
+	mkdir -p .jeju-dev/deep-research-agent
+	cp -R tests/fixtures/deep-research/. .jeju-dev/deep-research-agent/
 
 benchmark-terminal-lite:
 	./scripts/run-terminal-lite-benchmark.sh
