@@ -16,6 +16,9 @@ func ApplyDefaults(m *AgentManifest) {
 			if provider.Thinking.Type == "" {
 				provider.Thinking.Type = "disabled"
 			}
+			if provider.ContextWindow == 0 {
+				provider.ContextWindow = 128000
+			}
 		case "mimo":
 			if provider.Type == "" {
 				provider.Type = "openaiCompatible"
@@ -29,12 +32,21 @@ func ApplyDefaults(m *AgentManifest) {
 			if provider.Thinking.Type == "" {
 				provider.Thinking.Type = "disabled"
 			}
+			if provider.ContextWindow == 0 {
+				provider.ContextWindow = 128000
+			}
+		}
+		if provider.Type == "mock" && provider.ContextWindow == 0 {
+			provider.ContextWindow = 128000
 		}
 		m.Models.Providers[name] = provider
 	}
 
 	if m.Runtime.Loop.Type == "" {
 		m.Runtime.Loop.Type = "react"
+	}
+	if m.Runtime.CompressionThreshold == 0 {
+		m.Runtime.CompressionThreshold = 0.8
 	}
 	if m.Runtime.Model == "" && len(m.Models.Providers) == 1 {
 		for name := range m.Models.Providers {

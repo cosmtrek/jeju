@@ -1,6 +1,6 @@
 PROVIDER ?= mock
 
-.PHONY: build test vet test-agent build-deep-research-agent benchmark-terminal-lite benchmark-bfcl-lite
+.PHONY: build test vet test-agent test-long-horizon-agent build-deep-research-agent benchmark-terminal-lite benchmark-bfcl-lite
 
 build:
 	mkdir -p .jeju-dev/bin
@@ -14,6 +14,9 @@ vet:
 
 test-agent:
 	./scripts/run-agent.sh $(PROVIDER)
+
+test-long-horizon-agent:
+	./scripts/run-long-horizon-agent.sh $(if $(filter mock,$(PROVIDER)),mimo,$(PROVIDER))
 
 build-deep-research-agent:
 	rm -rf .jeju-dev/deep-research-agent

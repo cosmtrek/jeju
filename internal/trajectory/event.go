@@ -15,6 +15,14 @@ const (
 	EventModelCompleted EventType = "model.completed"
 	EventModelFailed    EventType = "model.failed"
 
+	EventContextEstimated            EventType = "context.estimated"
+	EventContextSummaryStarted       EventType = "context.summary.started"
+	EventContextSummaryCompleted     EventType = "context.summary.completed"
+	EventContextSummaryFailed        EventType = "context.summary.failed"
+	EventContextCompressionStarted   EventType = "context.compression.started"
+	EventContextCompressionCompleted EventType = "context.compression.completed"
+	EventContextCompressionFailed    EventType = "context.compression.failed"
+
 	EventActionParsed      EventType = "action.parsed"
 	EventActionParseFailed EventType = "action.parse_failed"
 

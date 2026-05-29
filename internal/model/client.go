@@ -19,6 +19,7 @@ type ProviderConfig struct {
 	Temperature     *float64
 	Thinking        ThinkingConfig
 	MaxOutputTokens int
+	ContextWindow   int
 	TimeoutSec      int
 	ToolCalling     bool
 	JSONSchemaMode  bool

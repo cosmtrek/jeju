@@ -41,6 +41,12 @@ func TestApplyDefaultsKeepsOnlyEnvKeyForNamedProviders(t *testing.T) {
 			if provider.Thinking.Type != "disabled" {
 				t.Fatalf("expected thinking disabled for %s preset, got %q", tc.preset, provider.Thinking.Type)
 			}
+			if provider.ContextWindow != 128000 {
+				t.Fatalf("expected default context window for %s preset, got %d", tc.preset, provider.ContextWindow)
+			}
+			if manifest.Runtime.CompressionThreshold != 0.8 {
+				t.Fatalf("expected default compression threshold, got %v", manifest.Runtime.CompressionThreshold)
+			}
 			snapshot, err := yaml.Marshal(manifest)
 			if err != nil {
 				t.Fatalf("Marshal failed: %v", err)

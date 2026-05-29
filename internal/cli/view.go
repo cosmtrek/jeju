@@ -170,11 +170,38 @@ type stepView struct {
 	ReasoningContentType string
 	ReasoningContentNote string
 
+	// context compression applied before this step's model request
+	Compression *compressionView
+
 	// debug-only
 	InputRef       string
 	OutputRef      string
 	DebugArtifacts []artifactRefView
 	Events         []eventView
+}
+
+// compressionView summarizes the context-management activity recorded for a step
+// (token estimate, threshold, and any truncation/summary/degradation applied).
+type compressionView struct {
+	Triggered            bool
+	EstimatedTokens      int
+	ThresholdTokens      int
+	ContextWindow        int
+	EffectiveInputLimit  int
+	BeforeTokens         int
+	AfterTokens          int
+	Strategies           []string
+	StrategiesLabel      string
+	PreservedBlocks      int
+	TruncatedToolResults int
+	Summarized           bool
+	SummaryFailed        bool
+	SummaryTokensIn      int
+	SummaryTokensOut     int
+	SummaryRef           string
+	ReportRef            string
+	Failed               bool
+	Error                string
 }
 
 type toolCallView struct {
@@ -640,7 +667,72 @@ func applyEventToStep(step *stepView, event trajectory.Event, artifacts map[stri
 		// All artifact references go into debug; the main view uses dedicated fields
 		// (ShellStdout, FileContent, etc.) to surface the meaningful bits.
 		step.DebugArtifacts = append(step.DebugArtifacts, ref)
+	case trajectory.EventContextEstimated:
+		c := ensureCompression(step)
+		c.EstimatedTokens = intPayload(event.Payload, "estimated_tokens")
+		c.ThresholdTokens = intPayload(event.Payload, "threshold_tokens")
+		c.ContextWindow = intPayload(event.Payload, "context_window")
+		c.EffectiveInputLimit = intPayload(event.Payload, "effective_input_limit")
+		if boolPayload(event.Payload, "compression_required") {
+			c.Triggered = true
+		}
+	case trajectory.EventContextCompressionStarted:
+		c := ensureCompression(step)
+		c.Triggered = true
+		if c.BeforeTokens == 0 {
+			c.BeforeTokens = intPayload(event.Payload, "before_tokens")
+		}
+		if c.ThresholdTokens == 0 {
+			c.ThresholdTokens = intPayload(event.Payload, "threshold_tokens")
+		}
+	case trajectory.EventContextCompressionCompleted:
+		c := ensureCompression(step)
+		c.Triggered = true
+		c.BeforeTokens = intPayload(event.Payload, "before_tokens")
+		c.AfterTokens = intPayload(event.Payload, "after_tokens")
+		c.PreservedBlocks = intPayload(event.Payload, "preserved_blocks")
+		c.TruncatedToolResults = intPayload(event.Payload, "truncated_tool_results")
+		c.Strategies = stringSlicePayload(event.Payload, "strategies")
+		if ref := stringPayload(event.Payload, "summary_ref"); ref != "" {
+			c.SummaryRef = ref
+		}
+		if ref := stringPayload(event.Payload, "report_ref"); ref != "" {
+			c.ReportRef = ref
+		}
+	case trajectory.EventContextSummaryStarted:
+		c := ensureCompression(step)
+		c.Triggered = true
+		c.Summarized = true
+	case trajectory.EventContextSummaryCompleted:
+		c := ensureCompression(step)
+		c.Summarized = true
+		c.SummaryTokensIn = intPayload(event.Payload, "tokens_in")
+		c.SummaryTokensOut = intPayload(event.Payload, "tokens_out")
+	case trajectory.EventContextSummaryFailed:
+		c := ensureCompression(step)
+		c.SummaryFailed = true
+		if msg := stringPayload(event.Payload, "error"); msg != "" {
+			c.Error = msg
+		}
+	case trajectory.EventContextCompressionFailed:
+		c := ensureCompression(step)
+		c.Triggered = true
+		c.Failed = true
+		c.Error = stringPayload(event.Payload, "error")
+		if c.BeforeTokens == 0 {
+			c.BeforeTokens = intPayload(event.Payload, "before_tokens")
+		}
+		if c.AfterTokens == 0 {
+			c.AfterTokens = intPayload(event.Payload, "after_tokens")
+		}
 	}
+}
+
+func ensureCompression(step *stepView) *compressionView {
+	if step.Compression == nil {
+		step.Compression = &compressionView{}
+	}
+	return step.Compression
 }
 
 func applyToolOutput(tc *toolCallView, artifact artifactView) {
@@ -713,6 +805,9 @@ func finalizeStep(step *stepView) {
 	}
 	if step.Status == "" {
 		step.Status = "running"
+	}
+	if step.Compression != nil {
+		step.Compression.StrategiesLabel = strings.Join(step.Compression.Strategies, ", ")
 	}
 	step.Title = stepTitle(step)
 	step.TypeLabel, step.TypeClass = stepType(step)
@@ -865,6 +960,53 @@ func stringPayload(payload map[string]any, key string) string {
 		return text
 	}
 	return fmt.Sprint(value)
+}
+
+// intPayload reads a numeric payload field. Numbers decoded from JSONL arrive as
+// float64, so handle the common numeric kinds.
+func intPayload(payload map[string]any, key string) int {
+	if payload == nil {
+		return 0
+	}
+	switch value := payload[key].(type) {
+	case float64:
+		return int(value)
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case json.Number:
+		if n, err := value.Int64(); err == nil {
+			return int(n)
+		}
+	}
+	return 0
+}
+
+func boolPayload(payload map[string]any, key string) bool {
+	if payload == nil {
+		return false
+	}
+	value, _ := payload[key].(bool)
+	return value
+}
+
+// stringSlicePayload reads a string-array payload field (e.g. compression strategies).
+func stringSlicePayload(payload map[string]any, key string) []string {
+	if payload == nil {
+		return nil
+	}
+	raw, ok := payload[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if text, ok := item.(string); ok {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 func marshalIndented(value any) (string, error) {
@@ -1141,6 +1283,32 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
     .step-icon.ok { color: var(--ok); }
     .step-icon.bad { color: var(--bad); }
     .step-icon.warn { color: var(--warn); }
+    .compression {
+      margin: 0 0 10px;
+      padding: 8px 10px;
+      border: 1px solid #e6dcfb;
+      background: #faf7ff;
+      border-radius: 8px;
+      font-size: 12.5px;
+    }
+    .compression.failed { border-color: #fbcfcf; background: #fef5f5; }
+    .compression-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .compression-icon { color: #7c3aed; font-weight: 600; }
+    .compression-label { font-weight: 600; color: #5b21b6; }
+    .compression.failed .compression-label { color: var(--bad); }
+    .compression-tokens { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: auto; }
+    .compression-body { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+    .compression-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 999px;
+      background: #f1ecfb;
+      color: #5b21b6;
+      font-size: 11.5px;
+      font-variant-numeric: tabular-nums;
+    }
+    .chip.subtle { background: var(--soft); color: var(--muted); }
     .step-title {
       flex: 1;
       min-width: 0;
@@ -1534,6 +1702,7 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
     </span>
   </div>
   <div class="step-body">
+    {{if and .Compression .Compression.Triggered}}{{template "compression" .Compression}}{{end}}
     {{if .Thought}}<div class="thought">{{.Thought}}</div>{{end}}
     {{if .ReasoningRef}}
       <details class="thinking">
@@ -1559,6 +1728,35 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
       {{else}}
         {{range .ToolCalls}}{{template "toolcallrow" .}}{{end}}
       {{end}}
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "compression"}}
+<div class="compression{{if .Failed}} failed{{end}}">
+  <div class="compression-head">
+    <span class="compression-icon" aria-hidden="true">⊟</span>
+    <span class="compression-label">Context compressed</span>
+    {{if .Failed}}<span class="badge bad">overflow</span>{{end}}
+    {{if .SummaryFailed}}<span class="badge warn">summary failed</span>{{end}}
+    {{if .BeforeTokens}}<span class="compression-tokens">{{.BeforeTokens}} → {{.AfterTokens}} tok{{if .ThresholdTokens}} · threshold {{.ThresholdTokens}}{{end}}</span>{{end}}
+  </div>
+  <div class="compression-body">
+    {{if .StrategiesLabel}}<div><span class="subtle">strategy:</span> {{.StrategiesLabel}}</div>{{end}}
+    <div class="compression-meta">
+      {{if .PreservedBlocks}}<span class="chip">{{.PreservedBlocks}} recent block{{if ne .PreservedBlocks 1}}s{{end}} kept</span>{{end}}
+      {{if .TruncatedToolResults}}<span class="chip">{{.TruncatedToolResults}} tool result{{if ne .TruncatedToolResults 1}}s{{end}} truncated</span>{{end}}
+      {{if .Summarized}}<span class="chip">summary {{.SummaryTokensIn}}→{{.SummaryTokensOut}} tok</span>{{end}}
+      {{if .ContextWindow}}<span class="chip subtle">window {{.ContextWindow}}{{if .EffectiveInputLimit}} · input ≤ {{.EffectiveInputLimit}}{{end}}</span>{{end}}
+    </div>
+    {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
+    {{if or .SummaryRef .ReportRef}}
+      <div class="subtle ref">
+        {{if .SummaryRef}}summary: <a class="artifact-link" href="#" data-target="a-{{.SummaryRef}}">{{.SummaryRef}}</a>{{end}}
+        {{if and .SummaryRef .ReportRef}} · {{end}}
+        {{if .ReportRef}}report: <a class="artifact-link" href="#" data-target="a-{{.ReportRef}}">{{.ReportRef}}</a>{{end}}
+      </div>
     {{end}}
   </div>
 </div>

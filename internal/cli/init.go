@@ -117,6 +117,7 @@ models:
     primary:
       type: mock
       model: mock-react
+      contextWindow: 128000
 
 instructions:
   system: ../prompts/%[1]s.md
@@ -125,6 +126,7 @@ runtime:
   model: primary
   loop:
     type: react
+  compressionThreshold: 0.8
   limits:
     maxSteps: 8
     maxDurationSec: 300

@@ -28,16 +28,20 @@ type RunState struct {
 	EndedAt   *time.Time
 
 	Messages     []model.Message
+	Summary      string
 	Observations []string
 	Errors       []RunError
 	Final        string
 
-	ModelCalls        int
-	ToolCalls         int
-	ModelErrors       int
-	ToolErrors        int
-	PermissionDenied  int
-	ConsecutiveErrors int
+	ModelCalls            int
+	ToolCalls             int
+	ModelErrors           int
+	ToolErrors            int
+	PermissionDenied      int
+	ConsecutiveErrors     int
+	LastTokenEstimate     int
+	LastRawTokenEstimate  int
+	TokenCorrectionFactor float64
 }
 
 type RunError struct {
@@ -61,6 +65,7 @@ func NewRunState(runID, agent, input string) *RunState {
 		Messages: []model.Message{
 			{Role: "user", Content: input},
 		},
+		TokenCorrectionFactor: 1,
 	}
 }
 

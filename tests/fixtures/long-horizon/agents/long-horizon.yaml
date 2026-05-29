@@ -1,0 +1,86 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: long-horizon
+  description: "Long horizon fixture for context compression testing"
+
+models:
+  providers:
+    primary:
+      type: mock
+      model: mock-react
+      temperature: 0.2
+      maxOutputTokens: 1024
+      contextWindow: 16000
+      timeoutSec: 120
+
+instructions:
+  system: ../prompts/long-horizon.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.4
+  limits:
+    maxSteps: 24
+    maxDurationSec: 900
+    maxToolCalls: 20
+    maxConsecutiveErrors: 3
+
+workspace:
+  path: ../workspace/long-horizon
+
+tools:
+  - write
+
+  - name: chapter_probe
+    uses: command
+    description: "Return a large deterministic chapter payload for long-horizon compression tests"
+    capabilities:
+      - command
+    command:
+      run: ../workspace/long-horizon/tools/chapter_probe.py
+      args:
+        - --chapter
+        - "{{chapter}}"
+        - --paragraphs
+        - "{{paragraphs}}"
+      timeoutSec: 10
+    input:
+      schema:
+        type: object
+        required:
+          - chapter
+        properties:
+          chapter:
+            type: integer
+            description: "Chapter number to inspect, from 1 through 8."
+          paragraphs:
+            type: integer
+            description: "Number of verbose paragraphs to emit for this chapter."
+            default: 12
+
+skills:
+  dirs:
+    - ../skills
+  active:
+    - long-horizon-audit
+
+permissions:
+  access: workspace
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic_trajectory
+      uses: rules
+      rules:
+        - finalAnswerExists
+        - noModelError
+        - maxStepsNotExceeded
+        - maxToolCallsNotExceeded
+        - noPermissionDenied
+        - runCompleted

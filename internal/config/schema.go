@@ -40,6 +40,7 @@ type ModelConfig struct {
 	Temperature     *float64       `yaml:"temperature,omitempty"`
 	Thinking        ThinkingConfig `yaml:"thinking,omitempty"`
 	MaxOutputTokens int            `yaml:"maxOutputTokens,omitempty"`
+	ContextWindow   int            `yaml:"contextWindow,omitempty"`
 	TimeoutSec      int            `yaml:"timeoutSec,omitempty"`
 }
 
@@ -53,9 +54,10 @@ type InstructionsConfig struct {
 }
 
 type RuntimeConfig struct {
-	Model  string        `yaml:"model,omitempty"`
-	Loop   LoopConfig    `yaml:"loop,omitempty"`
-	Limits RuntimeLimits `yaml:"limits,omitempty"`
+	Model                string        `yaml:"model,omitempty"`
+	Loop                 LoopConfig    `yaml:"loop,omitempty"`
+	CompressionThreshold float64       `yaml:"compressionThreshold,omitempty"`
+	Limits               RuntimeLimits `yaml:"limits,omitempty"`
 }
 
 type LoopConfig struct {

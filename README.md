@@ -109,7 +109,7 @@ permissions:
 
 The important sections are:
 
-- `models`: registers model providers. The default scaffold uses `mock`; `openaiCompatible` can point at real Chat Completions-compatible endpoints.
+- `models`: registers model providers. The default scaffold uses `mock`; `openaiCompatible` can point at real Chat Completions-compatible endpoints and must have a known `contextWindow` for request budgeting.
 - `instructions`: loads the system prompt from a file so behavior can be reviewed and versioned.
 - `runtime`: selects the model, loop type, and execution limits.
 - `workspace`: defines where file and shell work is allowed.
@@ -146,7 +146,7 @@ go run ../cmd/jeju runs
 go run ../cmd/jeju inspect <run_id>
 ```
 
-Run `validate`, `run`, `runs`, and `inspect` from the generated working directory. To use a real model, change the manifest provider from `mock` to `openaiCompatible` and point it at a Chat Completions-compatible endpoint.
+Run `validate`, `run`, `runs`, and `inspect` from the generated working directory. To use a real model, change the manifest provider from `mock` to `openaiCompatible`, point it at a Chat Completions-compatible endpoint, and set `contextWindow` unless you use a preset that fills it.
 
 ## Tests
 
@@ -182,6 +182,13 @@ To test with MiMo V2.5 Pro:
 ```bash
 export MIMO_API_KEY=sk-...
 make test-agent PROVIDER=mimo
+```
+
+To stress context compression with a long-horizon native tool-calling run:
+
+```bash
+export MIMO_API_KEY=sk-...
+make test-long-horizon-agent PROVIDER=mimo
 ```
 
 Set `JEJU_MIMO_BASE_URL` if you need to override the MiMo endpoint.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"jeju/internal/compiler"
+	"jeju/internal/contextmgr"
 	"jeju/internal/evaluate"
 	"jeju/internal/model"
 	"jeju/internal/policy"
@@ -118,7 +119,13 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 	if !ok {
 		return fmt.Errorf("model %q is not compiled", modelName)
 	}
-	req := r.buildModelRequest(agent, state, cfg)
+	req, err := r.prepareModelRequest(ctx, agent, recorder, state, client, cfg)
+	if err != nil {
+		if contextmgr.IsOverflow(err) {
+			state.Status = StatusFailed
+		}
+		return err
+	}
 	inputData, _ := json.MarshalIndent(req, "", "  ")
 	inputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "model_input", "", "json"), inputData, "model_input")
 	recorder.Emit(ctx, trajectory.EventModelStarted, state.RunID, state.Step, "model:"+modelName, map[string]any{
@@ -136,6 +143,7 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 		})
 		return err
 	}
+	state.TokenCorrectionFactor = contextmgr.UpdateCorrectionFactor(state.TokenCorrectionFactor, state.LastRawTokenEstimate, resp.Usage.InputTokens)
 	state.ResetErrors()
 	reasoningRef := ""
 	if resp.ReasoningContent != "" {
@@ -220,6 +228,290 @@ func (r *Runtime) buildModelRequest(agent *compiler.CompiledAgent, state *RunSta
 			"observations": strings.Join(state.Observations, "\n"),
 		},
 	}
+}
+
+func (r *Runtime) prepareModelRequest(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, client model.Client, cfg model.ProviderConfig) (model.Request, error) {
+	req := r.buildModelRequest(agent, state, cfg)
+	contextOpts := contextmgr.Options{
+		ContextWindow:    cfg.ContextWindow,
+		MaxOutputTokens:  cfg.MaxOutputTokens,
+		Threshold:        agent.Config.Runtime.CompressionThreshold,
+		CorrectionFactor: state.TokenCorrectionFactor,
+	}
+	result, err := contextmgr.Prepare(req, state.Messages, state.Summary, contextOpts)
+	compressionRequired := result.Report.ContextWindow > 0 && result.Report.BeforeTokens > result.Report.ThresholdTokens
+	beforeRef := ""
+	afterRef := ""
+	if compressionRequired || result.Report.Compressed || err != nil {
+		beforeReq := contextmgr.RequestWithSummary(req, state.Messages, state.Summary)
+		beforeData, _ := json.MarshalIndent(beforeReq, "", "  ")
+		beforeRef, _ = writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_before", "", "json"), beforeData, "context_before")
+		if result.PendingSummary == nil {
+			afterData, _ := json.MarshalIndent(result.Request, "", "  ")
+			afterRef, _ = writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_after", "", "json"), afterData, "context_after")
+		}
+	}
+	reportRef := ""
+	writeReport := func() string {
+		reportData, _ := json.MarshalIndent(result.Report, "", "  ")
+		ref, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_report", "", "json"), reportData, "context_report")
+		return ref
+	}
+	if result.PendingSummary == nil {
+		reportRef = writeReport()
+	}
+	recorder.Emit(ctx, trajectory.EventContextEstimated, state.RunID, state.Step, "context", map[string]any{
+		"estimator":             result.Report.Estimator,
+		"estimated_tokens":      result.Report.BeforeTokens,
+		"raw_estimated_tokens":  result.Report.BeforeRawTokens,
+		"threshold_tokens":      result.Report.ThresholdTokens,
+		"context_window":        result.Report.ContextWindow,
+		"max_output_tokens":     result.Report.MaxOutputTokens,
+		"effective_input_limit": result.Report.EffectiveInputLimit,
+		"compression_required":  compressionRequired,
+		"correction_factor":     result.Report.CorrectionFactor,
+		"report_ref":            reportRef,
+		"before_ref":            beforeRef,
+	})
+	if compressionRequired {
+		recorder.Emit(ctx, trajectory.EventContextCompressionStarted, state.RunID, state.Step, "context", map[string]any{
+			"before_tokens":    result.Report.BeforeTokens,
+			"threshold_tokens": result.Report.ThresholdTokens,
+			"before_ref":       beforeRef,
+		})
+	}
+	if err != nil {
+		recorder.Emit(ctx, trajectory.EventContextCompressionFailed, state.RunID, state.Step, "context", map[string]any{
+			"error":                  err.Error(),
+			"before_tokens":          result.Report.BeforeTokens,
+			"after_tokens":           result.Report.AfterTokens,
+			"effective_input_limit":  result.Report.EffectiveInputLimit,
+			"strategies":             result.Report.Strategies,
+			"truncated_tool_results": result.Report.TruncatedToolResult,
+			"before_ref":             beforeRef,
+			"after_ref":              afterRef,
+			"report_ref":             reportRef,
+		})
+		return model.Request{}, err
+	}
+	if result.PendingSummary != nil {
+		summary, summaryErr := r.summarizeContext(ctx, agent, recorder, state, client, cfg, *result.PendingSummary)
+		if summaryErr != nil {
+			result = contextmgr.DegradeSummary(result, contextOpts)
+		} else {
+			result = contextmgr.CompleteSummary(result, summary, contextOpts)
+		}
+		afterData, _ := json.MarshalIndent(result.Request, "", "  ")
+		afterRef, _ = writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_after", "", "json"), afterData, "context_after")
+		reportRef = writeReport()
+	}
+	if err := contextmgr.Overflow(result, contextOpts); err != nil {
+		recorder.Emit(ctx, trajectory.EventContextCompressionFailed, state.RunID, state.Step, "context", map[string]any{
+			"error":                  err.Error(),
+			"before_tokens":          result.Report.BeforeTokens,
+			"after_tokens":           result.Report.AfterTokens,
+			"effective_input_limit":  result.Report.EffectiveInputLimit,
+			"strategies":             result.Report.Strategies,
+			"truncated_tool_results": result.Report.TruncatedToolResult,
+			"before_ref":             beforeRef,
+			"after_ref":              afterRef,
+			"report_ref":             reportRef,
+		})
+		return model.Request{}, err
+	}
+	if result.Report.Compressed {
+		if result.Summary != "" {
+			summaryRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_summary", "", "md"), []byte(result.Summary), "context_summary")
+			recorder.Emit(ctx, trajectory.EventContextCompressionCompleted, state.RunID, state.Step, "context", map[string]any{
+				"before_tokens":          result.Report.BeforeTokens,
+				"after_tokens":           result.Report.AfterTokens,
+				"strategies":             result.Report.Strategies,
+				"preserved_blocks":       result.Report.PreservedBlocks,
+				"truncated_tool_results": result.Report.TruncatedToolResult,
+				"summary_ref":            summaryRef,
+				"before_ref":             beforeRef,
+				"after_ref":              afterRef,
+				"report_ref":             reportRef,
+			})
+		} else {
+			recorder.Emit(ctx, trajectory.EventContextCompressionCompleted, state.RunID, state.Step, "context", map[string]any{
+				"before_tokens":          result.Report.BeforeTokens,
+				"after_tokens":           result.Report.AfterTokens,
+				"strategies":             result.Report.Strategies,
+				"preserved_blocks":       result.Report.PreservedBlocks,
+				"truncated_tool_results": result.Report.TruncatedToolResult,
+				"before_ref":             beforeRef,
+				"after_ref":              afterRef,
+				"report_ref":             reportRef,
+			})
+		}
+	}
+	state.Messages = result.StateMessages
+	state.Summary = result.Summary
+	state.LastTokenEstimate = result.Report.AfterTokens
+	state.LastRawTokenEstimate = result.Report.AfterRawTokens
+	return result.Request, nil
+}
+
+func (r *Runtime) summarizeContext(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, client model.Client, cfg model.ProviderConfig, summaryReq contextmgr.SummaryRequest) (string, error) {
+	req := model.Request{
+		Model:     cfg.Model,
+		Messages:  summaryMessages(summaryReq, cfg),
+		MaxTokens: summaryMaxTokens(cfg.MaxOutputTokens),
+		ResponseFormat: &model.ResponseFormat{
+			Type:   "jsonSchema",
+			Name:   "context_summary",
+			Strict: cfg.JSONSchemaMode,
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"summary": map[string]any{"type": "string"},
+				},
+				"required":             []string{"summary"},
+				"additionalProperties": false,
+			},
+		},
+		Metadata: map[string]any{
+			"task": state.Input,
+			"step": state.Step,
+			"kind": "context_summary",
+		},
+	}
+	rawTokens := contextmgr.EstimateRequestTokensRaw(req)
+	effectiveLimit := cfg.ContextWindow - req.MaxTokens
+	inputData, _ := json.MarshalIndent(req, "", "  ")
+	inputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_summary_input", "", "json"), inputData, "context_summary_input")
+	recorder.Emit(ctx, trajectory.EventContextSummaryStarted, state.RunID, state.Step, "model:"+cfg.Name, map[string]any{
+		"provider":  cfg.Provider,
+		"model":     cfg.Model,
+		"input_ref": inputRef,
+	})
+	if cfg.ContextWindow > 0 && rawTokens > effectiveLimit {
+		err := fmt.Errorf("context summary request estimate %d exceeds effective input limit %d", rawTokens, effectiveLimit)
+		recorder.Emit(ctx, trajectory.EventContextSummaryFailed, state.RunID, state.Step, "model:"+cfg.Name, map[string]any{
+			"error":     err.Error(),
+			"input_ref": inputRef,
+		})
+		return "", err
+	}
+	resp, err := client.Generate(ctx, req)
+	state.ModelCalls++
+	if err != nil {
+		state.ModelErrors++
+		recorder.Emit(ctx, trajectory.EventContextSummaryFailed, state.RunID, state.Step, "model:"+cfg.Name, map[string]any{
+			"error":     err.Error(),
+			"input_ref": inputRef,
+		})
+		return "", err
+	}
+	outputData := []byte(resp.Text)
+	outputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_summary_output", "", "txt"), outputData, "context_summary_output")
+	summary, err := parseSummaryResponse(resp.Text)
+	if err != nil {
+		state.ModelErrors++
+		recorder.Emit(ctx, trajectory.EventContextSummaryFailed, state.RunID, state.Step, "model:"+cfg.Name, map[string]any{
+			"error":      err.Error(),
+			"input_ref":  inputRef,
+			"output_ref": outputRef,
+		})
+		return "", err
+	}
+	recorder.Emit(ctx, trajectory.EventContextSummaryCompleted, state.RunID, state.Step, "model:"+cfg.Name, map[string]any{
+		"provider":     resp.Provider,
+		"model":        resp.Model,
+		"input_ref":    inputRef,
+		"output_ref":   outputRef,
+		"latency_ms":   resp.LatencyMS,
+		"tokens_in":    resp.Usage.InputTokens,
+		"tokens_out":   resp.Usage.OutputTokens,
+		"tokens_total": resp.Usage.TotalTokens,
+	})
+	return summary, nil
+}
+
+func summaryMessages(req contextmgr.SummaryRequest, cfg model.ProviderConfig) []model.Message {
+	var b strings.Builder
+	b.WriteString("Update the conversation summary for an agent run.\n")
+	b.WriteString("Return only a JSON object with a string field named summary.\n")
+	b.WriteString("Preserve user requirements, decisions, tool findings, file paths, errors, and unresolved work. Do not invent facts.\n")
+	if strings.TrimSpace(req.PreviousSummary) != "" {
+		b.WriteString("\n# Previous Summary\n")
+		b.WriteString(strings.TrimSpace(req.PreviousSummary))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n# Newly Evicted Messages\n")
+	messageBudget := summaryMessageBudget(cfg)
+	for i, message := range req.Messages {
+		b.WriteString(fmt.Sprintf("\n## Message %d role=%s\n", i+1, message.Role))
+		if message.ToolCallID != "" {
+			b.WriteString("tool_call_id: ")
+			b.WriteString(message.ToolCallID)
+			b.WriteString("\n")
+		}
+		if len(message.ToolCalls) > 0 {
+			calls, _ := json.Marshal(message.ToolCalls)
+			b.WriteString("tool_calls: ")
+			b.Write(calls)
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(message.Content) != "" {
+			b.WriteString(truncateSummaryContent(message.Content, messageBudget))
+			b.WriteString("\n")
+		}
+	}
+	return []model.Message{
+		{Role: "system", Content: "You summarize context for Jeju, a local agent runtime."},
+		{Role: "user", Content: b.String()},
+	}
+}
+
+func summaryMaxTokens(maxOutputTokens int) int {
+	if maxOutputTokens <= 0 || maxOutputTokens > 1024 {
+		return 1024
+	}
+	return maxOutputTokens
+}
+
+func summaryMessageBudget(cfg model.ProviderConfig) int {
+	limit := cfg.ContextWindow - summaryMaxTokens(cfg.MaxOutputTokens)
+	if limit <= 0 {
+		return 512
+	}
+	chars := limit * 3 / 8
+	if chars < 512 {
+		return 512
+	}
+	if chars > 6000 {
+		return 6000
+	}
+	return chars
+}
+
+func truncateSummaryContent(text string, maxChars int) string {
+	runes := []rune(text)
+	if len(runes) <= maxChars {
+		return text
+	}
+	head := maxChars * 2 / 3
+	tail := maxChars / 3
+	if head+tail >= len(runes) {
+		return text
+	}
+	return string(runes[:head]) + fmt.Sprintf("\n[Jeju truncated summary input: omitted approximately %d characters]\n", len(runes)-head-tail) + string(runes[len(runes)-tail:])
+}
+
+func parseSummaryResponse(text string) (string, error) {
+	var envelope struct {
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(text), &envelope); err != nil {
+		return "", fmt.Errorf("context summary response is not valid JSON: %w", err)
+	}
+	summary := strings.TrimSpace(envelope.Summary)
+	if summary == "" {
+		return "", fmt.Errorf("context summary response missing non-empty summary")
+	}
+	return summary, nil
 }
 
 func nativeToolDefinitions(specs []tools.Spec, cfg model.ProviderConfig) []model.ToolDefinition {

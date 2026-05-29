@@ -106,6 +106,7 @@ func compileModels(cfg config.ModelsConfig) (*model.Registry, error) {
 				Effort: item.Thinking.Effort,
 			},
 			MaxOutputTokens: item.MaxOutputTokens,
+			ContextWindow:   item.ContextWindow,
 			TimeoutSec:      item.TimeoutSec,
 		}
 		switch item.Type {

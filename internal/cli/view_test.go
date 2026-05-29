@@ -131,6 +131,70 @@ func TestBuildStepViewsMultipleToolCalls(t *testing.T) {
 	}
 }
 
+func TestBuildStepViewsContextCompression(t *testing.T) {
+	runID := "run-compress"
+	events := []trajectory.Event{
+		{ID: "e1", Type: trajectory.EventContextEstimated, RunID: runID, Step: 6, Actor: "context", Payload: map[string]any{
+			"estimated_tokens": float64(6650), "threshold_tokens": float64(5990), "context_window": float64(16000),
+			"effective_input_limit": float64(14976), "compression_required": true,
+		}},
+		{ID: "e2", Type: trajectory.EventContextCompressionStarted, RunID: runID, Step: 6, Actor: "context", Payload: map[string]any{"before_tokens": float64(6650), "threshold_tokens": float64(5990)}},
+		{ID: "e3", Type: trajectory.EventContextSummaryStarted, RunID: runID, Step: 6, Actor: "model:primary", Payload: map[string]any{}},
+		{ID: "e4", Type: trajectory.EventContextSummaryCompleted, RunID: runID, Step: 6, Actor: "model:primary", Payload: map[string]any{"tokens_in": float64(565), "tokens_out": float64(136)}},
+		{ID: "e5", Type: trajectory.EventContextCompressionCompleted, RunID: runID, Step: 6, Actor: "context", Payload: map[string]any{
+			"before_tokens": float64(6650), "after_tokens": float64(5691), "preserved_blocks": float64(4),
+			"truncated_tool_results": float64(1), "strategies": []any{"tool_result_truncate", "summary"},
+			"summary_ref": "artifacts/step006_context_summary.md", "report_ref": "artifacts/step006_context_report.json",
+		}},
+		{ID: "e6", Type: trajectory.EventModelStarted, RunID: runID, Step: 6, Actor: "model:primary", Payload: map[string]any{"input_ref": "artifacts/step006_model_input.json"}},
+		{ID: "e7", Type: trajectory.EventStepCompleted, RunID: runID, Step: 6, Actor: "runtime", Payload: map[string]any{"status": "running"}},
+	}
+
+	steps := buildStepViews(events, map[string]artifactView{}, "")
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(steps))
+	}
+	c := steps[0].Compression
+	if c == nil {
+		t.Fatal("expected compression view to be populated")
+	}
+	if !c.Triggered {
+		t.Fatal("expected compression to be marked triggered")
+	}
+	if c.BeforeTokens != 6650 || c.AfterTokens != 5691 || c.ThresholdTokens != 5990 {
+		t.Fatalf("unexpected token figures: %+v", c)
+	}
+	if c.PreservedBlocks != 4 || c.TruncatedToolResults != 1 {
+		t.Fatalf("unexpected block/truncation counts: %+v", c)
+	}
+	if !c.Summarized || c.SummaryTokensIn != 565 || c.SummaryTokensOut != 136 {
+		t.Fatalf("summary not captured: %+v", c)
+	}
+	if c.StrategiesLabel != "tool_result_truncate, summary" {
+		t.Fatalf("unexpected strategies label: %q", c.StrategiesLabel)
+	}
+	if c.SummaryRef == "" || c.ReportRef == "" {
+		t.Fatalf("artifact refs not captured: %+v", c)
+	}
+}
+
+func TestBuildStepViewsContextEstimateOnlyNoPanel(t *testing.T) {
+	runID := "run-noop"
+	events := []trajectory.Event{
+		{ID: "e1", Type: trajectory.EventContextEstimated, RunID: runID, Step: 1, Actor: "context", Payload: map[string]any{
+			"estimated_tokens": float64(1200), "threshold_tokens": float64(5990), "context_window": float64(16000), "compression_required": false,
+		}},
+		{ID: "e2", Type: trajectory.EventStepCompleted, RunID: runID, Step: 1, Actor: "runtime", Payload: map[string]any{"status": "running"}},
+	}
+	steps := buildStepViews(events, map[string]artifactView{}, "")
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(steps))
+	}
+	if c := steps[0].Compression; c != nil && c.Triggered {
+		t.Fatalf("expected no triggered compression panel for sub-threshold estimate: %+v", c)
+	}
+}
+
 func writeTrajectory(path string, events []trajectory.Event) error {
 	file, err := os.Create(path)
 	if err != nil {

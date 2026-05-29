@@ -195,6 +195,58 @@ func TestOpenAICompatibleClientSendsToolsAndParsesToolCalls(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleClientDoesNotForceJSONModeWhenToolsArePresent(t *testing.T) {
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"test-model",
+			"choices":[{
+				"message":{
+					"role":"assistant",
+					"content":"",
+					"tool_calls":[{
+						"id":"call_1",
+						"type":"function",
+						"function":{"name":"write","arguments":"{\"path\":\"notes.md\",\"content\":\"hello\"}"}
+					}]
+				}
+			}],
+			"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}
+		}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("JEJU_TEST_API_KEY", "test")
+	client := NewOpenAICompatibleClient(ProviderConfig{
+		Provider:    "mimo",
+		Model:       "test-model",
+		BaseURL:     server.URL,
+		EnvKey:      "JEJU_TEST_API_KEY",
+		JSONMode:    true,
+		ToolCalling: true,
+	})
+
+	if _, err := client.Generate(context.Background(), Request{
+		Messages: []Message{{Role: "user", Content: "hello"}},
+		Tools: []ToolDefinition{{
+			Name:       "write",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+		}},
+	}); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if _, ok := request["response_format"]; ok {
+		t.Fatalf("did not expect automatic JSON response_format with tools: %#v", request["response_format"])
+	}
+	if request["tool_choice"] != "auto" {
+		t.Fatalf("expected tool_choice auto, got %#v", request["tool_choice"])
+	}
+}
+
 func TestOpenAICompatibleClientReplaysReasoningContent(t *testing.T) {
 	var request map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

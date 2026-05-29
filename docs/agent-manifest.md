@@ -32,6 +32,7 @@ models:
       thinking:
         type: disabled
       maxOutputTokens: 2048
+      contextWindow: 128000
       timeoutSec: 60
 
 instructions:
@@ -41,6 +42,7 @@ runtime:
   model: primary
   loop:
     type: react
+  compressionThreshold: 0.8
   limits:
     maxSteps: 20
     maxDurationSec: 900
@@ -158,6 +160,8 @@ models:
       envKey: DEEPSEEK_API_KEY
       thinking:
         type: disabled
+      maxOutputTokens: 2048
+      contextWindow: 128000
 ```
 
 Provider fields:
@@ -172,7 +176,8 @@ Provider fields:
 | `temperature` | no | Sampling temperature. |
 | `thinking.type` | no | `auto`, `disabled`, or `enabled`. DeepSeek and MiMo presets default to `disabled`; when enabled, Jeju records provider reasoning content and replays it on later tool turns. |
 | `thinking.effort` | no | Provider-specific reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
-| `maxOutputTokens` | no | Maximum output tokens. |
+| `maxOutputTokens` | no | Maximum output tokens. Jeju reserves this amount when budgeting input context. |
+| `contextWindow` | no | Total model context window used for request-time token budgeting. Presets fill common defaults; custom `openaiCompatible` providers must set it explicitly. |
 | `timeoutSec` | no | Model request timeout. |
 
 `runtime.model` selects the provider used by the agent loop. If omitted, Jeju uses the single configured provider; with multiple providers it must be explicit.
@@ -190,6 +195,7 @@ runtime:
   model: primary
   loop:
     type: react
+  compressionThreshold: 0.8
   limits:
     maxSteps: 20
     maxDurationSec: 900
@@ -198,6 +204,8 @@ runtime:
 ```
 
 `loop.type` currently supports `react`. The action protocol is selected internally from the model provider and capabilities; it is not a manifest field.
+
+`compressionThreshold` defaults to `0.8`. Before each model request, Jeju estimates input tokens for prompt layers, message history, tools, and response schema. The effective input budget is `contextWindow - maxOutputTokens`; compression starts when the estimate exceeds `effectiveInputBudget * compressionThreshold`, and the run fails before the provider call if the compressed request still exceeds the effective budget. Jeju first truncates older tool results, then asks the configured runtime model to update a rolling summary from the previous summary plus newly evicted blocks, then applies emergency truncation to recent tool results if needed. Summary inputs are capped before the summary model call; if the summary call fails, Jeju degrades by dropping the evicted blocks and preserving the previous summary plus recent raw messages instead of retrying the same failing summary call. The previous summary is stored separately from recent raw messages, so later compression summarizes only newly evicted raw messages together with the prior summary rather than re-summarizing the original messages. Context estimates, before/after snapshots, summary model calls, summaries, and compression decisions are recorded in the trajectory and run artifacts.
 
 ## Tools
 

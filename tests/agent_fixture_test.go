@@ -236,6 +236,61 @@ func TestAgentFixtures(t *testing.T) {
 			t.Fatalf("active skill instructions should be the final contextual user layer before task input: %+v", last)
 		}
 	})
+
+	t.Run("long horizon fixture compiles", func(t *testing.T) {
+		tmp := t.TempDir()
+		workdir := filepath.Join(tmp, "long-horizon")
+		copyDir(t, fixturePath(t, "long-horizon"), workdir)
+
+		restoreCWD := chdir(t, workdir)
+		defer restoreCWD()
+
+		manifest, _, err := config.LoadFile("agents/long-horizon.yaml")
+		if err != nil {
+			t.Fatalf("LoadFile failed: %v", err)
+		}
+		if err := config.Validate(manifest); err != nil {
+			t.Fatalf("Validate failed: %v", err)
+		}
+		if manifest.Runtime.CompressionThreshold != 0.4 {
+			t.Fatalf("expected compression threshold 0.4, got %v", manifest.Runtime.CompressionThreshold)
+		}
+		provider := manifest.Models.Providers["primary"]
+		if provider.ContextWindow != 16000 || provider.MaxOutputTokens != 1024 {
+			t.Fatalf("unexpected compression budget provider config: %+v", provider)
+		}
+
+		agent, err := compiler.Compile("agents/long-horizon.yaml")
+		if err != nil {
+			t.Fatalf("Compile failed: %v", err)
+		}
+		if _, ok := agent.Tools.Get("chapter_probe"); !ok {
+			t.Fatal("chapter_probe tool missing")
+		}
+		if _, ok := agent.Tools.Get("write"); !ok {
+			t.Fatal("write tool missing")
+		}
+		if _, ok := agent.Skills.Get("long-horizon-audit"); !ok {
+			t.Fatal("long-horizon-audit skill missing")
+		}
+		prompt := agent.SystemPrompt()
+		if !strings.Contains(prompt, "chapter_probe") ||
+			!strings.Contains(prompt, "reports/long-horizon-summary.md") {
+			t.Fatalf("system prompt does not include long horizon workflow:\n%s", prompt)
+		}
+
+		tool, ok := agent.Tools.Get("chapter_probe")
+		if !ok {
+			t.Fatal("chapter_probe tool missing")
+		}
+		result, err := tool.Run(context.Background(), json.RawMessage(`{"chapter":3}`))
+		if err != nil {
+			t.Fatalf("chapter_probe failed: %v", err)
+		}
+		if !strings.Contains(result.Output, "CHK-03-411") || !strings.Contains(result.Output, "chapter=3") {
+			t.Fatalf("unexpected chapter_probe output: %s", result.Output)
+		}
+	})
 }
 
 func copyAgentFixtureWithProvider(t *testing.T, provider, model, envKey string) string {

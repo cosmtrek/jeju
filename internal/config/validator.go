@@ -102,6 +102,12 @@ func Validate(m *AgentManifest) error {
 		if !validThinkingEfforts[provider.Thinking.Effort] {
 			return fmt.Errorf("models.providers.%s.thinking.effort %q is invalid", name, provider.Thinking.Effort)
 		}
+		if provider.ContextWindow < 0 {
+			return fmt.Errorf("models.providers.%s.contextWindow must be non-negative", name)
+		}
+		if provider.Type == "openaiCompatible" && provider.ContextWindow == 0 {
+			return fmt.Errorf("models.providers.%s.contextWindow is required for openaiCompatible providers", name)
+		}
 	}
 	if m.Runtime.Model == "" {
 		return fmt.Errorf("runtime.model is required when more than one provider is configured")
@@ -111,6 +117,9 @@ func Validate(m *AgentManifest) error {
 	}
 	if m.Runtime.Loop.Type != "react" {
 		return fmt.Errorf("runtime.loop.type %q is not supported", m.Runtime.Loop.Type)
+	}
+	if m.Runtime.CompressionThreshold <= 0 || m.Runtime.CompressionThreshold > 1 {
+		return fmt.Errorf("runtime.compressionThreshold must be greater than 0 and at most 1")
 	}
 	if m.Instructions.System == "" {
 		return fmt.Errorf("instructions.system is required")
