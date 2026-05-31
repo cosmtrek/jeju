@@ -759,6 +759,7 @@ func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAg
 		"decision":     decision.Action,
 		"reason":       decision.Reason,
 	})
+	approvalReason := ""
 	if decision.Action == policy.DecisionDeny {
 		state.PermissionDenied++
 		recorder.Emit(ctx, trajectory.EventPermissionDenied, state.RunID, state.Step, "policy", map[string]any{
@@ -769,25 +770,33 @@ func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAg
 		return
 	}
 	if decision.Action == policy.DecisionAsk {
-		approved, stop := r.askApproval(action.Tool, spec.Capabilities)
-		if stop {
-			state.Status = StatusCancelled
-			state.AddObservation("User stopped the run.")
-			return
-		}
-		if !approved {
-			state.PermissionDenied++
-			recorder.Emit(ctx, trajectory.EventPermissionDenied, state.RunID, state.Step, "policy", map[string]any{
-				"tool":   action.Tool,
-				"reason": "user denied",
-			})
-			state.AddObservation(fmt.Sprintf("Tool %s denied by user.", action.Tool))
-			return
+		if r.autoApprove {
+			approvalReason = "auto_approved_by_evolve"
+		} else {
+			approved, stop := r.askApproval(action.Tool, spec.Capabilities)
+			if stop {
+				state.Status = StatusCancelled
+				state.AddObservation("User stopped the run.")
+				return
+			}
+			if !approved {
+				state.PermissionDenied++
+				recorder.Emit(ctx, trajectory.EventPermissionDenied, state.RunID, state.Step, "policy", map[string]any{
+					"tool":   action.Tool,
+					"reason": "user denied",
+				})
+				state.AddObservation(fmt.Sprintf("Tool %s denied by user.", action.Tool))
+				return
+			}
 		}
 	}
-	recorder.Emit(ctx, trajectory.EventPermissionApproved, state.RunID, state.Step, "policy", map[string]any{
+	approvalPayload := map[string]any{
 		"tool": action.Tool,
-	})
+	}
+	if approvalReason != "" {
+		approvalPayload["reason"] = approvalReason
+	}
+	recorder.Emit(ctx, trajectory.EventPermissionApproved, state.RunID, state.Step, "policy", approvalPayload)
 
 	start := time.Now()
 	recorder.Emit(ctx, trajectory.EventToolStarted, state.RunID, state.Step, "tool:"+action.Tool, map[string]any{
@@ -837,6 +846,16 @@ func (r *Runtime) handleAskUser(ctx context.Context, recorder *trajectory.Record
 	recorder.Emit(ctx, trajectory.EventUserInputRequested, state.RunID, state.Step, "runtime", map[string]any{
 		"question": action.Question,
 	})
+	if r.autoUserInput != nil {
+		answer := *r.autoUserInput
+		recorder.Emit(ctx, trajectory.EventUserInputReceived, state.RunID, state.Step, "user", map[string]any{
+			"input":  answer,
+			"reason": "auto_answered_by_evolve",
+		})
+		state.Messages = append(state.Messages, model.Message{Role: "user", Content: answer})
+		state.Status = StatusRunning
+		return
+	}
 	fmt.Printf("? %s\n> ", action.Question)
 	answer := r.readLine()
 	if strings.TrimSpace(answer) == "/stop" {

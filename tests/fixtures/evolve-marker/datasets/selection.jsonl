@@ -1,0 +1,1 @@
+{"id":"selection-marker-001","input":{"question":"Give a one-sentence summary of why reproducible experiments matter."},"expected":{"mustInclude":["APPROVED_FIX_MARKER"]},"metadata":{"split":"selection","purpose":"verify accepted candidate generalizes past train"},"weight":1}

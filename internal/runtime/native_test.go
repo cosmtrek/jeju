@@ -17,6 +17,7 @@ import (
 	"jeju/internal/skills"
 	"jeju/internal/tools"
 	"jeju/internal/tools/builtin"
+	"jeju/internal/trajectory"
 )
 
 type nativeFakeClient struct {
@@ -172,6 +173,92 @@ func TestRuntimeUsesNativeToolCalls(t *testing.T) {
 	}
 	if second[len(second)-2].ReasoningContent != "I should write the requested note." {
 		t.Fatalf("second request did not replay reasoning content: %+v", second[len(second)-2])
+	}
+}
+
+func TestRuntimeAutoApproveDoesNotBypassPolicyDeny(t *testing.T) {
+	tmp := t.TempDir()
+	workspace := filepath.Join(tmp, "workspace")
+	box, err := sandbox.NewLocal(workspace)
+	if err != nil {
+		t.Fatalf("NewLocal failed: %v", err)
+	}
+	registry := tools.NewRegistry()
+	if err := registry.Register(builtin.NewFileWrite(tools.Spec{
+		Name:         "write",
+		Description:  "Write a file",
+		Capabilities: []string{"workspaceWrite"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":    map[string]any{"type": "string"},
+				"content": map[string]any{"type": "string"},
+			},
+			"required": []string{"path", "content"},
+		},
+	}, box)); err != nil {
+		t.Fatalf("register write failed: %v", err)
+	}
+
+	client := &nativeFakeClient{}
+	models := model.NewRegistry()
+	models.Add("primary", model.ProviderConfig{
+		Name:           "primary",
+		Provider:       "openaiCompatible",
+		Model:          "fake-native",
+		ToolCalling:    true,
+		JSONSchemaMode: true,
+	}, client)
+
+	permissions := config.PermissionsConfig{Access: "readOnly", Approval: "never"}
+	agent := &compiler.CompiledAgent{
+		Name:         "native",
+		Instructions: "Write the requested note.",
+		Config: config.AgentManifest{
+			Metadata: config.Metadata{Name: "native"},
+			Runtime: config.RuntimeConfig{
+				Model: "primary",
+				Limits: config.RuntimeLimits{
+					MaxSteps:             4,
+					MaxDurationSec:       30,
+					MaxToolCalls:         4,
+					MaxConsecutiveErrors: 2,
+				},
+			},
+			Permissions: permissions,
+		},
+		ConfigSnapshot: []byte("apiVersion: jeju/v1alpha1\nkind: Agent\n"),
+		Models:         models,
+		Tools:          registry,
+		Skills:         skills.NewRegistry(),
+		Memory:         memory.Noop{},
+		Sandbox:        box,
+		Policy:         policy.NewGate(permissions),
+		RunStore:       runs.NewStore(filepath.Join(tmp, "runs")),
+	}
+
+	result, err := NewWithOptions(Options{AutoApprove: true}).Run(context.Background(), agent, "save a note")
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.Status != StatusCompleted || result.Final != "done" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "notes.md")); !os.IsNotExist(err) {
+		t.Fatalf("policy-denied write should not create notes.md, stat error: %v", err)
+	}
+	events, err := trajectory.ReadFile(filepath.Join(tmp, "runs", result.RunID, runs.TrajectoryFile))
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if !hasRuntimeEventType(events, trajectory.EventPermissionDenied) {
+		t.Fatalf("expected permission.denied event, got %+v", events)
+	}
+	if hasRuntimeEventType(events, trajectory.EventPermissionApproved) {
+		t.Fatalf("did not expect permission.approved for denied tool call: %+v", events)
+	}
+	if hasRuntimeEventType(events, trajectory.EventToolCompleted) {
+		t.Fatalf("did not expect tool.completed for denied tool call: %+v", events)
 	}
 }
 

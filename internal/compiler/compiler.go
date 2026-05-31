@@ -19,6 +19,8 @@ import (
 	toolcli "jeju/internal/tools/cli"
 	"jeju/internal/tools/command"
 	toolhttp "jeju/internal/tools/http"
+
+	"gopkg.in/yaml.v3"
 )
 
 type CompiledAgent struct {
@@ -38,10 +40,26 @@ type CompiledAgent struct {
 	systemPrompt   string
 }
 
+type Options struct {
+	RunStore          *runs.Store
+	WorkspaceOverride string
+}
+
 func Compile(manifestPath string) (*CompiledAgent, error) {
+	return CompileWithOptions(manifestPath, Options{})
+}
+
+func CompileWithOptions(manifestPath string, opts Options) (*CompiledAgent, error) {
 	manifest, snapshot, err := config.LoadFile(manifestPath)
 	if err != nil {
 		return nil, err
+	}
+	if opts.WorkspaceOverride != "" {
+		manifest.Workspace.Path = opts.WorkspaceOverride
+		snapshot, err = yaml.Marshal(manifest)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := config.Validate(manifest); err != nil {
 		return nil, err
@@ -85,7 +103,10 @@ func Compile(manifestPath string) (*CompiledAgent, error) {
 		Sandbox:        box,
 		Policy:         policy.NewGate(manifest.Permissions),
 		Evaluators:     evaluators,
-		RunStore:       runs.NewStore("./runs"),
+		RunStore:       opts.RunStore,
+	}
+	if agent.RunStore == nil {
+		agent.RunStore = runs.NewStore("./runs")
 	}
 	agent.systemPrompt = agent.renderSystemPrompt()
 	return agent, nil

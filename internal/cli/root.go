@@ -27,6 +27,8 @@ func Execute(ctx context.Context, args []string) error {
 		return runRuns(args[1:])
 	case "view":
 		return runView(args[1:])
+	case "evolve":
+		return runEvolve(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -39,6 +41,7 @@ Usage:
   jeju init <name> [--dir <dir>]
   jeju validate <agent.yaml>
   jeju run <agent.yaml> "<task>"
+  jeju evolve [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>
   jeju inspect <run_id>
   jeju view <run_id> [--out <html>]
   jeju runs
@@ -48,5 +51,6 @@ Examples:
   cd .jeju-dev
   jeju validate agents/research.agent.yaml
   jeju run agents/research.agent.yaml "写一份关于 AgentOps 的简短分析，并保存到 notes.md"
+  jeju evolve --baseline-only experiments/research-evolve.yaml
   jeju view 20260526-120000-research`)
 }

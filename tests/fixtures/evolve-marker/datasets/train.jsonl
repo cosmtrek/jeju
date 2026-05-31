@@ -1,0 +1,1 @@
+{"id":"train-marker-001","input":{"question":"Give a one-sentence status update for a local agent runtime experiment."},"expected":{"mustInclude":["APPROVED_FIX_MARKER"]},"metadata":{"split":"train","purpose":"verify prompt mutation affects target output"},"weight":1}

@@ -36,11 +36,24 @@ func (e *LLMEvaluator) Type() string {
 }
 
 func (e *LLMEvaluator) Evaluate(ctx context.Context, input Context) (EvaluatorResult, error) {
+	userContent := fmt.Sprintf("Task:\n%s\n\nFinal answer:\n%s", input.Input, input.Final)
+	if input.Expected != nil {
+		data, _ := json.MarshalIndent(input.Expected, "", "  ")
+		userContent += fmt.Sprintf("\n\nExpected:\n%s", string(data))
+	}
+	if input.Eval != nil {
+		data, _ := json.MarshalIndent(input.Eval, "", "  ")
+		userContent += fmt.Sprintf("\n\nTask evaluation instructions:\n%s", string(data))
+	}
+	if input.Metadata != nil {
+		data, _ := json.MarshalIndent(input.Metadata, "", "  ")
+		userContent += fmt.Sprintf("\n\nTask metadata:\n%s", string(data))
+	}
 	req := model.Request{
 		Model: e.provider.Model,
 		Messages: []model.Message{
 			{Role: "system", Content: e.prompt},
-			{Role: "user", Content: fmt.Sprintf("Task:\n%s\n\nFinal answer:\n%s", input.Input, input.Final)},
+			{Role: "user", Content: userContent},
 		},
 		Temperature: e.provider.Temperature,
 		MaxTokens:   e.provider.MaxOutputTokens,

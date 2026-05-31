@@ -1,0 +1,46 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: evolve-triage-target
+  description: "Target triage agent for self-evolution effect validation"
+
+models:
+  providers:
+    primary:
+      type: mock
+      model: mock-react
+      temperature: 0.1
+      maxOutputTokens: 1536
+      contextWindow: 32768
+      timeoutSec: 120
+
+instructions:
+  system: ../prompts/triage.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  limits:
+    maxSteps: 4
+    maxDurationSec: 180
+    maxToolCalls: 0
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace/triage
+
+permissions:
+  access: readOnly
+  approval: onRequest
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: triage_judge
+      uses: command
+      command:
+        run: ../eval/triage_judge.py
+        timeoutSec: 20

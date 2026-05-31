@@ -4,13 +4,13 @@
 
 - Jeju is a Go 1.25 local-first, config-defined mini agent runtime.
 - Keep implementation under `internal/`. Do not add `pkg/` until a public API is intentionally stabilized.
-- V0 spec lives in `docs/spec-v0.md`.
+- Agent manifest docs live in `docs/agent-manifest.md`; evolution experiment docs live in `docs/agent-evolution-manifest.md`.
 - DeepSeek setup notes live in `docs/deepseek.md`.
 - CLI entrypoint is `cmd/jeju/main.go`; command handlers live in `internal/cli/`.
 
 ## Scope Rules
 
-- Keep V0 scope tight: no Web UI, multi-agent runtime, Docker sandbox, remote sandbox, long-term memory, distributed workers, or full MCP client.
+- Keep the core runtime scope tight: no Web UI, multi-agent runtime, Docker sandbox, remote sandbox, long-term memory, distributed workers, or full MCP client unless explicitly requested.
 - Runtime must not read YAML directly. The path is `config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run`.
 - Agent behavior should come from manifest config, loaded instructions, tools, skills, policy, sandbox, trajectory, and evaluator config rather than hardcoded runtime branches.
 
@@ -22,7 +22,7 @@
 - Large model/tool payloads go under run `artifacts/`; events should store artifact refs instead of large content.
 - All tool calls must pass through `policy.Gate` before execution.
 - File tools must stay inside the configured local workspace. Shell runs must use the sandbox workdir and enforce timeout.
-- Skills use disclosure plus manual active loading in V0. Do not inject all skill assets by default.
+- Skills use disclosure plus manual active loading. Do not inject all skill assets by default.
 
 ## Generated Files
 

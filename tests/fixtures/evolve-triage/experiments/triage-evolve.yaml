@@ -1,0 +1,57 @@
+apiVersion: jeju/v1alpha1
+kind: EvolutionExperiment
+
+metadata:
+  name: evolve-triage
+  description: "Validate self-evolution effect on an operations triage task with deterministic judging."
+
+target:
+  agent: ../agents/triage.agent.yaml
+  editable:
+    - instructions.system
+  forbidden:
+    - permissions.access
+    - permissions.approval
+    - workspace.path
+    - evaluate.evaluators[].command.run
+    - tools[].command.run
+    - tools[].command.args
+    - tools[].http.url
+    - models.providers.*.envKey
+    - models.providers.*.baseUrl
+
+data:
+  format: jeju.task.v1
+  train: ../datasets/train.jsonl
+  selection: ../datasets/selection.jsonl
+  test: ../datasets/test.jsonl
+  render:
+    template: ../prompts/task_input.md.tmpl
+
+objective:
+  metric: evaluation.evaluators["triage_judge"].score
+  direction: maximize
+  minDelta: 0.2
+  guards:
+    - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
+    - "run.modelErrors <= baseline.run.modelErrors"
+  guidance:
+    - "Improve general incident triage behavior rather than memorizing examples."
+    - "The target agent must output only strict JSON with severity, route, action, and rationale."
+    - "Selection and test cases are holdout validation; do not depend on task ids or expected labels."
+
+evolver:
+  agent: ../agents/evolver.agent.yaml
+  proposals: 2
+
+search:
+  iterations: 2
+  trialsPerTask: 1
+  parallelism: 2
+  seed: 42
+  budget:
+    maxRuns: 80
+    maxModelTokens: 800000
+
+output:
+  dir: ../.jeju-dev/evolve-triage

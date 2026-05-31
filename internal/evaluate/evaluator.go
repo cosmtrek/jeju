@@ -13,6 +13,9 @@ type Context struct {
 	Input            string
 	Status           string
 	Final            string
+	Expected         any
+	Eval             any
+	Metadata         map[string]any
 	Steps            int
 	ToolCalls        int
 	ModelErrors      int

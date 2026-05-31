@@ -1,6 +1,6 @@
 PROVIDER ?= mock
 
-.PHONY: build test vet test-agent test-long-horizon-agent build-deep-research-agent benchmark-terminal-lite benchmark-bfcl-lite
+.PHONY: build test vet test-agent test-long-horizon-agent test-evolve-e2e test-evolve-effect-e2e build-deep-research-agent benchmark-terminal-lite benchmark-bfcl-lite
 
 build:
 	mkdir -p .jeju-dev/bin
@@ -17,6 +17,12 @@ test-agent:
 
 test-long-horizon-agent:
 	./scripts/run-long-horizon-agent.sh $(if $(filter mock,$(PROVIDER)),mimo,$(PROVIDER))
+
+test-evolve-e2e:
+	./scripts/run-evolve-e2e.sh $(PROVIDER)
+
+test-evolve-effect-e2e:
+	./scripts/run-evolve-effect-e2e.sh $(PROVIDER)
 
 build-deep-research-agent:
 	rm -rf .jeju-dev/deep-research-agent

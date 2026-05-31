@@ -1,0 +1,54 @@
+apiVersion: jeju/v1alpha1
+kind: EvolutionExperiment
+
+metadata:
+  name: evolve-marker
+  description: "End-to-end self-evolution fixture that validates train/selection improvement with a prompt patch."
+
+target:
+  agent: ../agents/support.agent.yaml
+  editable:
+    - instructions.system
+  forbidden:
+    - permissions.access
+    - permissions.approval
+    - workspace.path
+    - tools[].command.run
+    - tools[].command.args
+    - tools[].http.url
+    - models.providers.*.envKey
+    - models.providers.*.baseUrl
+
+data:
+  format: jeju.task.v1
+  train: ../datasets/train.jsonl
+  selection: ../datasets/selection.jsonl
+  render:
+    template: ../prompts/task_input.md.tmpl
+
+objective:
+  metric: evaluation.score
+  direction: maximize
+  minDelta: 0.5
+  guards:
+    - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
+    - "run.modelErrors <= baseline.run.modelErrors"
+  guidance:
+    - "This fixture optimizes only the target system prompt via exact replacement."
+    - "Do not modify credentials, workspace paths, permissions, or tool definitions."
+
+evolver:
+  agent: ../agents/evolver.agent.yaml
+  proposals: 2
+
+search:
+  iterations: 2
+  trialsPerTask: 1
+  parallelism: 1
+  seed: 42
+  budget:
+    maxRuns: 20
+    maxModelTokens: 200000
+
+output:
+  dir: ../.jeju-dev/evolve-marker
