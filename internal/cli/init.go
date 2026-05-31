@@ -179,7 +179,7 @@ skills:
 
 permissions:
   access: workspace
-  approval: onRequest
+  approval: never
 
 evaluate:
   enabled: true

@@ -34,13 +34,10 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 		t.Fatalf("validate failed: %v", err)
 	}
 
-	var runOutput string
-	withStdin(t, "y\n", func() {
-		runOutput = captureStdout(t, func() {
-			if err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "写一份关于 AgentOps 的简短分析，并保存到 notes.md"}); err != nil {
-				t.Fatalf("run failed: %v", err)
-			}
-		})
+	runOutput := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"}); err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
 	})
 
 	store := runs.NewStore("./runs")

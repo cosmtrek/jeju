@@ -1,40 +1,82 @@
 # Jeju
 
+> Define in config. Execute with boundaries. Trace everything. Improve with evidence.
+
 ![Jeju project architecture](docs/jeju-architecture.png)
 
-> Manifest. Agent. Done.
+Jeju is a config-defined agent runtime written in Go. It turns declarative manifests into runnable agents through a strict load, validate, compile, and run boundary.
 
-Jeju is a config-defined agent runtime written in Go. Agents start with a manifest: a declarative spec that describes an agent's model, instructions, runtime loop, workspace, tools, skills, permissions, and evaluation.
-
-Instead of wiring behavior into runtime code, Jeju loads, validates, and compiles a manifest into a runnable agent. The current runtime executes locally with workspace controls and file-backed runs, while the manifest-centered design leaves room for future cloud execution.
-
-Primary docs:
-
-- [Agent manifest reference](docs/agent-manifest.md)
-- [Agent evolution manifest reference](docs/agent-evolution-manifest.md)
-- [Self-evolution design](docs/self-evolution.md)
-- [DeepSeek setup notes](docs/deepseek.md)
+A manifest describes the agent's model, instructions, runtime loop, workspace, tools, skills, permissions, context budget, and evaluation rules. The runtime then executes the compiled result with workspace controls, permission gates, auditable trajectories, file-backed artifacts, inspection views, and optional config-space self-evolution.
 
 ## Features
 
-- **Agent Manifest as the source of truth**: define the agent's model, instructions, runtime limits, tools, skills, permissions, and evaluation in one declarative file.
-- **Config-defined behavior**: change agent behavior by editing manifest, prompt, and skill files instead of modifying runtime code.
-- **Compiled runtime boundary**: Jeju follows `config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run`, keeping YAML parsing out of the runtime.
-- **Portable execution model**: Jeju runs locally today with filesystem-backed runs and workspaces, while the manifest/runtime boundary keeps the design open for future cloud execution.
-- **Auditable trajectories**: every run writes JSONL events and keeps large payloads under run artifacts.
-- **Permission-aware tools**: tool calls pass through `policy.Gate`, with capability metadata and approval profiles for sensitive operations.
-- **Workspace-constrained file and shell access**: builtin file tools stay inside the configured workspace, and shell commands run there with timeouts.
-- **Skill disclosure model**: skills are disclosed first and loaded manually, so the runtime does not inject every skill asset by default.
-- **Mock and real model modes**: the scaffolded mock model supports fast local tests without credentials; OpenAI-compatible providers support real API-backed runs.
-- **Built-in inspection flow**: `runs` and `inspect` make completed runs easy to list and debug.
-- **Rule-based evaluation**: completed runs can be checked for expected lifecycle, model, tool, permission, and output conditions.
-- **Config-space self-evolution**: `jeju evolve` runs a target agent over train and selection tasks, asks an evolver agent for structured config patches, validates candidates, and writes a better audited config when the objective improves.
-- **Task-level effective evaluation**: evolution tasks can provide `expected`, `eval`, and `metadata` so experiment-specific judging can override or complement the target agent's default evaluators.
-- **Holdout effect validation fixtures**: the evolve test scripts include both a mechanics fixture and a real-effect triage fixture that can run against MiMo.
+- **Config-defined agents**: define models, instructions, tools, skills, permissions, context budget, and evaluation in one manifest.
+- **Compiled runtime boundary**: Jeju follows `config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run`, so execution never depends on raw YAML.
+- **Bounded execution**: work happens inside explicit workspace, tool, skill, permission, sandbox, timeout, and context-window limits.
+- **Auditable trajectories**: every run records lifecycle, model, context, tool, permission, artifact, and evaluation events, with large payloads stored separately.
+- **Evidence-driven improvement**: inspect completed runs, evaluate outcomes, and use `jeju evolve` to search config-space patches against train and selection tasks.
+
+## Quick Start
+
+The generated agent bundle includes a manifest, prompt, workspace, skills, run store, and a `mock` model, so the full lifecycle runs without API credentials or approval prompts. Install the CLI from the repository, then choose any local directory for the generated agent project.
+
+```bash
+# Clone the repository and install the CLI.
+git clone https://github.com/cosmtrek/jeju.git
+cd jeju
+go install ./cmd/jeju
+jeju --help
+
+# Scaffold a new agent project wherever you want to keep it.
+jeju init research --dir ~/jeju-agents/research-agent
+
+# Run the generated agent bundle.
+cd ~/jeju-agents/research-agent
+jeju validate agents/research.agent.yaml
+jeju run agents/research.agent.yaml "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"
+
+# Inspect the recorded run.
+jeju runs
+jeju inspect <run_id>
+```
+
+The run writes metadata, a config snapshot, trajectory JSONL, artifacts, and `final.md` under `runs/<run_id>/`. The first inspect view should show the full loop: skill loading, model calls, permission checking, a workspace write, artifacts, and evaluation.
+
+The default `mock` provider is deterministic, so this first run demonstrates Jeju's execution lifecycle rather than live web research.
+
+### Run With DeepSeek
+
+To run the same generated agent with a real model, edit `agents/research.agent.yaml` and replace the generated `models.providers.primary` block:
+
+```yaml
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-flash
+      envKey: DEEPSEEK_API_KEY
+      thinking:
+        type: disabled
+```
+
+Then set credentials and run the agent again:
+
+```bash
+export DEEPSEEK_API_KEY=sk-...
+
+# Optional: required only if the agent should call the scaffolded search_api tool.
+export EXA_API_KEY=...
+
+jeju validate agents/research.agent.yaml
+jeju run agents/research.agent.yaml "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"
+```
+
+`preset: deepseek` fills the DeepSeek base URL and context window defaults. See [DeepSeek setup notes](docs/deepseek.md) for provider details.
 
 ## Design Philosophy
 
-Jeju treats an agent as a small, explicit runtime unit instead of an opaque application. The core idea is that the manifest should be the source of truth for agent behavior, and the runtime should execute the compiled result through a narrow path:
+Jeju treats an agent as a small, explicit runtime unit instead of an opaque application. The manifest is the source of truth for behavior, the compiler fixes the executable boundary, and the runtime records each meaningful effect:
 
 ```text
 Manifest -> Validate -> Compile -> Run -> Gate -> Trace -> Evaluate -> Inspect
@@ -42,7 +84,9 @@ Manifest -> Validate -> Compile -> Run -> Gate -> Trace -> Evaluate -> Inspect
 
 The runtime does not read YAML directly. Configuration is loaded, validated, and compiled into a `CompiledAgent` before execution. This keeps runtime behavior grounded in the manifest, loaded instructions, tools, skills, permissions, and evaluator configuration rather than hardcoded branches.
 
-Local execution is the first runtime target. Runs are stored on disk, file and shell tools are constrained to a configured workspace, and every run leaves behind enough metadata and trajectory data to inspect what happened.
+The current runtime stores runs on disk, constrains file and shell tools to a configured workspace, and leaves behind enough metadata and trajectory data to inspect what happened.
+
+Self-evolution is built on top of the same contract. An evolution experiment does not mutate the source agent in place; it runs candidate bundles, scores them with task-level evaluation, applies only allowed exact patches, and materializes the best accepted config separately.
 
 ## Agent Manifest
 
@@ -271,104 +315,42 @@ Evolution output is written under `output.dir/<experiment_id>/`:
 
 See [docs/agent-evolution-manifest.md](docs/agent-evolution-manifest.md) for the full schema and [docs/self-evolution.md](docs/self-evolution.md) for the design details.
 
-## Quick Start
-
-The generated agent uses the `mock` model by default, so the full lifecycle can run without API credentials. The commands below create an isolated Jeju working directory under `.jeju-dev/`, keeping generated agents, workspaces, runs, and skill fixtures separate from the source tree.
-
-```bash
-# 1. Check the CLI entrypoint.
-go run ./cmd/jeju --help
-
-# 2. Scaffold a new agent into an isolated working directory.
-go run ./cmd/jeju init research --dir .jeju-dev
-
-# 3. Enter the generated Jeju working directory.
-cd .jeju-dev
-
-# 4. Validate the generated Agent Manifest.
-go run ../cmd/jeju validate agents/research.agent.yaml
-
-# 5. Run the agent. The leading "y" approves the scaffolded file write.
-printf 'y\n' | go run ../cmd/jeju run agents/research.agent.yaml "写一份关于 AgentOps 的简短分析，并保存到 notes.md"
-
-# 6. List recorded runs.
-go run ../cmd/jeju runs
-
-# 7. Inspect a completed run and its trajectory/artifacts.
-go run ../cmd/jeju inspect <run_id>
-```
-
-Run `validate`, `run`, `runs`, and `inspect` from the generated working directory. To use a real model, change the manifest provider from `mock` to `openaiCompatible`, point it at a Chat Completions-compatible endpoint, and set `contextWindow` unless you use a preset that fills it.
-
 ## Tests
+
+Run the normal code checks first:
 
 ```bash
 go test ./...
+go vet ./...
 ```
 
-The full-path fixture agent is under `tests/fixtures/agent/`. The test copies it into a temporary directory before running, so fixture sources stay clean.
-
-To run the fixture agent locally end to end:
+Run the mock fixture agent end to end without credentials:
 
 ```bash
 make test-agent
 ```
 
-Or run the script directly with an optional task:
+Provider-backed and heavier smoke runs are opt-in and may call real model APIs:
 
 ```bash
-./scripts/run-agent.sh mock "write a brief AgentOps note and save it to notes.md"
-```
-
-The script writes local output under `.jeju-dev/<provider>-agent-run/`.
-
-To test with DeepSeek V4 Flash:
-
-```bash
+# DeepSeek fixture run.
 export DEEPSEEK_API_KEY=sk-...
 make test-agent PROVIDER=deepseek
-```
 
-To test with MiMo V2.5 Pro:
-
-```bash
+# MiMo fixture run.
 export MIMO_API_KEY=sk-...
 make test-agent PROVIDER=mimo
-```
 
-To stress context compression with a long-horizon native tool-calling run:
-
-```bash
-export MIMO_API_KEY=sk-...
+# Long-horizon context compression run.
 make test-long-horizon-agent PROVIDER=mimo
-```
 
-Set `JEJU_MIMO_BASE_URL` if you need to override the MiMo endpoint.
-
-To validate the evolution mechanics fixture:
-
-```bash
+# Evolution mechanics.
 make test-evolve-e2e PROVIDER=mock
-```
-
-To run the same evolution mechanics fixture with MiMo:
-
-```bash
-export MIMO_API_KEY=sk-...
 make test-evolve-e2e PROVIDER=mimo
-```
 
-To smoke the effect fixture without credentials, run the mock baseline path:
-
-```bash
+# Evolution effect smoke and real-provider holdout check.
 make test-evolve-effect-e2e PROVIDER=mock
-```
-
-To validate that self-evolution actually improves behavior on held-out triage tasks, run the real MiMo path:
-
-```bash
-export MIMO_API_KEY=sk-...
 make test-evolve-effect-e2e PROVIDER=mimo
 ```
 
-The real-provider effect script writes `.jeju-dev/evolve-effect-e2e-mimo/.jeju-dev/evolve-triage-effect-summary.json`, including baseline and best-candidate holdout scores.
+Fixture scripts copy sources into temporary or `.jeju-dev/<scenario>/` workdirs before running, so fixture sources stay clean. Set `JEJU_MIMO_BASE_URL` if you need to override the MiMo endpoint.
