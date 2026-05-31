@@ -315,6 +315,17 @@ Evolution output is written under `output.dir/<experiment_id>/`:
 
 See [docs/agent-evolution-manifest.md](docs/agent-evolution-manifest.md) for the full schema and [docs/self-evolution.md](docs/self-evolution.md) for the design details.
 
+## Recommended Use Cases
+
+Runnable recommended scenarios live under [usecases](usecases/README.md).
+These are not test fixtures; they are example agent bundles for repeatable,
+evaluable workflows such as code review, translation, research, model comparison,
+and agent-as-skill integration.
+
+The first use case is a [code review agent](usecases/code-review-agent/README.md)
+that reviews a Git diff, returns structured findings, and checks the result with
+a local evaluator.
+
 ## Tests
 
 Run the normal code checks first:

@@ -1,0 +1,45 @@
+diff --git a/internal/auth/session_cache.go b/internal/auth/session_cache.go
+index 6d31a7a..4c9bf90 100644
+--- a/internal/auth/session_cache.go
++++ b/internal/auth/session_cache.go
+@@ -18,16 +18,24 @@ type SessionCache struct {
+ 	ttl   time.Duration
+ }
+ 
+ func (c *SessionCache) Get(ctx context.Context, token string) (*Session, error) {
+-	key := hashToken(token)
+-	raw, err := c.store.Get(ctx, key)
++	raw, err := c.store.Get(ctx, token)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 	if raw == nil {
+ 		return nil, nil
+ 	}
+ 	return decodeSession(raw)
+ }
+ 
+ func (c *SessionCache) Put(ctx context.Context, token string, session *Session) error {
+-	key := hashToken(token)
+-	return c.store.Set(ctx, key, encodeSession(session), c.ttl)
++	if session.UserID == "" {
++		return nil
++	}
++	return c.store.Set(ctx, token, encodeSession(session), 0)
+ }
+ 
+ func hashToken(token string) string {
+ 	sum := sha256.Sum256([]byte(token))
+ 	return hex.EncodeToString(sum[:])
+ }
+diff --git a/internal/auth/session_cache_test.go b/internal/auth/session_cache_test.go
+index 20bcf52..b4d4e18 100644
+--- a/internal/auth/session_cache_test.go
++++ b/internal/auth/session_cache_test.go
+@@ -31,6 +31,7 @@ func TestSessionCacheRoundTrip(t *testing.T) {
+ 	if got.UserID != "u_123" {
+ 		t.Fatalf("UserID = %q", got.UserID)
+ 	}
++	// TODO: add expiry test later
+ }
+

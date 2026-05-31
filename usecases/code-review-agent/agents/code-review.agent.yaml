@@ -1,0 +1,54 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: code-review
+  description: "Repeatable code review agent for structured diff review"
+  labels:
+    scenario: personal-agent
+    use_case: code-review
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-flash
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.1
+      thinking:
+        type: disabled
+      maxOutputTokens: 2048
+      contextWindow: 128000
+      timeoutSec: 90
+
+instructions:
+  system: ../prompts/code-review.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  limits:
+    maxSteps: 3
+    maxDurationSec: 180
+    maxToolCalls: 0
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace
+
+permissions:
+  access: readOnly
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: review_contract
+      uses: command
+      command:
+        run: ../eval/review_contract.py
+        timeoutSec: 20
+

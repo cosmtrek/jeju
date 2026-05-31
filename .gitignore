@@ -1,5 +1,6 @@
 /log/
 /jeju
 /.jeju-dev/
+/usecases/*/runs/
 __pycache__/
 *.pyc
