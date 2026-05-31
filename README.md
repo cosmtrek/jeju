@@ -323,8 +323,8 @@ evaluable workflows such as code review, translation, research, model comparison
 and agent-as-skill integration.
 
 The first use case is a [code review agent](usecases/code-review-agent/README.md)
-that reviews a Git diff, returns structured findings, and checks the result with
-a local evaluator.
+that reviews the current Git workspace diff with read-only tools and prints
+structured findings directly.
 
 ## Tests
 

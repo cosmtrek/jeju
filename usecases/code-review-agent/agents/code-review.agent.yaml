@@ -13,7 +13,7 @@ models:
     primary:
       type: openaiCompatible
       preset: deepseek
-      model: deepseek-v4-flash
+      model: deepseek-v4-pro
       envKey: DEEPSEEK_API_KEY
       temperature: 0.1
       thinking:
@@ -31,24 +31,61 @@ runtime:
     type: react
   compressionThreshold: 0.8
   limits:
-    maxSteps: 3
+    maxSteps: 20
     maxDurationSec: 180
-    maxToolCalls: 0
+    maxToolCalls: 100
     maxConsecutiveErrors: 2
 
 workspace:
-  path: ../workspace
+  path: ../../..
+
+tools:
+  - read
+  - search
+
+  - name: git_status
+    uses: command
+    description: "Show current working tree changes with git status --short."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["status", "--short"]
+      timeoutSec: 20
+
+  - name: git_diff
+    uses: command
+    description: "Show unstaged working tree diff. Optionally restrict to one path."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--", "{{path}}"]
+      timeoutSec: 30
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to diff."
+
+  - name: git_diff_cached
+    uses: command
+    description: "Show staged diff. Optionally restrict to one path."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--cached", "--", "{{path}}"]
+      timeoutSec: 30
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to diff."
 
 permissions:
   access: readOnly
   approval: never
-
-evaluate:
-  enabled: true
-  evaluators:
-    - name: review_contract
-      uses: command
-      command:
-        run: ../eval/review_contract.py
-        timeoutSec: 20
-

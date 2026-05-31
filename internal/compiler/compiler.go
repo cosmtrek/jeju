@@ -223,6 +223,9 @@ func compileToolSpec(cfg config.ToolConfig) (tools.Spec, error) {
 	if cfg.Uses == "http" {
 		spec.TimeoutSec = cfg.HTTP.TimeoutSec
 	}
+	if spec.Description == "" {
+		spec.Description = defaultToolDescription(cfg.Uses)
+	}
 	schema, err := compileInputSchema(cfg.Input.Schema)
 	if err != nil {
 		return tools.Spec{}, fmt.Errorf("tool %q input.schema: %w", cfg.Name, err)
@@ -234,11 +237,24 @@ func compileToolSpec(cfg config.ToolConfig) (tools.Spec, error) {
 	return spec, nil
 }
 
+func defaultToolDescription(uses string) string {
+	switch uses {
+	case "builtin:read":
+		return "Read a workspace file in line-based pages. Defaults to the first 200 lines; use offset and limit to continue reading later pages."
+	case "builtin:search":
+		return "Search workspace file contents. This is similar to grep or rg: provide a pattern, optional path, optional glob, match mode, context lines, and result limit."
+	default:
+		return ""
+	}
+}
+
 func defaultInputSchema(uses string) any {
 	switch uses {
 	case "builtin:read":
 		return objectSchema(map[string]any{
-			"path": map[string]any{"type": "string", "description": "Workspace-relative file path to read."},
+			"path":   map[string]any{"type": "string", "description": "Workspace-relative file path to read."},
+			"offset": map[string]any{"type": "integer", "minimum": 1, "description": "Optional 1-based first line to return. Defaults to 1."},
+			"limit":  map[string]any{"type": "integer", "minimum": 1, "description": "Optional maximum number of lines to return. Defaults to 200."},
 		}, []string{"path"})
 	case "builtin:write":
 		return objectSchema(map[string]any{
@@ -253,9 +269,13 @@ func defaultInputSchema(uses string) any {
 		}, []string{"path", "oldText", "newText"})
 	case "builtin:search":
 		return objectSchema(map[string]any{
-			"query": map[string]any{"type": "string", "description": "Literal text to search for."},
-			"path":  map[string]any{"type": "string", "description": "Optional workspace-relative directory to search."},
-		}, []string{"query"})
+			"pattern": map[string]any{"type": "string", "description": "Text or regular expression pattern to search for."},
+			"path":    map[string]any{"type": "string", "description": "Optional workspace-relative directory to search. Defaults to the workspace root."},
+			"glob":    map[string]any{"type": "string", "description": "Optional file glob filter, matched against file name or relative path when the pattern contains a slash, for example *.go."},
+			"mode":    map[string]any{"type": "string", "enum": []string{"literal", "regex"}, "description": "Pattern mode. Defaults to literal."},
+			"context": map[string]any{"type": "integer", "minimum": 0, "maximum": 10, "description": "Optional number of context lines before and after each match."},
+			"limit":   map[string]any{"type": "integer", "minimum": 1, "description": "Optional maximum number of matches to return. Defaults to 50."},
+		}, []string{"pattern"})
 	case "builtin:shell":
 		return objectSchema(map[string]any{
 			"command": map[string]any{"type": "string", "description": "Shell command to run in the workspace."},

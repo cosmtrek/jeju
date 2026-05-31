@@ -29,6 +29,9 @@ func runAgent(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("write run report: %w", err)
 	}
+	if result.Final != "" {
+		fmt.Printf("\nFinal\n%s\n", strings.TrimRight(result.Final, "\n"))
+	}
 	fmt.Printf("\nOutputs\n  run_id %s\n  report %s\n", result.RunID, reportPath)
 	return nil
 }

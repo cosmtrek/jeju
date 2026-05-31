@@ -3,39 +3,72 @@ package cli
 import (
 	"context"
 	"fmt"
+
+	"github.com/spf13/cobra"
 )
 
 func Execute(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		printHelp()
-		return nil
-	}
+	cmd := newRootCommand(ctx)
+	cmd.SetArgs(args)
+	return cmd.ExecuteContext(ctx)
+}
 
-	switch args[0] {
-	case "-h", "--help", "help":
-		printHelp()
-		return nil
-	case "init":
-		return runInit(args[1:])
-	case "validate":
-		return runValidate(args[1:])
-	case "run":
-		return runAgent(ctx, args[1:])
-	case "inspect":
-		return runInspect(args[1:])
-	case "runs":
-		return runRuns(args[1:])
-	case "view":
-		return runView(args[1:])
-	case "evolve":
-		return runEvolve(ctx, args[1:])
-	default:
-		return fmt.Errorf("unknown command %q", args[0])
+func newRootCommand(ctx context.Context) *cobra.Command {
+	root := &cobra.Command{
+		Use:           "jeju",
+		Short:         "Config-defined local agent runtime",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			printHelp(cmd)
+			return nil
+		},
+	}
+	root.CompletionOptions.DisableDefaultCmd = true
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		printHelp(cmd)
+	})
+
+	root.AddCommand(
+		rawArgsCommand("init", func(args []string) error {
+			return runInit(args)
+		}),
+		rawArgsCommand("validate", func(args []string) error {
+			return runValidate(args)
+		}),
+		rawArgsCommand("run", func(args []string) error {
+			return runAgent(ctx, args)
+		}),
+		rawArgsCommand("inspect", func(args []string) error {
+			return runInspect(args)
+		}),
+		rawArgsCommand("runs", func(args []string) error {
+			return runRuns(args)
+		}),
+		rawArgsCommand("view", func(args []string) error {
+			return runView(args)
+		}),
+		rawArgsCommand("evolve", func(args []string) error {
+			return runEvolve(ctx, args)
+		}),
+	)
+	return root
+}
+
+func rawArgsCommand(use string, run func([]string) error) *cobra.Command {
+	return &cobra.Command{
+		Use:                use,
+		DisableFlagParsing: true,
+		SilenceUsage:       true,
+		SilenceErrors:      true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return run(args)
+		},
 	}
 }
 
-func printHelp() {
-	fmt.Println(`Jeju - config-defined local agent runtime
+func printHelp(cmd *cobra.Command) {
+	fmt.Fprintln(cmd.OutOrStdout(), `Jeju - config-defined local agent runtime
 
 Usage:
   jeju init <name> [--dir <dir>]
@@ -47,10 +80,10 @@ Usage:
   jeju runs
 
 Examples:
-  jeju init research --dir .jeju-dev
-  cd .jeju-dev
+  jeju init research --dir ~/jeju-agents/research-agent
+  cd ~/jeju-agents/research-agent
   jeju validate agents/research.agent.yaml
-  jeju run agents/research.agent.yaml "写一份关于 AgentOps 的简短分析，并保存到 notes.md"
+  jeju run agents/research.agent.yaml "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"
   jeju evolve --baseline-only experiments/research-evolve.yaml
   jeju view 20260526-120000-research`)
 }

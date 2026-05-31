@@ -114,6 +114,33 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 	}
 }
 
+func TestExecuteHelpPrintsRootUsage(t *testing.T) {
+	output := captureStdout(t, func() {
+		if err := Execute(context.Background(), []string{"--help"}); err != nil {
+			t.Fatalf("help failed: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"Jeju - config-defined local agent runtime",
+		"jeju init <name> [--dir <dir>]",
+		"jeju evolve [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("help output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestExecuteUnknownCommandReturnsError(t *testing.T) {
+	err := Execute(context.Background(), []string{"unknown"})
+	if err == nil {
+		t.Fatal("expected unknown command error")
+	}
+	if !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func chdir(t *testing.T, dir string) func() {
 	t.Helper()
 	cwd, err := os.Getwd()
