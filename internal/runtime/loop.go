@@ -589,7 +589,7 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
 					"error": err.Error(),
 				})
-				state.AddObservation("Invalid ask_user tool arguments.")
+				addNativeToolFeedback(state, call, fmt.Sprintf("Tool ask_user failed: invalid JSON arguments: %s. Re-issue ask_user with valid JSON arguments.", err.Error()))
 				return nil
 			}
 			action.Question = input.Question
@@ -611,7 +611,7 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
 					"error": err.Error(),
 				})
-				state.AddObservation("Invalid final_answer tool arguments.")
+				addNativeToolFeedback(state, call, fmt.Sprintf("Tool final_answer failed: invalid JSON arguments: %s. Re-issue final_answer with valid JSON arguments and keep content concise.", err.Error()))
 				return nil
 			}
 			if strings.TrimSpace(input.Content) == "" {
@@ -620,7 +620,7 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
 					"error": err.Error(),
 				})
-				state.AddObservation("final_answer requires a non-empty content string.")
+				addNativeToolFeedback(state, call, "Tool final_answer failed: content must be a non-empty string. Re-issue final_answer with concise non-empty content.")
 				return nil
 			}
 			state.Messages[len(state.Messages)-1] = model.Message{Role: "assistant", Content: input.Content, ReasoningContent: resp.ReasoningContent}
@@ -640,7 +640,9 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
 					"error": err.Error(),
 				})
-				state.AddObservation("Return ask_user or final_answer as a single function tool call.")
+				for _, feedbackCall := range resp.ToolCalls {
+					addNativeToolFeedback(state, feedbackCall, fmt.Sprintf("Tool %s failed: %s. Return ask_user or final_answer as a single function tool call.", feedbackCall.Name, err.Error()))
+				}
 				return nil
 			}
 		}
@@ -701,6 +703,19 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 	state.Final = content
 	state.Status = StatusCompleted
 	return nil
+}
+
+func addNativeToolFeedback(state *RunState, call model.ToolCall, content string) {
+	state.Observations = append(state.Observations, content)
+	if call.ID == "" {
+		state.Messages = append(state.Messages, model.Message{Role: "user", Content: "Observation: " + content})
+		return
+	}
+	state.Messages = append(state.Messages, model.Message{
+		Role:       "tool",
+		ToolCallID: call.ID,
+		Content:    content,
+	})
 }
 
 func parseFinalContent(text string) (string, error) {

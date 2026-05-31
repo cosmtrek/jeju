@@ -7,6 +7,7 @@ config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run
 ```
 
 The runtime receives a compiled agent, not raw YAML. Relative paths are resolved from the manifest file location.
+For reusable agents, `jeju run --workspace <dir>` can override `workspace.path` for a single run while keeping the saved config snapshot auditable.
 
 ## Example
 

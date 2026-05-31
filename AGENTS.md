@@ -30,6 +30,10 @@
 - Do not leave temporary scaffold output such as `agents/research.agent.yaml`, `prompts/research.md`, `skills/web-research`, `runs/<run_id>`, or `workspace/<agent>` in the repo root unless the task explicitly asks to add source fixtures.
 - `.jeju-dev/` is the preferred ignored local quick-start directory.
 
+## Path Hygiene
+
+- Do not commit machine-local absolute paths from a developer home directory. Prefer neutral placeholders such as `/path/to/project`; use repo-relative paths such as `scripts/...` when the example is already rooted at the Jeju checkout.
+
 ## Verification
 
 - Run `go test ./...` after code changes.

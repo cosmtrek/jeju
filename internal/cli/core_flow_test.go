@@ -114,6 +114,49 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 	}
 }
 
+func TestRunWorkspaceOverride(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+	targetWorkspace := filepath.Join(tmp, "target-repo")
+	if err := os.MkdirAll(targetWorkspace, 0o755); err != nil {
+		t.Fatalf("create target workspace failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	if err := Execute(ctx, []string{"run", "--workspace", targetWorkspace, "agents/research.agent.yaml", "Save a short note to notes.md"}); err != nil {
+		t.Fatalf("run with workspace override failed: %v", err)
+	}
+
+	assertFileExists(t, filepath.Join(targetWorkspace, "notes.md"))
+	if _, err := os.Stat(filepath.Join(tmp, "jeju-work", "workspace", "research", "notes.md")); !os.IsNotExist(err) {
+		t.Fatalf("run wrote notes.md to the manifest default workspace instead of override")
+	}
+
+	store := runs.NewStore("./runs")
+	items, err := store.ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(items))
+	}
+	snapshot, err := os.ReadFile(filepath.Join("runs", items[0].RunID, runs.ConfigSnapshotFile))
+	if err != nil {
+		t.Fatalf("read config snapshot failed: %v", err)
+	}
+	if !strings.Contains(string(snapshot), targetWorkspace) {
+		t.Fatalf("config snapshot does not include workspace override %q:\n%s", targetWorkspace, snapshot)
+	}
+}
+
 func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 	output := captureStdout(t, func() {
 		if err := Execute(context.Background(), []string{"--help"}); err != nil {

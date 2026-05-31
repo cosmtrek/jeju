@@ -20,7 +20,7 @@ func TestValidateWorkspaceCommandRejectsWorkspaceEscapes(t *testing.T) {
 	commands := []string{
 		"cd .. && git status",
 		"rm -rf ../repo",
-		"git -C /Users/bytedance/Developer/jeju status",
+		"git -C /workspace/jeju status",
 		"python3 /app/check.py",
 		"cat ~/secret",
 		"python3 check.py 2>../err.log",

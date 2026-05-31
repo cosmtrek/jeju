@@ -17,11 +17,18 @@ It demonstrates:
 
 ## Run
 
-From the repository root:
+From the repository you want to review:
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
 
+cd /path/to/jeju
+./scripts/run-code-review-agent.sh /path/to/project
+```
+
+From the Jeju checkout, omitting the argument reviews the current directory:
+
+```bash
 ./scripts/run-code-review-agent.sh
 ```
 
@@ -31,10 +38,19 @@ manifest's `models.providers.primary` block.
 The JSON review is printed directly by `jeju run` and is also saved to
 `runs/<run_id>/final.md`.
 
+The manifest keeps `workspace.path` pointed at this use case's local placeholder
+workspace so it can be validated in place. For normal reuse, keep the agent
+config anywhere, for example `~/.jeju/ability/code-review/`, and bind it to the
+target project at runtime:
+
+```bash
+jeju run --workspace /path/to/project ~/.jeju/ability/code-review/agents/code-review.agent.yaml "Review the current repository changes."
+```
+
 Inspect the recorded run:
 
 ```bash
-cd usecases/code-review-agent
-go run /Users/bytedance/Developer/jeju/cmd/jeju runs
-go run /Users/bytedance/Developer/jeju/cmd/jeju inspect <run_id>
+cd /path/to/project
+go run /path/to/jeju/cmd/jeju runs
+go run /path/to/jeju/cmd/jeju inspect <run_id>
 ```

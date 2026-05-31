@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"jeju/internal/compiler"
@@ -80,6 +81,34 @@ func (c *nativeMultiToolClient) Generate(ctx context.Context, req model.Request)
 			ID:        "call_3",
 			Name:      "final_answer",
 			Arguments: json.RawMessage(`{"content":"done"}`),
+		}},
+	}, nil
+}
+
+type nativeInvalidFinalClient struct {
+	requests []model.Request
+}
+
+func (c *nativeInvalidFinalClient) Generate(ctx context.Context, req model.Request) (model.Response, error) {
+	c.requests = append(c.requests, req)
+	if len(c.requests) == 1 {
+		return model.Response{
+			Provider: "openaiCompatible",
+			Model:    "fake-native",
+			ToolCalls: []model.ToolCall{{
+				ID:        "call_bad_final",
+				Name:      "final_answer",
+				Arguments: json.RawMessage(`{"content":"unterminated`),
+			}},
+		}, nil
+	}
+	return model.Response{
+		Provider: "openaiCompatible",
+		Model:    "fake-native",
+		ToolCalls: []model.ToolCall{{
+			ID:        "call_good_final",
+			Name:      "final_answer",
+			Arguments: json.RawMessage(`{"content":"done after retry"}`),
 		}},
 	}, nil
 }
@@ -173,6 +202,75 @@ func TestRuntimeUsesNativeToolCalls(t *testing.T) {
 	}
 	if second[len(second)-2].ReasoningContent != "I should write the requested note." {
 		t.Fatalf("second request did not replay reasoning content: %+v", second[len(second)-2])
+	}
+}
+
+func TestRuntimeReturnsNativeToolFeedbackForInvalidFinalAnswer(t *testing.T) {
+	tmp := t.TempDir()
+	box, err := sandbox.NewLocal(filepath.Join(tmp, "workspace"))
+	if err != nil {
+		t.Fatalf("NewLocal failed: %v", err)
+	}
+	client := &nativeInvalidFinalClient{}
+	models := model.NewRegistry()
+	models.Add("primary", model.ProviderConfig{
+		Name:           "primary",
+		Provider:       "openaiCompatible",
+		Model:          "fake-native",
+		ToolCalling:    true,
+		JSONSchemaMode: true,
+	}, client)
+
+	agent := &compiler.CompiledAgent{
+		Name:         "native-invalid-final",
+		Instructions: "Review the changes.",
+		Config: config.AgentManifest{
+			Metadata: config.Metadata{Name: "native-invalid-final"},
+			Runtime: config.RuntimeConfig{
+				Model: "primary",
+				Limits: config.RuntimeLimits{
+					MaxSteps:             3,
+					MaxDurationSec:       30,
+					MaxToolCalls:         2,
+					MaxConsecutiveErrors: 2,
+				},
+			},
+			Permissions: config.PermissionsConfig{Access: "readOnly", Approval: "never"},
+		},
+		ConfigSnapshot: []byte("apiVersion: jeju/v1alpha1\nkind: Agent\n"),
+		Models:         models,
+		Tools:          tools.NewRegistry(),
+		Skills:         skills.NewRegistry(),
+		Memory:         memory.Noop{},
+		Sandbox:        box,
+		Policy:         policy.NewGate(config.PermissionsConfig{Access: "readOnly", Approval: "never"}),
+		RunStore:       runs.NewStore(filepath.Join(tmp, "runs")),
+	}
+
+	result, err := New().Run(context.Background(), agent, "finish")
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.Status != StatusCompleted || result.Final != "done after retry" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(client.requests) != 2 {
+		t.Fatalf("expected two model requests, got %d", len(client.requests))
+	}
+	second := client.requests[1].Messages
+	if len(second) < 3 {
+		t.Fatalf("expected retry context to include invalid tool call feedback, got %+v", second)
+	}
+	assistant := second[len(second)-2]
+	feedback := second[len(second)-1]
+	if assistant.Role != "assistant" || len(assistant.ToolCalls) != 1 || assistant.ToolCalls[0].ID != "call_bad_final" {
+		t.Fatalf("invalid final_answer call was not replayed: %+v", assistant)
+	}
+	if feedback.Role != "tool" || feedback.ToolCallID != "call_bad_final" {
+		t.Fatalf("invalid final_answer feedback was not a tool response: %+v", feedback)
+	}
+	if !strings.Contains(feedback.Content, "invalid JSON arguments") {
+		t.Fatalf("feedback did not explain parse failure: %q", feedback.Content)
 	}
 }
 

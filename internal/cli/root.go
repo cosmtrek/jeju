@@ -73,7 +73,7 @@ func printHelp(cmd *cobra.Command) {
 Usage:
   jeju init <name> [--dir <dir>]
   jeju validate <agent.yaml>
-  jeju run <agent.yaml> "<task>"
+  jeju run [--workspace <dir>] <agent.yaml> "<task>"
   jeju evolve [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>
   jeju inspect <run_id>
   jeju view <run_id> [--out <html>]
@@ -84,6 +84,7 @@ Examples:
   cd ~/jeju-agents/research-agent
   jeju validate agents/research.agent.yaml
   jeju run agents/research.agent.yaml "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"
+  jeju run --workspace /path/to/project agents/code-review.agent.yaml "Review the current repository changes."
   jeju evolve --baseline-only experiments/research-evolve.yaml
   jeju view 20260526-120000-research`)
 }
