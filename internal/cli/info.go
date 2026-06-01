@@ -6,10 +6,7 @@ import (
 	"jeju/internal/config"
 )
 
-func runInfo(args []string) error {
-	if len(args) != 0 {
-		return fmt.Errorf("usage: jeju info")
-	}
+func runInfo() error {
 	caps := config.SupportedCapabilities()
 	fmt.Println("Jeju capabilities")
 	fmt.Println()

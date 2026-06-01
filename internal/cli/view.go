@@ -33,19 +33,13 @@ func renderMarkdown(src string) template.HTML {
 	return template.HTML(buf.String())
 }
 
-func runView(args []string) error {
-	opts, err := parseViewArgs(args)
-	if err != nil {
-		return err
-	}
-
+func runView(runID, out string) error {
 	store := runs.NewStore(filepath.Clean("./runs"))
-	runDir, err := store.LoadRun(opts.runID)
+	runDir, err := store.LoadRun(runID)
 	if err != nil {
 		return err
 	}
 
-	out := opts.out
 	if out == "" {
 		out = defaultRunReportPath(runDir)
 	}
@@ -85,40 +79,6 @@ func writeRunReport(store *runs.Store, runDir *runs.RunDir, out string) error {
 		return err
 	}
 	return writeRunReportHTML(out, report)
-}
-
-type viewOptions struct {
-	runID string
-	out   string
-}
-
-func parseViewArgs(args []string) (viewOptions, error) {
-	var opts viewOptions
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch arg {
-		case "-h", "--help":
-			return opts, fmt.Errorf("usage: jeju view <run_id> [--out <html>]")
-		case "--out":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("--out requires a path")
-			}
-			i++
-			opts.out = args[i]
-		default:
-			if strings.HasPrefix(arg, "-") {
-				return opts, fmt.Errorf("unknown view flag %q", arg)
-			}
-			if opts.runID != "" {
-				return opts, fmt.Errorf("usage: jeju view <run_id> [--out <html>]")
-			}
-			opts.runID = arg
-		}
-	}
-	if opts.runID == "" {
-		return opts, fmt.Errorf("usage: jeju view <run_id> [--out <html>]")
-	}
-	return opts, nil
 }
 
 type runReport struct {

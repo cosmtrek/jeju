@@ -12,16 +12,6 @@ import (
 	"jeju/internal/trajectory"
 )
 
-func TestParseViewArgs(t *testing.T) {
-	opts, err := parseViewArgs([]string{"run-1", "--out", "out.html"})
-	if err != nil {
-		t.Fatalf("parseViewArgs failed: %v", err)
-	}
-	if opts.runID != "run-1" || opts.out != "out.html" {
-		t.Fatalf("unexpected opts: %#v", opts)
-	}
-}
-
 func TestBuildRunReportAndWriteHTML(t *testing.T) {
 	tmp := t.TempDir()
 	store := runs.NewStore(filepath.Join(tmp, "runs"))

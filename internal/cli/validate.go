@@ -8,11 +8,7 @@ import (
 	"jeju/internal/config"
 )
 
-func runValidate(args []string) error {
-	manifestPath, explain, err := parseValidateArgs(args)
-	if err != nil {
-		return err
-	}
+func runValidate(manifestPath string, explain bool) error {
 	manifest, _, err := config.LoadFile(manifestPath)
 	if err != nil {
 		return err
@@ -25,27 +21,6 @@ func runValidate(args []string) error {
 		printManifestExplanation(manifest)
 	}
 	return nil
-}
-
-func parseValidateArgs(args []string) (string, bool, error) {
-	explain := false
-	manifestPath := ""
-	for _, arg := range args {
-		switch {
-		case arg == "--explain":
-			explain = true
-		case strings.HasPrefix(arg, "-"):
-			return "", false, fmt.Errorf("unknown validate option %q", arg)
-		case manifestPath == "":
-			manifestPath = arg
-		default:
-			return "", false, fmt.Errorf("usage: jeju validate [--explain] <agent.yaml>")
-		}
-	}
-	if manifestPath == "" {
-		return "", false, fmt.Errorf("usage: jeju validate [--explain] <agent.yaml>")
-	}
-	return manifestPath, explain, nil
 }
 
 func printManifestExplanation(manifest *config.AgentManifest) {

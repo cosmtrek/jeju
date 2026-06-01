@@ -70,6 +70,10 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 	if err := Execute(ctx, []string{"view", runID}); err != nil {
 		t.Fatalf("view failed: %v", err)
 	}
+	customReport := filepath.Join(tmp, "jeju-work", "custom-report.html")
+	if err := Execute(ctx, []string{"view", runID, "--out", customReport}); err != nil {
+		t.Fatalf("view --out failed: %v", err)
+	}
 
 	assertFileExists(t, filepath.Join(runDir, runs.MetadataFile))
 	assertFileExists(t, filepath.Join(runDir, runs.ConfigSnapshotFile))
@@ -77,6 +81,7 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 	assertFileExists(t, filepath.Join(runDir, runs.FinalFile))
 	assertFileExists(t, filepath.Join(runDir, runs.EvaluationFile))
 	assertFileExists(t, filepath.Join(runDir, runs.ReportFile))
+	assertFileExists(t, customReport)
 	assertFileExists(t, filepath.Join(tmp, "jeju-work", "workspace", "research", "notes.md"))
 
 	events, err := trajectory.ReadFile(filepath.Join(runDir, runs.TrajectoryFile))
@@ -158,6 +163,46 @@ func TestRunWorkspaceOverride(t *testing.T) {
 	}
 }
 
+func TestRunTaskCanStartWithFlagLikeText(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	if err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "--write", "notes.md"}); err != nil {
+		t.Fatalf("run should accept flag-like task text after manifest: %v", err)
+	}
+}
+
+func TestRunRejectsWorkspaceFlagAfterManifest(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "--workspace", tmp, "Save a short note"})
+	if err == nil {
+		t.Fatal("expected misplaced --workspace error")
+	}
+	if !strings.Contains(err.Error(), "run flags must appear before <agent.yaml>") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 	output := captureStdout(t, func() {
 		if err := Execute(context.Background(), []string{"--help"}); err != nil {
@@ -166,14 +211,88 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 	})
 	for _, want := range []string{
 		"Jeju - config-defined local agent runtime",
-		"jeju init <name> [--dir <dir>]",
+		"jeju init <name> [<dir>] [--dir <dir>]",
+		"Scaffold a local agent bundle",
 		"jeju info",
+		"List supported providers, tools, evaluators, and trajectory formats",
 		"jeju validate [--explain] <agent.yaml>",
-		"jeju evolve [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>",
+		"Validate a manifest and optionally explain resolved wiring",
+		"jeju run [--workspace <dir>] <agent.yaml> \"<task>\"",
+		"Run an agent against a task",
+		"jeju evolve [--dry-run] [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>",
+		"Run an evolution experiment",
+		"jeju inspect <run_id>",
+		"Print a run summary and artifact paths",
+		"jeju view <run_id> [--out <html>]",
+		"Render an HTML run report",
+		"jeju runs",
+		"List local runs",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestExecuteSubcommandHelpPrintsFlags(t *testing.T) {
+	output := captureStdout(t, func() {
+		if err := Execute(context.Background(), []string{"run", "--help"}); err != nil {
+			t.Fatalf("run help failed: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"Jeju - Run an agent against a task",
+		`jeju run [--workspace <dir>] <agent.yaml> "<task>" [flags]`,
+		"--workspace string",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("run help output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestEvolveHelpPrintsFlags(t *testing.T) {
+	output := captureStdout(t, func() {
+		if err := Execute(context.Background(), []string{"evolve", "--help"}); err != nil {
+			t.Fatalf("evolve help failed: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"Jeju - Run an evolution experiment",
+		"jeju evolve [--dry-run] [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml> [flags]",
+		"--dry-run",
+		"--baseline-only",
+		"--max-iterations int",
+		"--out string",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("evolve help output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestInitKeepsLegacyPositionalOutputDir(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	if err := Execute(context.Background(), []string{"init", "research", "jeju-work"}); err != nil {
+		t.Fatalf("init with positional output dir failed: %v", err)
+	}
+	assertFileExists(t, filepath.Join(tmp, "jeju-work", "agents", "research.agent.yaml"))
+}
+
+func TestInitDirFlagWinsOverLegacyPositionalOutputDir(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	if err := Execute(context.Background(), []string{"init", "research", "legacy-dir", "--dir", "flag-dir"}); err != nil {
+		t.Fatalf("init with positional and --dir output dirs failed: %v", err)
+	}
+	assertFileExists(t, filepath.Join(tmp, "flag-dir", "agents", "research.agent.yaml"))
+	if _, err := os.Stat(filepath.Join(tmp, "legacy-dir", "agents", "research.agent.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("init used legacy positional output dir even though --dir was set")
 	}
 }
 
@@ -259,7 +378,7 @@ func TestValidateRejectsUnknownOption(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validate unknown option error")
 	}
-	if !strings.Contains(err.Error(), `unknown validate option "--unknown"`) {
+	if !strings.Contains(err.Error(), `unknown flag: --unknown`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

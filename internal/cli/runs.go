@@ -7,10 +7,7 @@ import (
 	"jeju/internal/runs"
 )
 
-func runRuns(args []string) error {
-	if len(args) != 0 {
-		return fmt.Errorf("usage: jeju runs")
-	}
+func runRuns() error {
 	store := runs.NewStore(filepath.Clean("./runs"))
 	items, err := store.ListRuns()
 	if err != nil {

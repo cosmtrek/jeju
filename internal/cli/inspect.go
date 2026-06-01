@@ -12,16 +12,13 @@ import (
 	"jeju/internal/trajectory"
 )
 
-func runInspect(args []string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("usage: jeju inspect <run_id>")
-	}
+func runInspect(runID string) error {
 	store := runs.NewStore(filepath.Clean("./runs"))
-	runDir, err := store.LoadRun(args[0])
+	runDir, err := store.LoadRun(runID)
 	if err != nil {
 		return err
 	}
-	meta, err := store.ReadMetadata(args[0])
+	meta, err := store.ReadMetadata(runID)
 	if err != nil {
 		return err
 	}

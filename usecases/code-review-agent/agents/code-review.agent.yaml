@@ -31,7 +31,7 @@ runtime:
     type: react
   compressionThreshold: 0.8
   limits:
-    maxSteps: 20
+    maxSteps: 100
     maxDurationSec: 180
     maxToolCalls: 100
     maxConsecutiveErrors: 2

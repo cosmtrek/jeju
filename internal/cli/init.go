@@ -5,16 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 )
 
 var agentNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 
-func runInit(args []string) error {
-	name, outputDir, err := parseInitArgs(args)
-	if err != nil {
-		return err
-	}
+func runInit(name, outputDir string) error {
 	if !agentNameRe.MatchString(name) {
 		return fmt.Errorf("invalid agent name %q", name)
 	}
@@ -62,39 +57,6 @@ func runInit(args []string) error {
 		fmt.Printf("next: cd %s\n", displayPath(outputDir))
 	}
 	return nil
-}
-
-func parseInitArgs(args []string) (string, string, error) {
-	if len(args) == 0 {
-		return "", "", fmt.Errorf("usage: jeju init <name> [--dir <dir>]")
-	}
-	name := ""
-	outputDir := "."
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--dir" || arg == "-d":
-			if i+1 >= len(args) {
-				return "", "", fmt.Errorf("%s requires a directory", arg)
-			}
-			outputDir = args[i+1]
-			i++
-		case strings.HasPrefix(arg, "--dir="):
-			outputDir = strings.TrimPrefix(arg, "--dir=")
-		case strings.HasPrefix(arg, "-"):
-			return "", "", fmt.Errorf("unknown init option %q", arg)
-		case name == "":
-			name = arg
-		case outputDir == ".":
-			outputDir = arg
-		default:
-			return "", "", fmt.Errorf("usage: jeju init <name> [--dir <dir>]")
-		}
-	}
-	if name == "" {
-		return "", "", fmt.Errorf("usage: jeju init <name> [--dir <dir>]")
-	}
-	return name, outputDir, nil
 }
 
 func displayPath(path string) string {
