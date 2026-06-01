@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"jeju/internal/config"
 	"jeju/internal/evaluate"
 	"jeju/internal/runs"
 	"jeju/internal/trajectory"
@@ -166,12 +167,149 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 	for _, want := range []string{
 		"Jeju - config-defined local agent runtime",
 		"jeju init <name> [--dir <dir>]",
+		"jeju info",
+		"jeju validate [--explain] <agent.yaml>",
 		"jeju evolve [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q:\n%s", want, output)
 		}
 	}
+}
+
+func TestInfoPrintsSupportedCapabilities(t *testing.T) {
+	output := captureStdout(t, func() {
+		if err := Execute(context.Background(), []string{"info"}); err != nil {
+			t.Fatalf("info failed: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"Model provider types:",
+		"openaiCompatible",
+		"Tool uses:",
+		"builtin:search",
+		"Evaluator uses:",
+		"Trajectory formats:",
+		"jeju-jsonl",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("info output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestValidateExplainPrintsManifestConnections(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	output := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"validate", "--explain", "agents/research.agent.yaml"}); err != nil {
+			t.Fatalf("validate --explain failed: %v", err)
+		}
+	})
+	expectedWorkspacePath, err := filepath.Abs(filepath.Join("workspace", "research"))
+	if err != nil {
+		t.Fatalf("resolve expected workspace path failed: %v", err)
+	}
+	for _, want := range []string{
+		"valid: agents/research.agent.yaml",
+		"Manifest: research (Agent jeju/v1alpha1)",
+		"runtime.model -> models.providers.primary",
+		"workspace.path -> " + expectedWorkspacePath,
+		"permissions.approval -> never",
+		"tools.search_api -> uses=http",
+		"skills.active -> web-research",
+		"evaluate.evaluators.basic_trajectory -> uses=rules",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("validate --explain output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestValidateExplainDistinguishesEnabledEmptyEvaluators(t *testing.T) {
+	manifest := minimalExplainManifest(t, true)
+	output := captureStdout(t, func() {
+		printManifestExplanation(manifest)
+	})
+	if !strings.Contains(output, "Evaluators:\n  (enabled, none)") {
+		t.Fatalf("expected enabled empty evaluators explanation, got:\n%s", output)
+	}
+
+	manifest.Evaluate.Enabled = false
+	output = captureStdout(t, func() {
+		printManifestExplanation(manifest)
+	})
+	if !strings.Contains(output, "Evaluators:\n  (disabled)") {
+		t.Fatalf("expected disabled evaluators explanation, got:\n%s", output)
+	}
+}
+
+func TestValidateRejectsUnknownOption(t *testing.T) {
+	err := Execute(context.Background(), []string{"validate", "--unknown", "agent.yaml"})
+	if err == nil {
+		t.Fatal("expected validate unknown option error")
+	}
+	if !strings.Contains(err.Error(), `unknown validate option "--unknown"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func minimalExplainManifest(t *testing.T, evaluateEnabled bool) *config.AgentManifest {
+	t.Helper()
+	tmp := t.TempDir()
+	promptPath := filepath.Join(tmp, "prompt.md")
+	if err := os.WriteFile(promptPath, []byte("test prompt"), 0o644); err != nil {
+		t.Fatalf("write prompt failed: %v", err)
+	}
+	workspacePath := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatalf("create workspace failed: %v", err)
+	}
+	manifest := &config.AgentManifest{
+		APIVersion: "jeju/v1alpha1",
+		Kind:       "Agent",
+		Metadata: config.Metadata{
+			Name: "agent",
+		},
+		Models: config.ModelsConfig{
+			Providers: map[string]config.ModelConfig{
+				"primary": {
+					Type:          "mock",
+					Model:         "mock-react",
+					ContextWindow: 128000,
+				},
+			},
+		},
+		Instructions: config.InstructionsConfig{System: promptPath},
+		Runtime: config.RuntimeConfig{
+			Model:                "primary",
+			Loop:                 config.LoopConfig{Type: "react"},
+			CompressionThreshold: 0.8,
+			Limits: config.RuntimeLimits{
+				MaxSteps:             1,
+				MaxDurationSec:       30,
+				MaxToolCalls:         1,
+				MaxConsecutiveErrors: 1,
+			},
+		},
+		Workspace:   config.WorkspaceConfig{Path: workspacePath},
+		Permissions: config.PermissionsConfig{Access: "workspace", Approval: "never"},
+		Evaluate:    config.EvaluateConfig{Enabled: evaluateEnabled},
+	}
+	if err := config.Validate(manifest); err != nil {
+		t.Fatalf("minimal manifest should validate: %v", err)
+	}
+	return manifest
 }
 
 func TestExecuteUnknownCommandReturnsError(t *testing.T) {

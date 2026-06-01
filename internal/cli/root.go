@@ -33,6 +33,9 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		rawArgsCommand("init", func(args []string) error {
 			return runInit(args)
 		}),
+		rawArgsCommand("info", func(args []string) error {
+			return runInfo(args)
+		}),
 		rawArgsCommand("validate", func(args []string) error {
 			return runValidate(args)
 		}),
@@ -72,7 +75,8 @@ func printHelp(cmd *cobra.Command) {
 
 Usage:
   jeju init <name> [--dir <dir>]
-  jeju validate <agent.yaml>
+  jeju info
+  jeju validate [--explain] <agent.yaml>
   jeju run [--workspace <dir>] <agent.yaml> "<task>"
   jeju evolve [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>
   jeju inspect <run_id>
@@ -82,7 +86,9 @@ Usage:
 Examples:
   jeju init research --dir ~/jeju-agents/research-agent
   cd ~/jeju-agents/research-agent
+  jeju info
   jeju validate agents/research.agent.yaml
+  jeju validate --explain agents/research.agent.yaml
   jeju run agents/research.agent.yaml "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"
   jeju run --workspace /path/to/project agents/code-review.agent.yaml "Review the current repository changes."
   jeju evolve --baseline-only experiments/research-evolve.yaml

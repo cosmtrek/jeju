@@ -12,16 +12,13 @@ import (
 
 var validNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 
-var validModelTypes = map[string]bool{
-	"mock":             true,
-	"openaiCompatible": true,
-}
+var supportedModelTypes = []string{"mock", "openaiCompatible"}
 
-var validPresets = map[string]bool{
-	"":         true,
-	"deepseek": true,
-	"mimo":     true,
-}
+var validModelTypes = boolSet(supportedModelTypes...)
+
+var supportedModelPresets = []string{"deepseek", "mimo"}
+
+var validPresets = boolSet(append([]string{""}, supportedModelPresets...)...)
 
 var validThinkingTypes = map[string]bool{
 	"":         true,
@@ -60,6 +57,24 @@ var validCapabilities = map[string]bool{
 	"networkRead":    true,
 	"networkWrite":   true,
 }
+
+var supportedToolUses = []string{
+	"builtin:read",
+	"builtin:write",
+	"builtin:edit",
+	"builtin:search",
+	"builtin:shell",
+	"command",
+	"http",
+}
+
+var validToolUses = boolSet(supportedToolUses...)
+
+var supportedEvaluatorUses = []string{"rules", "llm", "command"}
+
+var validEvaluatorUses = boolSet(supportedEvaluatorUses...)
+
+var supportedTrajectoryFormats = []string{"jeju-jsonl"}
 
 var validEvalRules = map[string]bool{
 	"finalAnswerExists":       true,
@@ -164,9 +179,7 @@ func validateTools(tools []ToolConfig) error {
 		if tool.Uses == "" {
 			return fmt.Errorf("tool %q uses is required", tool.Name)
 		}
-		switch tool.Uses {
-		case "builtin:read", "builtin:write", "builtin:edit", "builtin:search", "builtin:shell", "command", "http":
-		default:
+		if !validToolUses[tool.Uses] {
 			return fmt.Errorf("tool %q uses %q is not supported", tool.Name, tool.Uses)
 		}
 		if tool.Uses == "command" && tool.Command.Run == "" {
@@ -257,6 +270,9 @@ func validateEvaluators(cfg EvaluateConfig, providers map[string]ModelConfig, ru
 		if evaluator.Name == "" {
 			return fmt.Errorf("evaluate evaluator name is required")
 		}
+		if !validEvaluatorUses[evaluator.Uses] {
+			return fmt.Errorf("evaluate evaluator %q uses %q is not supported", evaluator.Name, evaluator.Uses)
+		}
 		switch evaluator.Uses {
 		case "rules":
 			for _, rule := range evaluator.Rules {
@@ -282,8 +298,6 @@ func validateEvaluators(cfg EvaluateConfig, providers map[string]ModelConfig, ru
 			if evaluator.Command.Run == "" {
 				return fmt.Errorf("evaluate evaluator %q command.run is required", evaluator.Name)
 			}
-		default:
-			return fmt.Errorf("evaluate evaluator %q uses %q is not supported", evaluator.Name, evaluator.Uses)
 		}
 	}
 	return nil
