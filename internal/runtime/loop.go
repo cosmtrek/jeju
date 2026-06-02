@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"jeju/internal/compiler"
-	"jeju/internal/contextmgr"
-	"jeju/internal/evaluate"
-	"jeju/internal/model"
-	"jeju/internal/policy"
-	"jeju/internal/runs"
-	"jeju/internal/tools"
-	"jeju/internal/trajectory"
+	"github.com/cosmtrek/jeju/internal/compiler"
+	"github.com/cosmtrek/jeju/internal/contextmgr"
+	"github.com/cosmtrek/jeju/internal/evaluate"
+	"github.com/cosmtrek/jeju/internal/model"
+	"github.com/cosmtrek/jeju/internal/policy"
+	"github.com/cosmtrek/jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/tools"
+	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
 func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input string) (*RunResult, error) {

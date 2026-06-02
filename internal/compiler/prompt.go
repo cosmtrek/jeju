@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"jeju/internal/model"
-	"jeju/internal/skills"
+	"github.com/cosmtrek/jeju/internal/model"
+	"github.com/cosmtrek/jeju/internal/skills"
 )
 
 func (a *CompiledAgent) SystemPrompt() string {

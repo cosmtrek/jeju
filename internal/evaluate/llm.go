@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"jeju/internal/model"
+	"github.com/cosmtrek/jeju/internal/model"
 )
 
 type LLMEvaluator struct {

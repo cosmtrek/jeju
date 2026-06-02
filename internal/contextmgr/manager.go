@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"jeju/internal/model"
+	"github.com/cosmtrek/jeju/internal/model"
 )
 
 const (

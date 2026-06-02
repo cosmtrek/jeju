@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/config"
 )
 
 func shouldStop(state *RunState, limits config.RuntimeLimits) error {

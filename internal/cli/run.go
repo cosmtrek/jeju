@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"jeju/internal/compiler"
-	"jeju/internal/runtime"
+	"github.com/cosmtrek/jeju/internal/compiler"
+	"github.com/cosmtrek/jeju/internal/runtime"
 )
 
 func runAgent(ctx context.Context, manifestPath, task, workspace string) error {

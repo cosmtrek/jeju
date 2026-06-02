@@ -1,4 +1,4 @@
-module jeju
+module github.com/cosmtrek/jeju
 
 go 1.25
 

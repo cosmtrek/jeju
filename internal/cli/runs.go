@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/runs"
 )
 
 func runRuns() error {

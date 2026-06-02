@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"jeju/internal/cli"
-	"jeju/internal/compiler"
-	"jeju/internal/config"
-	"jeju/internal/evaluate"
-	"jeju/internal/runs"
-	"jeju/internal/trajectory"
+	"github.com/cosmtrek/jeju/internal/cli"
+	"github.com/cosmtrek/jeju/internal/compiler"
+	"github.com/cosmtrek/jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/evaluate"
+	"github.com/cosmtrek/jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
 func TestAgentFixtures(t *testing.T) {

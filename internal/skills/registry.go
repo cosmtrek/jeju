@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/config"
 )
 
 type Registry struct {

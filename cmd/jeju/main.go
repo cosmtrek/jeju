@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"jeju/internal/cli"
+	"github.com/cosmtrek/jeju/internal/cli"
 )
 
 func main() {

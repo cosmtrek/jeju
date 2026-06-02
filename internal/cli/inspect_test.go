@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"jeju/internal/runs"
-	"jeju/internal/trajectory"
+	"github.com/cosmtrek/jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
 func TestSummarizeInspect(t *testing.T) {

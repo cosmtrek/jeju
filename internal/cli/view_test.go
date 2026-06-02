@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"jeju/internal/runs"
-	"jeju/internal/trajectory"
+	"github.com/cosmtrek/jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
 func TestBuildRunReportAndWriteHTML(t *testing.T) {

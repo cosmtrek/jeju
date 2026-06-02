@@ -15,9 +15,9 @@ import (
 	"github.com/yuin/goldmark/extension"
 	"gopkg.in/yaml.v3"
 
-	"jeju/internal/evaluate"
-	"jeju/internal/runs"
-	"jeju/internal/trajectory"
+	"github.com/cosmtrek/jeju/internal/evaluate"
+	"github.com/cosmtrek/jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
 var markdownRenderer = goldmark.New(goldmark.WithExtensions(extension.GFM))

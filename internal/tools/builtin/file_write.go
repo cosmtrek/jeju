@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"jeju/internal/sandbox"
-	"jeju/internal/tools"
+	"github.com/cosmtrek/jeju/internal/sandbox"
+	"github.com/cosmtrek/jeju/internal/tools"
 )
 
 type FileWrite struct {

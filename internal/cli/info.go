@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/config"
 )
 
 func runInfo() error {

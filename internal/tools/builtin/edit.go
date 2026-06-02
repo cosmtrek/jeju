@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"jeju/internal/sandbox"
-	"jeju/internal/tools"
+	"github.com/cosmtrek/jeju/internal/sandbox"
+	"github.com/cosmtrek/jeju/internal/tools"
 )
 
 type Edit struct {

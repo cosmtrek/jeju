@@ -17,12 +17,12 @@ import (
 	"text/template"
 	"time"
 
-	"jeju/internal/compiler"
-	"jeju/internal/config"
-	"jeju/internal/evaluate"
-	"jeju/internal/runs"
-	"jeju/internal/runtime"
-	"jeju/internal/trajectory"
+	"github.com/cosmtrek/jeju/internal/compiler"
+	"github.com/cosmtrek/jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/evaluate"
+	"github.com/cosmtrek/jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/runtime"
+	"github.com/cosmtrek/jeju/internal/trajectory"
 
 	"gopkg.in/yaml.v3"
 )

@@ -47,6 +47,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 	root.AddCommand(newInspectCommand())
 	root.AddCommand(newViewCommand())
 	root.AddCommand(newRunsCommand())
+	root.AddCommand(newVersionCommand())
 	return root
 }
 
@@ -179,6 +180,18 @@ func newRunsCommand() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRuns()
+		},
+	}
+}
+
+func newVersionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:          "version",
+		Short:        "Print build version information",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runVersion()
 		},
 	}
 }

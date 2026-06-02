@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"jeju/internal/config"
-	"jeju/internal/evaluate"
-	"jeju/internal/runs"
-	"jeju/internal/trajectory"
+	"github.com/cosmtrek/jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/evaluate"
+	"github.com/cosmtrek/jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
 func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {

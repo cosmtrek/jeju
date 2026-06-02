@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"jeju/internal/model"
+	"github.com/cosmtrek/jeju/internal/model"
 )
 
 func TestPrepareTruncatesOldToolResultsBeforeSummary(t *testing.T) {

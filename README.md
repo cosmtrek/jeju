@@ -18,14 +18,12 @@ A manifest describes the agent's model, instructions, runtime loop, workspace, t
 
 ## Quick Start
 
-The generated agent bundle includes a manifest, prompt, workspace, skills, run store, and a `mock` model, so the full lifecycle runs without API credentials or approval prompts. Install the CLI from the repository, then choose any local directory for the generated agent project.
+The generated agent bundle includes a manifest, prompt, workspace, skills, run store, and a `mock` model, so the full lifecycle runs without API credentials or approval prompts. Install the CLI, then choose any local directory for the generated agent project.
 
 ```bash
-# Clone the repository and install the CLI.
-git clone https://github.com/cosmtrek/jeju.git
-cd jeju
-go install ./cmd/jeju
-jeju --help
+# Install the latest released CLI.
+curl -fsSL https://raw.githubusercontent.com/cosmtrek/jeju/master/scripts/install.sh | sh
+jeju version
 
 # Scaffold a new agent project wherever you want to keep it.
 jeju init research --dir ~/jeju-agents/research-agent
@@ -43,6 +41,14 @@ jeju inspect <run_id>
 The run writes metadata, a config snapshot, trajectory JSONL, artifacts, and `final.md` under `runs/<run_id>/`. The first inspect view should show the full loop: skill loading, model calls, permission checking, a workspace write, artifacts, and evaluation.
 
 The default `mock` provider is deterministic, so this first run demonstrates Jeju's execution lifecycle rather than live web research.
+
+### Install From Source
+
+Developers can also install Jeju from the Go module:
+
+```bash
+go install github.com/cosmtrek/jeju/cmd/jeju@latest
+```
 
 ### Run With DeepSeek
 

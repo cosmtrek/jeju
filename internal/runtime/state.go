@@ -3,7 +3,7 @@ package runtime
 import (
 	"time"
 
-	"jeju/internal/model"
+	"github.com/cosmtrek/jeju/internal/model"
 )
 
 type RunStatus string

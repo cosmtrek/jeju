@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/runs"
 )
 
 type Recorder struct {

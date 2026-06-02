@@ -8,17 +8,17 @@ import (
 	"strings"
 	"testing"
 
-	"jeju/internal/compiler"
-	"jeju/internal/config"
-	"jeju/internal/memory"
-	"jeju/internal/model"
-	"jeju/internal/policy"
-	"jeju/internal/runs"
-	"jeju/internal/sandbox"
-	"jeju/internal/skills"
-	"jeju/internal/tools"
-	"jeju/internal/tools/builtin"
-	"jeju/internal/trajectory"
+	"github.com/cosmtrek/jeju/internal/compiler"
+	"github.com/cosmtrek/jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/memory"
+	"github.com/cosmtrek/jeju/internal/model"
+	"github.com/cosmtrek/jeju/internal/policy"
+	"github.com/cosmtrek/jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/sandbox"
+	"github.com/cosmtrek/jeju/internal/skills"
+	"github.com/cosmtrek/jeju/internal/tools"
+	"github.com/cosmtrek/jeju/internal/tools/builtin"
+	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
 type nativeFakeClient struct {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"jeju/internal/evaluate"
+	"github.com/cosmtrek/jeju/internal/evaluate"
 )
 
 func TestBaselineOnlyRunsTrainAndSelection(t *testing.T) {

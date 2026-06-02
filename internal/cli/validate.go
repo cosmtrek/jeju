@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/config"
 )
 
 func runValidate(manifestPath string, explain bool) error {

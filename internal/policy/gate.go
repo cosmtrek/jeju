@@ -3,8 +3,8 @@ package policy
 import (
 	"fmt"
 
-	"jeju/internal/config"
-	"jeju/internal/tools"
+	"github.com/cosmtrek/jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/tools"
 )
 
 type Gate struct {

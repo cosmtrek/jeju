@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"jeju/internal/tools"
+	"github.com/cosmtrek/jeju/internal/tools"
 )
 
 type Tool struct {

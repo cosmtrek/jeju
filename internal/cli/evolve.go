@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"jeju/internal/evolve"
+	"github.com/cosmtrek/jeju/internal/evolve"
 )
 
 type evolveCLIOptions struct {

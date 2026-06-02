@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"jeju/internal/config"
-	"jeju/internal/tools"
+	"github.com/cosmtrek/jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/tools"
 )
 
 func TestGateDenyTakesPrecedence(t *testing.T) {
