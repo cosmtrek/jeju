@@ -1,9 +1,12 @@
 name: Release
 
 on:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, e.g. v0.2.2. Leave empty to use svu next."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -22,16 +25,29 @@ jobs:
 
       - name: Create semantic version tag
         id: tag
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           git fetch --force --tags
           go install github.com/caarlos0/svu/v3@latest
 
-          next_tag="$(svu next)"
+          if [ -n "$REQUESTED_VERSION" ]; then
+            next_tag="$REQUESTED_VERSION"
+          else
+            next_tag="$(svu next)"
+          fi
+
+          case "$next_tag" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "Invalid release version: $next_tag; expected vX.Y.Z" >&2
+              exit 1
+              ;;
+          esac
+
           if git rev-parse -q --verify "refs/tags/${next_tag}" >/dev/null; then
-            echo "created=false" >> "$GITHUB_OUTPUT"
-            echo "tag=${next_tag}" >> "$GITHUB_OUTPUT"
-            echo "Tag ${next_tag} already exists; skipping release."
-            exit 0
+            echo "Tag ${next_tag} already exists." >&2
+            exit 1
           fi
 
           git config user.name "github-actions[bot]"
@@ -44,7 +60,6 @@ jobs:
           echo "Created release tag ${next_tag}."
 
       - uses: goreleaser/goreleaser-action@v7
-        if: ${{ steps.tag.outputs.created == 'true' }}
         with:
           version: "~> v2"
           args: release --clean
