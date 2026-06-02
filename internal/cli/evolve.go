@@ -12,6 +12,7 @@ type evolveCLIOptions struct {
 	maxIterations int
 	dryRun        bool
 	baselineOnly  bool
+	runTest       bool
 }
 
 func runEvolve(ctx context.Context, experimentPath string, opts evolveCLIOptions) error {
@@ -20,6 +21,7 @@ func runEvolve(ctx context.Context, experimentPath string, opts evolveCLIOptions
 		MaxIterations: opts.maxIterations,
 		DryRun:        opts.dryRun,
 		BaselineOnly:  opts.baselineOnly,
+		RunTest:       opts.runTest,
 	})
 	if err != nil {
 		return err

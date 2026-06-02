@@ -125,6 +125,7 @@ type RunOptions struct {
 	MaxIterations int
 	DryRun        bool
 	BaselineOnly  bool
+	RunTest       bool
 }
 
 type Result struct {
@@ -142,6 +143,7 @@ type controller struct {
 	events        *eventWriter
 	train         []TaskCase
 	selection     []TaskCase
+	test          []TaskCase
 	renderer      *template.Template
 	history       []historyItem
 	usageMu       sync.Mutex
@@ -347,6 +349,11 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 	baseline.Results["selection"] = selectionBaseline
+	if c.opts.RunTest && c.opts.BaselineOnly {
+		if err := c.evaluateFinalTest(ctx, baseline, baseline); err != nil {
+			return nil, err
+		}
+	}
 	if err := writeJSON(filepath.Join(baseline.Dir, "results.json"), baseline); err != nil {
 		return nil, err
 	}
@@ -446,6 +453,19 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 		}
 	}
 	bestDir := filepath.Join(c.outDir, "best")
+	if c.opts.RunTest {
+		if err := c.evaluateFinalTest(ctx, baseline, best); err != nil {
+			return nil, err
+		}
+		if err := writeJSON(filepath.Join(baseline.Dir, "results.json"), baseline); err != nil {
+			return nil, err
+		}
+		if best != baseline {
+			if err := writeJSON(filepath.Join(best.Dir, "results.json"), best); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if err := os.RemoveAll(bestDir); err != nil {
 		return nil, err
 	}
@@ -512,6 +532,15 @@ func (c *controller) loadData() error {
 	if err != nil {
 		return fmt.Errorf("load selection: %w", err)
 	}
+	if c.opts.RunTest {
+		if strings.TrimSpace(c.exp.Data.Test) == "" {
+			return fmt.Errorf("--test requires data.test in the evolution manifest")
+		}
+		c.test, err = loadTasks(c.resolvePath(c.exp.Data.Test))
+		if err != nil {
+			return fmt.Errorf("load test: %w", err)
+		}
+	}
 	if c.exp.Data.Render.Template != "" {
 		data, err := os.ReadFile(c.resolvePath(c.exp.Data.Render.Template))
 		if err != nil {
@@ -522,6 +551,29 @@ func (c *controller) loadData() error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (c *controller) evaluateFinalTest(ctx context.Context, baseline, best *candidate) error {
+	if len(c.test) == 0 {
+		return fmt.Errorf("--test requires data.test in the evolution manifest")
+	}
+	baselineResult, err := c.evaluateCandidate(ctx, baseline, "test", c.test, nil)
+	if err != nil {
+		return err
+	}
+	baseline.Results["test"] = baselineResult
+	if best != baseline {
+		bestResult, err := c.evaluateCandidate(ctx, best, "test", c.test, nil)
+		if err != nil {
+			return err
+		}
+		best.Results["test"] = bestResult
+	}
+	c.events.Write("test.completed", map[string]any{
+		"baseline": baseline.ID,
+		"best":     best.ID,
+	})
 	return nil
 }
 
@@ -1252,7 +1304,7 @@ func (c *controller) writeReport(best *candidate, candidates []*candidate) (stri
 	fmt.Fprintf(&b, "- experiment: `%s`\n- best: `%s`\n- objective: `%s` `%s`\n\n", c.id, best.ID, c.exp.Objective.Direction, c.exp.Objective.Metric)
 	fmt.Fprintf(&b, "## Best Metrics\n\n")
 	if best.Results != nil {
-		for _, split := range []string{"train", "selection"} {
+		for _, split := range []string{"train", "selection", "test"} {
 			if result := best.Results[split]; result != nil {
 				fmt.Fprintf(&b, "### %s\n\n", split)
 				writeMetricTable(&b, result.Metrics)
@@ -1274,8 +1326,11 @@ func (c *controller) writeReport(best *candidate, candidates []*candidate) (stri
 		fmt.Fprintf(&b, "| `%s` | `%s` | %s | %v | %s | %s |\n", cand.ID, cand.Parent, escapeTable(hypothesis), cand.Rejected, escapeTable(cand.RejectReason), metric)
 	}
 	fmt.Fprintf(&b, "\n## Notes\n\n")
-	if c.exp.Data.Test != "" {
-		fmt.Fprintf(&b, "- `data.test` is configured but not executed in P0-P4; it is reserved for P5 final evaluation.\n")
+	if c.exp.Data.Test != "" && !c.opts.RunTest {
+		fmt.Fprintf(&b, "- `data.test` is configured but was not run. Use `jeju evolve --test` to run it on baseline and final best after selection.\n")
+	}
+	if c.exp.Data.Test != "" && c.opts.RunTest {
+		fmt.Fprintf(&b, "- `data.test` was run only after candidate selection, on baseline and final best. Test metrics do not affect candidate acceptance.\n")
 	}
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		return "", err

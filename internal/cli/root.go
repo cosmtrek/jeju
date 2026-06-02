@@ -130,8 +130,9 @@ func newEvolveCommand(ctx context.Context) *cobra.Command {
 	var maxIterations int
 	var dryRun bool
 	var baselineOnly bool
+	var runTest bool
 	cmd := &cobra.Command{
-		Use:          "evolve [--dry-run] [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>",
+		Use:          "evolve [--dry-run] [--baseline-only] [--test] [--max-iterations N] [--out <dir>] <experiment.yaml>",
 		Short:        "Run an evolution experiment",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
@@ -141,6 +142,7 @@ func newEvolveCommand(ctx context.Context) *cobra.Command {
 				maxIterations: maxIterations,
 				dryRun:        dryRun,
 				baselineOnly:  baselineOnly,
+				runTest:       runTest,
 			})
 		},
 	}
@@ -148,6 +150,7 @@ func newEvolveCommand(ctx context.Context) *cobra.Command {
 	cmd.Flags().IntVar(&maxIterations, "max-iterations", 0, "override search.iterations")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate spec and compile the baseline bundle without model calls")
 	cmd.Flags().BoolVar(&baselineOnly, "baseline-only", false, "run baseline train/selection metrics and report without calling evolver")
+	cmd.Flags().BoolVar(&runTest, "test", false, "run data.test on baseline and final best after selection")
 	return cmd
 }
 

@@ -31,6 +31,86 @@ func TestBaselineOnlyRunsTrainAndSelection(t *testing.T) {
 	if !strings.Contains(text, "evaluation.score") {
 		t.Fatalf("report missing objective metric:\n%s", text)
 	}
+	if !strings.Contains(text, "`data.test` is configured but was not run") {
+		t.Fatalf("report missing test opt-in note:\n%s", text)
+	}
+}
+
+func TestRunTestRunsConfiguredTestSplit(t *testing.T) {
+	root := writeFixture(t)
+	result, err := Run(context.Background(), filepath.Join(root, "experiments", "research-evolve.yaml"), RunOptions{BaselineOnly: true, RunTest: true})
+	if err != nil {
+		t.Fatalf("Run baseline-only --test failed: %v", err)
+	}
+	report, err := os.ReadFile(result.ReportPath)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	text := string(report)
+	if !strings.Contains(text, "### test") {
+		t.Fatalf("report missing test metrics:\n%s", text)
+	}
+	if !strings.Contains(text, "Test metrics do not affect candidate acceptance") {
+		t.Fatalf("report missing final holdout note:\n%s", text)
+	}
+	data, err := os.ReadFile(filepath.Join(result.OutputDir, "best", "results.json"))
+	if err != nil {
+		t.Fatalf("read best results: %v", err)
+	}
+	if !strings.Contains(string(data), `"split": "test"`) {
+		t.Fatalf("best results missing test split:\n%s", string(data))
+	}
+}
+
+func TestRunTestRunsAfterFullSelectionPath(t *testing.T) {
+	root := writeFixture(t)
+	manifestPath := filepath.Join(root, "experiments", "research-evolve.yaml")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	text := strings.Replace(string(data), "  iterations: 1\n", "  iterations: -1\n", 1)
+	if err := os.WriteFile(manifestPath, []byte(text), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	result, err := Run(context.Background(), manifestPath, RunOptions{RunTest: true})
+	if err != nil {
+		t.Fatalf("Run full --test failed: %v", err)
+	}
+	report, err := os.ReadFile(result.ReportPath)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	if !strings.Contains(string(report), "### test") {
+		t.Fatalf("report missing test metrics:\n%s", string(report))
+	}
+	data, err = os.ReadFile(filepath.Join(result.OutputDir, "best", "results.json"))
+	if err != nil {
+		t.Fatalf("read best results: %v", err)
+	}
+	if !strings.Contains(string(data), `"split": "test"`) {
+		t.Fatalf("best results missing test split:\n%s", string(data))
+	}
+}
+
+func TestRunTestRequiresConfiguredTestSplit(t *testing.T) {
+	root := writeFixture(t)
+	manifestPath := filepath.Join(root, "experiments", "research-evolve.yaml")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	text := strings.Replace(string(data), "  test: ../datasets/test.jsonl\n", "", 1)
+	if err := os.WriteFile(manifestPath, []byte(text), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	_, err = Run(context.Background(), manifestPath, RunOptions{BaselineOnly: true, RunTest: true})
+	if err == nil {
+		t.Fatal("expected --test without data.test to fail")
+	}
+	if !strings.Contains(err.Error(), "--test requires data.test") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestCreateCandidateAppliesExactReplacement(t *testing.T) {
@@ -341,6 +421,7 @@ permissions:
 	task := `{"id":"task-1","input":{"question":"Summarize Jeju"},"expected":{"mustInclude":["Jeju Mock Result"]}}` + "\n"
 	writeFile(t, filepath.Join(root, "datasets", "train.jsonl"), task)
 	writeFile(t, filepath.Join(root, "datasets", "selection.jsonl"), task)
+	writeFile(t, filepath.Join(root, "datasets", "test.jsonl"), task)
 	writeFile(t, filepath.Join(root, "experiments", "research-evolve.yaml"), `apiVersion: jeju/v1alpha1
 kind: EvolutionExperiment
 metadata:
@@ -356,6 +437,7 @@ data:
   format: jeju.task.v1
   train: ../datasets/train.jsonl
   selection: ../datasets/selection.jsonl
+  test: ../datasets/test.jsonl
 objective:
   metric: evaluation.score
   direction: maximize

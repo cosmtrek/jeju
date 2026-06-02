@@ -404,7 +404,7 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		"Validate a manifest and optionally explain resolved wiring",
 		"jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent.yaml> \"<task>\"",
 		"Run an agent against a task",
-		"jeju evolve [--dry-run] [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>",
+		"jeju evolve [--dry-run] [--baseline-only] [--test] [--max-iterations N] [--out <dir>] <experiment.yaml>",
 		"Run an evolution experiment",
 		"jeju inspect <run_id>",
 		"Print a run summary and artifact paths",
@@ -446,9 +446,10 @@ func TestEvolveHelpPrintsFlags(t *testing.T) {
 	})
 	for _, want := range []string{
 		"Jeju - Run an evolution experiment",
-		"jeju evolve [--dry-run] [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml> [flags]",
+		"jeju evolve [--dry-run] [--baseline-only] [--test] [--max-iterations N] [--out <dir>] <experiment.yaml> [flags]",
 		"--dry-run",
 		"--baseline-only",
+		"--test",
 		"--max-iterations int",
 		"--out string",
 	} {

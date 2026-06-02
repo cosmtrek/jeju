@@ -5,7 +5,7 @@ Jeju agents are defined by configuration, prompts, tools, skills, permissions, a
 The loop is:
 
 ```text
-target agent -> train runs -> evaluator feedback -> evolver proposal -> patched candidate -> train/selection validation -> best config
+target agent -> train runs -> evaluator feedback -> evolver proposal -> patched candidate -> train/selection validation -> best config -> optional test holdout
 ```
 
 The runtime contract stays the same. Every candidate still goes through:
@@ -22,6 +22,7 @@ config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run
 - Let the user define the optimization objective, guardrails, editable fields, datasets, budget, and output location.
 - Treat system prompts as editable, but only through controlled exact-replacement patches inside isolated candidate bundles.
 - Validate candidates with train and selection splits before accepting a new best config.
+- Optionally run `data.test` after selection on baseline and final best with `--test`.
 - Keep all evidence on disk: proposals, patches, run outputs, metrics, leaderboard, report, and event log.
 
 ## Non-Goals
@@ -88,7 +89,7 @@ Evolution uses three logical splits:
 
 - `train`: visible feedback for the evolver. Failures and metrics from this split drive proposals.
 - `selection`: held-out validation used to accept or reject candidates.
-- `test`: optional field in the schema. The current `jeju evolve` implementation records it but does not run it yet. Use a separate audit script or future final-test support for true final evaluation.
+- `test`: optional final holdout split. It runs only when `jeju evolve --test` is specified, after candidate selection, on baseline and the final best.
 
 Task rows use `jeju.task.v1` JSONL. The fixed fields are small and the user owns the payload shape:
 
@@ -248,7 +249,7 @@ jeju evolve --dry-run experiments/research-evolve.yaml
 jeju evolve --max-iterations 2 --out .jeju-dev/evolve/research experiments/research-evolve.yaml
 ```
 
-`--baseline-only` runs train and selection for the baseline and writes a report without calling the evolver. `--dry-run` validates the experiment and compiles the baseline bundle without model calls.
+`--baseline-only` runs train and selection for the baseline and writes a report without calling the evolver. `--dry-run` validates the experiment and compiles the baseline bundle without model calls. `--test` runs `data.test` after selection on baseline and final best, and records test metrics without using them for candidate acceptance.
 
 ## Validation Fixtures
 
@@ -275,14 +276,14 @@ The effect fixture uses unseen holdout audit tasks outside the evolution selecti
 - Core train/selection evolution is implemented.
 - Task-level expected/eval context is passed to effective evaluation.
 - Non-interactive evolution currently auto-approves runtime permission prompts and auto-answers `ask_user` with an empty string. Hard policy denials still block execution. This is intentionally simple and should be tightened before production automation.
-- `data.test` is part of the schema but not executed by `jeju evolve` yet.
+- `data.test` runs only when `--test` is specified, and only after candidate selection.
 - The proposal channel accepts structured JSON from the evolver final answer. Empty or structurally invalid proposals are rejected before candidate evaluation.
 
 ## Future Directions
 
 The most useful extensions are harness-oriented, not just prompt-oriented:
 
-- Final test support: run `data.test` only for baseline and final best, then include those metrics in `report.md`.
+- Richer test reporting: include baseline-vs-best deltas and per-task failure summaries for `data.test`.
 - Resume support: continue a previous experiment directory without rerunning completed trials.
 - Stronger proposal schema: enforce JSON Schema response formats for evolver outputs when the provider supports it.
 - Failure-surface tagging: classify failures as prompt, tool, skill, evaluator, data, or harness issues before proposing edits.

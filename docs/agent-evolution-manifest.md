@@ -2,7 +2,7 @@
 
 `kind: EvolutionExperiment` defines a self-evolution experiment for one target Jeju agent. It is separate from `kind: Agent`: the experiment describes how to search for a better config, while the target agent manifest still describes how a candidate agent runs.
 
-`jeju evolve` loads the experiment, materializes isolated candidate bundles, runs train and selection tasks, asks an evolver agent for structured proposals, applies safe patches, and writes an auditable best candidate.
+`jeju evolve` loads the experiment, materializes isolated candidate bundles, runs train and selection tasks, asks an evolver agent for structured proposals, applies safe patches, and writes an auditable best candidate. With `--test`, it also runs `data.test` after selection on baseline and the final best.
 
 Relative paths in an evolution manifest are resolved from the manifest file location.
 
@@ -159,7 +159,7 @@ data:
 | `format` | no | Defaults to `jeju.task.v1`; other formats are rejected. |
 | `train` | yes | JSONL tasks used for proposal feedback and train filtering. |
 | `selection` | yes | JSONL tasks used for candidate acceptance. |
-| `test` | no | Reserved for final effect evaluation; current `jeju evolve` does not run it. |
+| `test` | no | Final holdout tasks run only when `jeju evolve --test` is specified. |
 | `render.template` | no | Go template that renders each task into the string passed to `runtime.Run`. |
 
 ### Task JSONL
@@ -410,13 +410,14 @@ Options:
 | Option | Description |
 | --- | --- |
 | `--baseline-only` | Run baseline train/selection and write a report without calling the evolver. |
+| `--test` | Run `data.test` after selection on baseline and final best; test metrics do not affect candidate acceptance. |
 | `--dry-run` | Validate the experiment and compile the baseline bundle without model calls. |
 | `--max-iterations N` | Override `search.iterations`. |
 | `--out DIR` | Override `output.dir`. |
 
 ## Current Limitations
 
-- `data.test` is accepted by the schema but not run by `jeju evolve` yet.
+- `data.test` is opt-in with `--test`; it runs only after candidate selection and does not affect candidate acceptance.
 - Non-interactive evolution auto-approves runtime prompts and auto-answers `ask_user` with an empty string. Hard policy denials still block execution.
 - Patch operations are exact text replacements, not YAML AST patches.
 - Proposal parsing is JSON-based and may reject free-form evolver output.

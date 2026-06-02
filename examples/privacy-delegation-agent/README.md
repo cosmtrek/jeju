@@ -10,7 +10,7 @@ It demonstrates:
 
 - privacy-aware delegation with a concrete leakage metric
 - rich textual evaluator feedback for prompt evolution
-- train/selection/test splits for candidate validation
+- train/selection splits for candidate selection plus an opt-in test holdout
 - safe config-space evolution: only `instructions.system` is editable
 - forbidden fields for permissions, workspace, tools, evaluator commands, and
   model credentials
@@ -25,7 +25,7 @@ export DEEPSEEK_API_KEY=sk-...
 
 go run ./cmd/jeju validate --explain examples/privacy-delegation-agent/agents/privacy.agent.yaml
 go run ./cmd/jeju evolve --baseline-only examples/privacy-delegation-agent/experiments/privacy-evolve.yaml
-go run ./cmd/jeju evolve --max-iterations 2 examples/privacy-delegation-agent/experiments/privacy-evolve.yaml
+go run ./cmd/jeju evolve --test --max-iterations 2 examples/privacy-delegation-agent/experiments/privacy-evolve.yaml
 ```
 
 Evolution output is written under

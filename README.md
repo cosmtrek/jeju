@@ -315,6 +315,9 @@ jeju evolve --baseline-only experiments/evolve.yaml
 # Run the full evolution loop.
 jeju evolve experiments/evolve.yaml
 
+# Run final holdout test metrics after selecting the best candidate.
+jeju evolve --test experiments/evolve.yaml
+
 # Limit real-provider cost while testing.
 jeju evolve --max-iterations 2 --out .jeju-dev/evolve/triage experiments/evolve.yaml
 ```
@@ -330,6 +333,10 @@ Evolution output is written under `output.dir/<experiment_id>/`:
 - `leaderboard.json`: all candidates, metrics, and rejection reasons.
 - `best/`: materialized best candidate bundle.
 - `report.md`: human-readable result summary.
+
+If `data.test` is configured, add `--test` to run the test split only after
+candidate selection, on baseline and the final best. Test metrics are written to
+the report but do not affect candidate acceptance.
 
 See [docs/agent-evolution-manifest.md](docs/agent-evolution-manifest.md) for the full schema and [docs/self-evolution.md](docs/self-evolution.md) for the design details.
 
