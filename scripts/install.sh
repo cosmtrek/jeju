@@ -15,23 +15,6 @@ need() {
 need curl
 need tar
 
-resolve_latest_tag() {
-  tag="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1 || true)"
-  if [ -n "$tag" ]; then
-    printf '%s\n' "$tag"
-    return
-  fi
-
-  tag="$(curl -fsSL "https://github.com/$REPO/releases.atom" 2>/dev/null | sed -n "s#.*href=\"https://github.com/$REPO/releases/tag/\\([^\"]*\\)\".*#\\1#p" | head -n 1 || true)"
-  if [ -n "$tag" ]; then
-    printf '%s\n' "$tag"
-    return
-  fi
-
-  latest_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" 2>/dev/null || true)"
-  printf '%s\n' "$latest_url" | sed -n 's#.*/releases/tag/\([^/?#]*\).*#\1#p'
-}
-
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -65,19 +48,14 @@ case "$arch" in
     ;;
 esac
 
+archive="jeju_${os}_${arch}.tar.gz"
 if [ "$VERSION" = "latest" ]; then
-  tag="$(resolve_latest_tag)"
+  base_url="https://github.com/$REPO/releases/latest/download"
+  display_version="latest"
 else
-  tag="$VERSION"
+  base_url="https://github.com/$REPO/releases/download/$VERSION"
+  display_version="$VERSION"
 fi
-
-if [ -z "$tag" ]; then
-  echo "error: could not resolve release version" >&2
-  exit 1
-fi
-
-archive="jeju_${tag#v}_${os}_${arch}.tar.gz"
-base_url="https://github.com/$REPO/releases/download/$tag"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -99,5 +77,5 @@ mkdir -p "$INSTALL_DIR"
 mv "$tmpdir/jeju" "$INSTALL_DIR/jeju"
 chmod +x "$INSTALL_DIR/jeju"
 
-echo "installed jeju $tag to $INSTALL_DIR/jeju"
+echo "installed jeju $display_version to $INSTALL_DIR/jeju"
 echo "run: jeju version"
