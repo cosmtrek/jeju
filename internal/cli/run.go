@@ -10,7 +10,16 @@ import (
 	"github.com/cosmtrek/jeju/internal/runtime"
 )
 
-func runAgent(ctx context.Context, manifestPath, task, workspace string) error {
+const (
+	runOutputLive  = "live"
+	runOutputFinal = "final"
+)
+
+func runAgent(ctx context.Context, manifestPath, task, workspace, output string) error {
+	if output != runOutputLive && output != runOutputFinal {
+		return fmt.Errorf("run --output must be one of: %s, %s", runOutputLive, runOutputFinal)
+	}
+
 	opts := compiler.Options{}
 	if workspace != "" {
 		absWorkspace, err := filepath.Abs(workspace)
@@ -23,7 +32,9 @@ func runAgent(ctx context.Context, manifestPath, task, workspace string) error {
 	if err != nil {
 		return err
 	}
-	rt := runtime.New()
+	rt := runtime.NewWithOptions(runtime.Options{
+		SuppressConsoleTrajectory: output == runOutputFinal,
+	})
 	result, err := rt.Run(ctx, agent, task)
 	if err != nil {
 		return err
@@ -31,6 +42,12 @@ func runAgent(ctx context.Context, manifestPath, task, workspace string) error {
 	reportPath, err := writeDefaultRunReport(agent.RunStore, result.RunID)
 	if err != nil {
 		return fmt.Errorf("write run report: %w", err)
+	}
+	if output == runOutputFinal {
+		if result.Final != "" {
+			fmt.Println(strings.TrimRight(result.Final, "\n"))
+		}
+		return nil
 	}
 	if result.Final != "" {
 		fmt.Printf("\nFinal\n%s\n", strings.TrimRight(result.Final, "\n"))

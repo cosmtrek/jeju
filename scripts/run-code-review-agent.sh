@@ -36,5 +36,5 @@ fi
 "$bin" validate "$agent_dir/$manifest"
 (
   cd "$target_workspace"
-  "$bin" run --workspace "$target_workspace" "$agent_dir/$manifest" "Review the current repository workspace changes. Use read-only Git and file inspection tools, then return the JSON review result directly."
+  "$bin" run --output final --workspace "$target_workspace" "$agent_dir/$manifest" "Review the current repository workspace changes. Use read-only Git and file inspection tools, then return the JSON review result directly."
 )

@@ -17,9 +17,19 @@ type Recorder struct {
 	counter         uint64
 }
 
+type RecorderOptions struct {
+	Console bool
+}
+
 func NewRecorder(runDir string) (*Recorder, error) {
+	return NewRecorderWithOptions(runDir, RecorderOptions{Console: true})
+}
+
+func NewRecorderWithOptions(runDir string, opts RecorderOptions) (*Recorder, error) {
 	recorder := &Recorder{}
-	recorder.Sinks = append(recorder.Sinks, NewConsoleSink())
+	if opts.Console {
+		recorder.Sinks = append(recorder.Sinks, NewConsoleSink())
+	}
 	fileSink, err := NewFileSink(filepath.Join(runDir, runs.TrajectoryFile))
 	if err != nil {
 		return nil, err

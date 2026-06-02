@@ -35,8 +35,9 @@ From the Jeju checkout, omitting the argument reviews the current directory:
 The default model is `deepseek-v4-pro`. To use another provider, edit the
 manifest's `models.providers.primary` block.
 
-The JSON review is printed directly by `jeju run` and is also saved to
-`runs/<run_id>/final.md`.
+The script runs `jeju run --output final`, so stdout contains only the JSON
+review. The full trajectory is still saved under `runs/<run_id>/trajectory.jsonl`,
+and the final answer is saved to `runs/<run_id>/final.md`.
 
 The manifest keeps `workspace.path` pointed at this use case's local placeholder
 workspace so it can be validated in place. For normal reuse, keep the agent
@@ -44,7 +45,7 @@ config anywhere, for example `~/.jeju/ability/code-review/`, and bind it to the
 target project at runtime:
 
 ```bash
-jeju run --workspace /path/to/project ~/.jeju/ability/code-review/agents/code-review.agent.yaml "Review the current repository changes."
+jeju run --output final --workspace /path/to/project ~/.jeju/ability/code-review/agents/code-review.agent.yaml "Review the current repository changes."
 ```
 
 Inspect the recorded run:

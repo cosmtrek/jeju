@@ -163,6 +163,69 @@ func TestRunWorkspaceOverride(t *testing.T) {
 	}
 }
 
+func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	output := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"run", "--output", "final", "agents/research.agent.yaml", "Save a short note to notes.md"}); err != nil {
+			t.Fatalf("run --output final failed: %v", err)
+		}
+	})
+	for _, unexpected := range []string{"Jeju Run", "\nStep ", "model  ", "tool   ", "\nOutputs\n", "report "} {
+		if strings.Contains(output, unexpected) {
+			t.Fatalf("run --output final leaked console trajectory %q:\n%s", unexpected, output)
+		}
+	}
+	if !strings.Contains(output, "This is a deterministic mock response.") {
+		t.Fatalf("run --output final did not print final answer:\n%s", output)
+	}
+
+	store := runs.NewStore("./runs")
+	items, err := store.ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(items))
+	}
+	runDir := filepath.Join(tmp, "jeju-work", "runs", items[0].RunID)
+	assertFileExists(t, filepath.Join(runDir, runs.MetadataFile))
+	assertFileExists(t, filepath.Join(runDir, runs.ConfigSnapshotFile))
+	assertFileExists(t, filepath.Join(runDir, runs.TrajectoryFile))
+	assertFileExists(t, filepath.Join(runDir, runs.FinalFile))
+	assertFileExists(t, filepath.Join(runDir, runs.ReportFile))
+
+	events, err := trajectory.ReadFile(filepath.Join(runDir, runs.TrajectoryFile))
+	if err != nil {
+		t.Fatalf("ReadFile trajectory failed: %v", err)
+	}
+	requireEventTypes(t, events,
+		trajectory.EventRunStarted,
+		trajectory.EventModelCompleted,
+		trajectory.EventRunCompleted,
+	)
+}
+
+func TestRunRejectsUnknownOutputMode(t *testing.T) {
+	err := Execute(context.Background(), []string{"run", "--output", "json", "agents/research.agent.yaml", "Save a short note"})
+	if err == nil {
+		t.Fatal("expected unknown output mode error")
+	}
+	if !strings.Contains(err.Error(), "run --output must be one of: live, final") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRunTaskCanStartWithFlagLikeText(t *testing.T) {
 	tmp := t.TempDir()
 	restoreCWD := chdir(t, tmp)
@@ -203,6 +266,28 @@ func TestRunRejectsWorkspaceFlagAfterManifest(t *testing.T) {
 	}
 }
 
+func TestRunRejectsOutputFlagAfterManifest(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "--output", "final", "Save a short note"})
+	if err == nil {
+		t.Fatal("expected misplaced --output error")
+	}
+	if !strings.Contains(err.Error(), "run flags must appear before <agent.yaml>") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 	output := captureStdout(t, func() {
 		if err := Execute(context.Background(), []string{"--help"}); err != nil {
@@ -217,7 +302,7 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		"List supported providers, tools, evaluators, and trajectory formats",
 		"jeju validate [--explain] <agent.yaml>",
 		"Validate a manifest and optionally explain resolved wiring",
-		"jeju run [--workspace <dir>] <agent.yaml> \"<task>\"",
+		"jeju run [--workspace <dir>] [--output live|final] <agent.yaml> \"<task>\"",
 		"Run an agent against a task",
 		"jeju evolve [--dry-run] [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>",
 		"Run an evolution experiment",
@@ -242,7 +327,8 @@ func TestExecuteSubcommandHelpPrintsFlags(t *testing.T) {
 	})
 	for _, want := range []string{
 		"Jeju - Run an agent against a task",
-		`jeju run [--workspace <dir>] <agent.yaml> "<task>" [flags]`,
+		`jeju run [--workspace <dir>] [--output live|final] <agent.yaml> "<task>" [flags]`,
+		"--output string",
 		"--workspace string",
 	} {
 		if !strings.Contains(output, want) {

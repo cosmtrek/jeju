@@ -352,3 +352,5 @@ Every run writes to `./runs/<run_id>/`:
 - `evaluation.json` when evaluation is enabled
 
 The run output location is a Jeju runtime convention, not an agent manifest field.
+Use `jeju run --output final` when stdout should contain only the final answer;
+the run directory and trajectory recording remain unchanged.

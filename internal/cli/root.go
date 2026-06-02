@@ -98,8 +98,9 @@ func newValidateCommand() *cobra.Command {
 
 func newRunCommand(ctx context.Context) *cobra.Command {
 	var workspace string
+	var output string
 	cmd := &cobra.Command{
-		Use:          `run [--workspace <dir>] <agent.yaml> "<task>"`,
+		Use:          `run [--workspace <dir>] [--output live|final] <agent.yaml> "<task>"`,
 		Short:        "Run an agent against a task",
 		Args:         cobra.MinimumNArgs(2),
 		SilenceUsage: true,
@@ -107,16 +108,18 @@ func newRunCommand(ctx context.Context) *cobra.Command {
 			if isMisplacedRunFlag(args[1]) {
 				return cmd.FlagErrorFunc()(cmd, fmt.Errorf("run flags must appear before <agent.yaml>; use -- before the task if it starts with flag-like text"))
 			}
-			return runAgent(ctx, args[0], strings.Join(args[1:], " "), workspace)
+			return runAgent(ctx, args[0], strings.Join(args[1:], " "), workspace, output)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", "", "override workspace.path for this run")
+	cmd.Flags().StringVar(&output, "output", runOutputLive, "console output mode: live or final")
 	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 
 func isMisplacedRunFlag(arg string) bool {
-	return arg == "--workspace" || strings.HasPrefix(arg, "--workspace=")
+	return arg == "--workspace" || strings.HasPrefix(arg, "--workspace=") ||
+		arg == "--output" || strings.HasPrefix(arg, "--output=")
 }
 
 func newEvolveCommand(ctx context.Context) *cobra.Command {

@@ -7,15 +7,17 @@ import (
 )
 
 type Runtime struct {
-	input         *bufio.Reader
-	autoApprove   bool
-	autoUserInput *string
+	input                     *bufio.Reader
+	autoApprove               bool
+	autoUserInput             *string
+	suppressConsoleTrajectory bool
 }
 
 type Options struct {
-	Input         io.Reader
-	AutoApprove   bool
-	AutoUserInput *string
+	Input                     io.Reader
+	AutoApprove               bool
+	AutoUserInput             *string
+	SuppressConsoleTrajectory bool
 }
 
 func New() *Runtime {
@@ -28,8 +30,9 @@ func NewWithOptions(opts Options) *Runtime {
 		input = os.Stdin
 	}
 	return &Runtime{
-		input:         bufio.NewReader(input),
-		autoApprove:   opts.AutoApprove,
-		autoUserInput: opts.AutoUserInput,
+		input:                     bufio.NewReader(input),
+		autoApprove:               opts.AutoApprove,
+		autoUserInput:             opts.AutoUserInput,
+		suppressConsoleTrajectory: opts.SuppressConsoleTrajectory,
 	}
 }

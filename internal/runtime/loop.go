@@ -25,7 +25,9 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 	if err := agent.RunStore.WriteConfigSnapshot(runDir.RunID, agent.ConfigSnapshot); err != nil {
 		return nil, err
 	}
-	recorder, err := trajectory.NewRecorder(runDir.Path)
+	recorder, err := trajectory.NewRecorderWithOptions(runDir.Path, trajectory.RecorderOptions{
+		Console: !r.suppressConsoleTrajectory,
+	})
 	if err != nil {
 		return nil, err
 	}
