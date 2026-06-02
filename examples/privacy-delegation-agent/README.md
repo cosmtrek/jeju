@@ -34,6 +34,44 @@ root.
 Inspect `leaderboard.json`, `report.md`, and `best/` to see whether the
 candidate improved without changing protected fields.
 
+One recorded DeepSeek run produced this summary:
+
+```text
+experiment: 20260602-204927-evolve-privacy-delegation
+best: candidate-001-01
+
+split       candidate          privacy_judge  pass_rate  model_errors
+train       baseline           0.4594         0.0000     0.5000
+train       candidate-001-01   0.9938         1.0000     0.0000
+selection   baseline           0.4875         0.0000     0.5000
+selection   candidate-001-01   0.9938         1.0000     0.0000
+```
+
+The same run shows the artifact trail Jeju leaves behind:
+
+```text
+.jeju-dev/evolve/privacy-delegation/20260602-204927-evolve-privacy-delegation/
+  report.md
+  leaderboard.json
+  baseline/results.json
+  best/results.json
+  best/agents/privacy.agent.yaml
+  iterations/001/proposals.json
+  iterations/001/candidate-001-01/...
+```
+
+Inspecting a candidate trial shows the concrete run artifacts:
+
+```bash
+go run ./cmd/jeju inspect \
+  --runs-dir .jeju-dev/evolve/privacy-delegation/20260602-204927-evolve-privacy-delegation/iterations/001/candidate-001-01/tasks/privacy-selection-003/trial-01/runs \
+  20260602-204954-privacy-delegation-target
+```
+
+The inspect output reports one completed model call, three artifacts, a passing
+`privacy_judge` evaluation with score `1`, and file paths for `final.md`,
+`trajectory.jsonl`, `metadata.json`, `config.snapshot.yaml`, and `artifacts/`.
+
 The target and evolver agents use the DeepSeek preset. To use another provider,
 edit the `models.providers.primary` blocks in `agents/privacy.agent.yaml` and
 `agents/evolver.agent.yaml`.

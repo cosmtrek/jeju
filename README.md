@@ -26,6 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/cosmtrek/jeju/master/scripts/instal
 jeju version
 
 # Scaffold a new agent project wherever you want to keep it.
+mkdir -p ~/jeju-agents
 jeju init research --dir ~/jeju-agents/research-agent
 
 # Run the generated agent bundle.

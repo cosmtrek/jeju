@@ -21,7 +21,8 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "jeju",
 		Short: "config-defined local agent runtime",
-		Example: `  jeju init research --dir ~/jeju-agents/research-agent
+		Example: `  mkdir -p ~/jeju-agents
+  jeju init research --dir ~/jeju-agents/research-agent
   cd ~/jeju-agents/research-agent
   jeju info
   jeju validate agents/research.agent.yaml
