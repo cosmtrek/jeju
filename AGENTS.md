@@ -29,6 +29,8 @@
 - `jeju init <name>` is allowed to scaffold into the current directory, but tests and local quick-start runs should use `jeju init <name> --dir <workdir>`.
 - Do not leave temporary scaffold output such as `agents/research.agent.yaml`, `prompts/research.md`, `skills/web-research`, `runs/<run_id>`, or `workspace/<agent>` in the repo root unless the task explicitly asks to add source fixtures.
 - `.jeju-dev/` is the preferred ignored local quick-start directory.
+- In the Jeju source checkout, local development runs, demo runs, benchmark outputs, and evolution outputs must be written under repo-root `.jeju-dev/`, for example `--runs-dir .jeju-dev/runs/<scenario>` or `--out .jeju-dev/evolve/<scenario>`.
+- Keep user project defaults separate from source-checkout hygiene: `./runs` is acceptable inside a generated agent project, but source-repo scripts and examples should not create root `runs/` or example-local `.jeju-dev/` directories.
 
 ## Path Hygiene
 

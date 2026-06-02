@@ -203,7 +203,7 @@ func shouldSkipDir(rel string) bool {
 		}
 	}
 	for i, part := range parts {
-		if part == "runs" && (i == 0 || (len(parts) == 3 && parts[0] == "usecases" && i == 2)) {
+		if part == "runs" && (i == 0 || (len(parts) == 3 && parts[0] == "examples" && i == 2)) {
 			return true
 		}
 	}

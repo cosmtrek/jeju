@@ -27,7 +27,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
   jeju validate agents/research.agent.yaml
   jeju validate --explain agents/research.agent.yaml
   jeju run agents/research.agent.yaml "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"
-  jeju run --workspace /path/to/project agents/code-review.agent.yaml "Review the current repository changes."
+  jeju run --runs-dir .jeju-dev/runs/code-review --workspace /path/to/project agents/code-review.agent.yaml "Review the current repository changes."
   jeju evolve --baseline-only experiments/research-evolve.yaml
   jeju view 20260526-120000-research`,
 		SilenceUsage:  true,
@@ -99,8 +99,9 @@ func newValidateCommand() *cobra.Command {
 func newRunCommand(ctx context.Context) *cobra.Command {
 	var workspace string
 	var output string
+	var runsDir string
 	cmd := &cobra.Command{
-		Use:          `run [--workspace <dir>] [--output live|final] <agent.yaml> "<task>"`,
+		Use:          `run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent.yaml> "<task>"`,
 		Short:        "Run an agent against a task",
 		Args:         cobra.MinimumNArgs(2),
 		SilenceUsage: true,
@@ -108,10 +109,11 @@ func newRunCommand(ctx context.Context) *cobra.Command {
 			if isMisplacedRunFlag(args[1]) {
 				return cmd.FlagErrorFunc()(cmd, fmt.Errorf("run flags must appear before <agent.yaml>; use -- before the task if it starts with flag-like text"))
 			}
-			return runAgent(ctx, args[0], strings.Join(args[1:], " "), workspace, output)
+			return runAgent(ctx, args[0], strings.Join(args[1:], " "), workspace, runsDir, output)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", "", "override workspace.path for this run")
+	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or ./runs)")
 	cmd.Flags().StringVar(&output, "output", runOutputLive, "console output mode: live or final")
 	cmd.Flags().SetInterspersed(false)
 	return cmd
@@ -119,6 +121,7 @@ func newRunCommand(ctx context.Context) *cobra.Command {
 
 func isMisplacedRunFlag(arg string) bool {
 	return arg == "--workspace" || strings.HasPrefix(arg, "--workspace=") ||
+		arg == "--runs-dir" || strings.HasPrefix(arg, "--runs-dir=") ||
 		arg == "--output" || strings.HasPrefix(arg, "--output=")
 }
 
@@ -149,42 +152,50 @@ func newEvolveCommand(ctx context.Context) *cobra.Command {
 }
 
 func newInspectCommand() *cobra.Command {
-	return &cobra.Command{
+	var runsDir string
+	cmd := &cobra.Command{
 		Use:          "inspect <run_id>",
 		Short:        "Print a run summary and artifact paths",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInspect(args[0])
+			return runInspect(args[0], runsDir)
 		},
 	}
+	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or ./runs)")
+	return cmd
 }
 
 func newViewCommand() *cobra.Command {
 	var out string
+	var runsDir string
 	cmd := &cobra.Command{
 		Use:          "view <run_id> [--out <html>]",
 		Short:        "Render an HTML run report",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runView(args[0], out)
+			return runView(args[0], out, runsDir)
 		},
 	}
 	cmd.Flags().StringVar(&out, "out", "", "output HTML path")
+	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or ./runs)")
 	return cmd
 }
 
 func newRunsCommand() *cobra.Command {
-	return &cobra.Command{
+	var runsDir string
+	cmd := &cobra.Command{
 		Use:          "runs",
 		Short:        "List local runs",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRuns()
+			return runRuns(runsDir)
 		},
 	}
+	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or ./runs)")
+	return cmd
 }
 
 func newVersionCommand() *cobra.Command {

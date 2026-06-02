@@ -6,7 +6,7 @@ metadata:
   description: "Repeatable code review agent for structured diff review"
   labels:
     scenario: personal-agent
-    use_case: code-review
+    example: code-review
 
 models:
   providers:

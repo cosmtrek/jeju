@@ -12,8 +12,8 @@ import (
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
-func runInspect(runID string) error {
-	store := runs.NewStore(filepath.Clean("./runs"))
+func runInspect(runID, runsDir string) error {
+	store := runs.NewStore(resolveRunsDir(runsDir))
 	runDir, err := store.LoadRun(runID)
 	if err != nil {
 		return err

@@ -1,6 +1,6 @@
 # Code Review Agent
 
-This use case shows Jeju as a repeatable personal/domain agent. The agent
+This example shows Jeju as a repeatable personal/domain agent. The agent
 discovers current Git workspace changes through read-only tools, inspects the
 current repository, and returns structured findings directly as the final
 answer.
@@ -35,23 +35,24 @@ From the Jeju checkout, omitting the argument reviews the current directory:
 The default model is `deepseek-v4-pro`. To use another provider, edit the
 manifest's `models.providers.primary` block.
 
-The script runs `jeju run --output final`, so stdout contains only the JSON
-review. The full trajectory is still saved under `runs/<run_id>/trajectory.jsonl`,
-and the final answer is saved to `runs/<run_id>/final.md`.
+The script runs `jeju run --output final --runs-dir .jeju-dev/runs/code-review`,
+so stdout contains only the JSON review. The full trajectory is still saved
+under `.jeju-dev/runs/code-review/<run_id>/trajectory.jsonl`, and the final
+answer is saved to `.jeju-dev/runs/code-review/<run_id>/final.md`.
 
-The manifest keeps `workspace.path` pointed at this use case's local placeholder
+The manifest keeps `workspace.path` pointed at this example's local placeholder
 workspace so it can be validated in place. For normal reuse, keep the agent
 config anywhere, for example `~/.jeju/ability/code-review/`, and bind it to the
 target project at runtime:
 
 ```bash
-jeju run --output final --workspace /path/to/project ~/.jeju/ability/code-review/agents/code-review.agent.yaml "Review the current repository changes."
+jeju run --output final --runs-dir .jeju-dev/runs/code-review --workspace /path/to/project ~/.jeju/ability/code-review/agents/code-review.agent.yaml "Review the current repository changes."
 ```
 
 Inspect the recorded run:
 
 ```bash
 cd /path/to/project
-go run /path/to/jeju/cmd/jeju runs
-go run /path/to/jeju/cmd/jeju inspect <run_id>
+go run /path/to/jeju/cmd/jeju runs --runs-dir /path/to/jeju/.jeju-dev/runs/code-review
+go run /path/to/jeju/cmd/jeju inspect --runs-dir /path/to/jeju/.jeju-dev/runs/code-review <run_id>
 ```

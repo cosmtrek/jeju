@@ -42,6 +42,18 @@ The run writes metadata, a config snapshot, trajectory JSONL, artifacts, and `fi
 
 The default `mock` provider is deterministic, so this first run demonstrates Jeju's execution lifecycle rather than live web research.
 
+When running demos or fixture scenarios from the Jeju source checkout, keep
+generated artifacts under the ignored `.jeju-dev/` directory:
+
+```bash
+jeju run --runs-dir .jeju-dev/runs/research agents/research.agent.yaml "Save a short note to notes.md"
+jeju runs --runs-dir .jeju-dev/runs/research
+jeju inspect --runs-dir .jeju-dev/runs/research <run_id>
+```
+
+Inside a generated agent project, the default `./runs` store remains the normal
+user-facing run history.
+
 ### Install From Source
 
 Developers can also install Jeju from the Go module:
@@ -321,14 +333,14 @@ Evolution output is written under `output.dir/<experiment_id>/`:
 
 See [docs/agent-evolution-manifest.md](docs/agent-evolution-manifest.md) for the full schema and [docs/self-evolution.md](docs/self-evolution.md) for the design details.
 
-## Recommended Use Cases
+## Examples
 
-Runnable recommended scenarios live under [usecases](usecases/README.md).
+Runnable recommended scenarios live under [examples](examples/README.md).
 These are not test fixtures; they are example agent bundles for repeatable,
-evaluable workflows such as code review, translation, research, model comparison,
-and agent-as-skill integration.
+evaluable workflows such as code review, privacy-aware delegation, research,
+model comparison, and agent-as-skill integration.
 
-The first use case is a [code review agent](usecases/code-review-agent/README.md)
+The first example is a [code review agent](examples/code-review-agent/README.md)
 that reviews the current Git workspace diff with read-only tools and prints
 structured findings directly.
 
@@ -371,3 +383,8 @@ make test-evolve-effect-e2e PROVIDER=mimo
 ```
 
 Fixture scripts copy sources into temporary or `.jeju-dev/<scenario>/` workdirs before running, so fixture sources stay clean. Set `JEJU_MIMO_BASE_URL` if you need to override the MiMo endpoint.
+
+For source-checkout development, avoid writing generated runs to repo-root
+`runs/` or example-local `runs/` directories. Prefer `--runs-dir
+.jeju-dev/runs/<scenario>` for demo runs and `.jeju-dev/evolve/<scenario>` for
+evolution output.

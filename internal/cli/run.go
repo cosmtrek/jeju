@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cosmtrek/jeju/internal/compiler"
+	"github.com/cosmtrek/jeju/internal/runs"
 	"github.com/cosmtrek/jeju/internal/runtime"
 )
 
@@ -15,12 +16,12 @@ const (
 	runOutputFinal = "final"
 )
 
-func runAgent(ctx context.Context, manifestPath, task, workspace, output string) error {
+func runAgent(ctx context.Context, manifestPath, task, workspace, runsDir, output string) error {
 	if output != runOutputLive && output != runOutputFinal {
 		return fmt.Errorf("run --output must be one of: %s, %s", runOutputLive, runOutputFinal)
 	}
 
-	opts := compiler.Options{}
+	opts := compiler.Options{RunStore: runs.NewStore(resolveRunsDir(runsDir))}
 	if workspace != "" {
 		absWorkspace, err := filepath.Abs(workspace)
 		if err != nil {

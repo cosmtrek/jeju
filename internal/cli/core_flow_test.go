@@ -216,6 +216,84 @@ func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
 	)
 }
 
+func TestRunCommandsUseCustomRunsDir(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	customRuns := filepath.Join(tmp, "jeju-runs")
+	if err := Execute(ctx, []string{"run", "--runs-dir", customRuns, "agents/research.agent.yaml", "Save a short note to notes.md"}); err != nil {
+		t.Fatalf("run --runs-dir failed: %v", err)
+	}
+
+	store := runs.NewStore(customRuns)
+	items, err := store.ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns custom store failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 custom run, got %d", len(items))
+	}
+	runID := items[0].RunID
+	assertFileExists(t, filepath.Join(customRuns, runID, runs.MetadataFile))
+	if _, err := os.Stat(filepath.Join("runs", runID, runs.MetadataFile)); !os.IsNotExist(err) {
+		t.Fatalf("run unexpectedly wrote metadata to default ./runs")
+	}
+
+	if err := Execute(ctx, []string{"runs", "--runs-dir", customRuns}); err != nil {
+		t.Fatalf("runs --runs-dir failed: %v", err)
+	}
+	if err := Execute(ctx, []string{"inspect", "--runs-dir", customRuns, runID}); err != nil {
+		t.Fatalf("inspect --runs-dir failed: %v", err)
+	}
+	customReport := filepath.Join(tmp, "custom-runs-report.html")
+	if err := Execute(ctx, []string{"view", "--runs-dir", customRuns, runID, "--out", customReport}); err != nil {
+		t.Fatalf("view --runs-dir failed: %v", err)
+	}
+	assertFileExists(t, customReport)
+}
+
+func TestRunCommandsUseRunsDirEnv(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	customRuns := filepath.Join(tmp, "env-runs")
+	t.Setenv(runsDirEnv, customRuns)
+	if err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "Save a short note to notes.md"}); err != nil {
+		t.Fatalf("run with JEJU_RUNS_DIR failed: %v", err)
+	}
+	items, err := runs.NewStore(customRuns).ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns env store failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 env run, got %d", len(items))
+	}
+	if err := Execute(ctx, []string{"runs"}); err != nil {
+		t.Fatalf("runs with JEJU_RUNS_DIR failed: %v", err)
+	}
+	if err := Execute(ctx, []string{"inspect", items[0].RunID}); err != nil {
+		t.Fatalf("inspect with JEJU_RUNS_DIR failed: %v", err)
+	}
+}
+
 func TestRunRejectsUnknownOutputMode(t *testing.T) {
 	err := Execute(context.Background(), []string{"run", "--output", "json", "agents/research.agent.yaml", "Save a short note"})
 	if err == nil {
@@ -288,6 +366,28 @@ func TestRunRejectsOutputFlagAfterManifest(t *testing.T) {
 	}
 }
 
+func TestRunRejectsRunsDirFlagAfterManifest(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "--runs-dir", filepath.Join(tmp, "runs"), "Save a short note"})
+	if err == nil {
+		t.Fatal("expected misplaced --runs-dir error")
+	}
+	if !strings.Contains(err.Error(), "run flags must appear before <agent.yaml>") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 	output := captureStdout(t, func() {
 		if err := Execute(context.Background(), []string{"--help"}); err != nil {
@@ -302,7 +402,7 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		"List supported providers, tools, evaluators, and trajectory formats",
 		"jeju validate [--explain] <agent.yaml>",
 		"Validate a manifest and optionally explain resolved wiring",
-		"jeju run [--workspace <dir>] [--output live|final] <agent.yaml> \"<task>\"",
+		"jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent.yaml> \"<task>\"",
 		"Run an agent against a task",
 		"jeju evolve [--dry-run] [--baseline-only] [--max-iterations N] [--out <dir>] <experiment.yaml>",
 		"Run an evolution experiment",
@@ -327,8 +427,9 @@ func TestExecuteSubcommandHelpPrintsFlags(t *testing.T) {
 	})
 	for _, want := range []string{
 		"Jeju - Run an agent against a task",
-		`jeju run [--workspace <dir>] [--output live|final] <agent.yaml> "<task>" [flags]`,
+		`jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent.yaml> "<task>" [flags]`,
 		"--output string",
+		"--runs-dir string",
 		"--workspace string",
 	} {
 		if !strings.Contains(output, want) {

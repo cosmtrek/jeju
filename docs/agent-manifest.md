@@ -338,11 +338,13 @@ Built-in rules:
 - `noPermissionDenied`
 - `runCompleted`
 
-Evaluation results are written to `runs/<run_id>/evaluation.json`.
+Evaluation results are written to `<runs-dir>/<run_id>/evaluation.json`.
 
 ## Run Output
 
-Every run writes to `./runs/<run_id>/`:
+Every run writes to `<runs-dir>/<run_id>/`. The default run store is `./runs`,
+or `JEJU_RUNS_DIR` when that environment variable is set. CLI commands can
+override it with `--runs-dir <dir>`.
 
 - `metadata.json`
 - `config.snapshot.yaml`
@@ -354,3 +356,13 @@ Every run writes to `./runs/<run_id>/`:
 The run output location is a Jeju runtime convention, not an agent manifest field.
 Use `jeju run --output final` when stdout should contain only the final answer;
 the run directory and trajectory recording remain unchanged.
+
+In a generated user agent project, `./runs` is the normal local run history. In
+the Jeju source checkout, prefer ignored development paths such as
+`.jeju-dev/runs/<scenario>`:
+
+```bash
+jeju run --runs-dir .jeju-dev/runs/research agents/research.agent.yaml "Save a note"
+jeju runs --runs-dir .jeju-dev/runs/research
+jeju inspect --runs-dir .jeju-dev/runs/research <run_id>
+```

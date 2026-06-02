@@ -33,8 +33,8 @@ func renderMarkdown(src string) template.HTML {
 	return template.HTML(buf.String())
 }
 
-func runView(runID, out string) error {
-	store := runs.NewStore(filepath.Clean("./runs"))
+func runView(runID, out, runsDir string) error {
+	store := runs.NewStore(resolveRunsDir(runsDir))
 	runDir, err := store.LoadRun(runID)
 	if err != nil {
 		return err

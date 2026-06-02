@@ -86,10 +86,10 @@ func TestSearchDefaultSkipsGeneratedRunDirs(t *testing.T) {
 	writeSearchFile(t, box, "internal/runs/store.go", "needle\n")
 	writeSearchFile(t, box, "src/dist/source.go", "needle\n")
 	writeSearchFile(t, box, "pkg/build/source.go", "needle\n")
-	writeSearchFile(t, box, "usecases/code-review-agent/.jeju-dev/config.yaml", "needle\n")
+	writeSearchFile(t, box, "examples/code-review-agent/.jeju-dev/config.yaml", "needle\n")
 	writeSearchFile(t, box, "runs/20260531/artifact.txt", "needle\n")
-	writeSearchFile(t, box, "usecases/code-review-agent/runs/20260531/artifact.txt", "needle\n")
-	writeSearchFile(t, box, "usecases/code-review-agent/subdir/runs/source.txt", "needle\n")
+	writeSearchFile(t, box, "examples/code-review-agent/runs/20260531/artifact.txt", "needle\n")
+	writeSearchFile(t, box, "examples/code-review-agent/subdir/runs/source.txt", "needle\n")
 	writeSearchFile(t, box, ".jeju-dev/tmp.txt", "needle\n")
 	writeSearchFile(t, box, "dist/generated.txt", "needle\n")
 	writeSearchFile(t, box, "build/generated.txt", "needle\n")
@@ -121,8 +121,8 @@ func TestSearchDefaultSkipsGeneratedRunDirs(t *testing.T) {
 		"internal/runs/store.go",
 		"src/dist/source.go",
 		"pkg/build/source.go",
-		"usecases/code-review-agent/.jeju-dev/config.yaml",
-		"usecases/code-review-agent/subdir/runs/source.txt",
+		"examples/code-review-agent/.jeju-dev/config.yaml",
+		"examples/code-review-agent/subdir/runs/source.txt",
 	} {
 		if !paths[filepath.ToSlash(path)] {
 			t.Fatalf("expected match for %s, got %+v", path, out.Matches)

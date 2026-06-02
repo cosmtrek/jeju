@@ -364,6 +364,9 @@ output:
 ```
 
 `output.dir` defaults to `.jeju-dev/evolve/<metadata.name>` relative to the evolution manifest.
+For source-checkout demos and examples, prefer a repo-root ignored path such as
+`.jeju-dev/evolve/<scenario>` so generated experiment artifacts do not accumulate
+inside source fixture directories.
 
 Each run creates:
 

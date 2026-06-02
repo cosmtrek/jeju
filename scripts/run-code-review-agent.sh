@@ -2,9 +2,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-agent_dir="$repo_root/usecases/code-review-agent"
+agent_dir="$repo_root/examples/code-review-agent"
 manifest="agents/code-review.agent.yaml"
 bin="$repo_root/.jeju-dev/bin/jeju"
+runs_dir="$repo_root/.jeju-dev/runs/code-review"
 target_workspace="${1:-$(pwd)}"
 
 env_key="${JEJU_DEEPSEEK_ENV_KEY:-DEEPSEEK_API_KEY}"
@@ -36,5 +37,5 @@ fi
 "$bin" validate "$agent_dir/$manifest"
 (
   cd "$target_workspace"
-  "$bin" run --output final --workspace "$target_workspace" "$agent_dir/$manifest" "Review the current repository workspace changes. Use read-only Git and file inspection tools, then return the JSON review result directly."
+  "$bin" run --output final --runs-dir "$runs_dir" --workspace "$target_workspace" "$agent_dir/$manifest" "Review the current repository workspace changes. Use read-only Git and file inspection tools, then return the JSON review result directly."
 )

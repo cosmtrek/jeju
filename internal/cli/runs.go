@@ -2,13 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/cosmtrek/jeju/internal/runs"
 )
 
-func runRuns() error {
-	store := runs.NewStore(filepath.Clean("./runs"))
+func runRuns(runsDir string) error {
+	store := runs.NewStore(resolveRunsDir(runsDir))
 	items, err := store.ListRuns()
 	if err != nil {
 		return err

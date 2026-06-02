@@ -233,6 +233,10 @@ Each experiment creates:
   report.md
 ```
 
+In a generated user agent project, `.jeju-dev/evolve/<name>` can be relative to
+that project. In the Jeju source checkout, write evolution output to repo-root
+`.jeju-dev/evolve/<scenario>` rather than example-local `.jeju-dev/` directories.
+
 `best/` is a copy of the accepted best candidate bundle. It is the config artifact a human can inspect, compare, and choose to promote manually.
 
 ## CLI
