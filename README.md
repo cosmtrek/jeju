@@ -394,3 +394,7 @@ For source-checkout development, avoid writing generated runs to repo-root
 `runs/` or example-local `runs/` directories. Prefer `--runs-dir
 .jeju-dev/runs/<scenario>` for demo runs and `.jeju-dev/evolve/<scenario>` for
 evolution output.
+
+## License
+
+Jeju is released under the MIT License. See [LICENSE](LICENSE) for details.
