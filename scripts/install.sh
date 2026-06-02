@@ -22,6 +22,12 @@ resolve_latest_tag() {
     return
   fi
 
+  tag="$(curl -fsSL "https://github.com/$REPO/releases.atom" 2>/dev/null | sed -n "s#.*href=\"https://github.com/$REPO/releases/tag/\\([^\"]*\\)\".*#\\1#p" | head -n 1 || true)"
+  if [ -n "$tag" ]; then
+    printf '%s\n' "$tag"
+    return
+  fi
+
   latest_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" 2>/dev/null || true)"
   printf '%s\n' "$latest_url" | sed -n 's#.*/releases/tag/\([^/?#]*\).*#\1#p'
 }
