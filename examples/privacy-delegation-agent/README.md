@@ -1,17 +1,17 @@
 # Privacy Delegation Agent
 
 This example is a PUPA-lite scenario inspired by privacy-conscious delegation
-benchmarks. It shows Jeju as a governed evolution harness: a weak agent leaks
-private details into a request meant for an external LLM, a deterministic
-evaluator explains the leakage, and `jeju evolve` may improve only the system
-prompt while forbidden config fields remain locked.
+benchmarks. It shows Jeju as an evaluation-guided local agent harness: a weak
+agent leaks private details into a request meant for an external LLM, a
+deterministic evaluator explains the leakage, and `jeju evolve` may improve only
+the system prompt while forbidden config fields remain locked.
 
 It demonstrates:
 
 - privacy-aware delegation with a concrete leakage metric
 - rich textual evaluator feedback for prompt evolution
 - train/selection splits for candidate selection plus an opt-in test holdout
-- safe config-space evolution: only `instructions.system` is editable
+- constrained config-space improvement: only `instructions.system` is editable
 - forbidden fields for permissions, workspace, tools, evaluator commands, and
   model credentials
 - auditable candidate bundles, leaderboard, report, and run trajectories

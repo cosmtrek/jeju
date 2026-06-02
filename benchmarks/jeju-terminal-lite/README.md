@@ -1,6 +1,6 @@
 # Jeju Terminal Lite Benchmark
 
-This is a Jeju-specific benchmark suite inspired by five public Terminal-Bench
+This is a Jeju-specific benchmark fixture inspired by five public Terminal-Bench
 2.0 task categories:
 
 - `regex-log`
@@ -10,8 +10,10 @@ This is a Jeju-specific benchmark suite inspired by five public Terminal-Bench
 - `openssl-selfsigned-cert`
 
 The fixtures and checkers in this directory are local Jeju fixtures, not copied
-Terminal-Bench hidden benchmark data. The suite is intentionally small and
-deterministic so it can be used as a development benchmark for Jeju's V0 runtime.
+Terminal-Bench hidden benchmark data, and they are not official Terminal-Bench
+scores. The suite is intentionally small and deterministic so it can exercise
+Jeju's local workspace effects, permission gates, run artifacts, and checker
+integration during development.
 
 ## Coverage
 

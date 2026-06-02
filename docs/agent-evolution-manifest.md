@@ -1,6 +1,6 @@
 # Agent Evolution Manifest
 
-`kind: EvolutionExperiment` defines a self-evolution experiment for one target Jeju agent. It is separate from `kind: Agent`: the experiment describes how to search for a better config, while the target agent manifest still describes how a candidate agent runs.
+`kind: EvolutionExperiment` defines an evaluation-guided improvement experiment for one target Jeju agent. It is separate from `kind: Agent`: the experiment describes how to search for a better config, while the target agent manifest still describes how a candidate agent runs.
 
 `jeju evolve` loads the experiment, materializes isolated candidate bundles, runs train and selection tasks, asks an evolver agent for structured proposals, applies safe patches, and writes an auditable best candidate. With `--test`, it also runs `data.test` after selection on baseline and the final best.
 

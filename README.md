@@ -1,20 +1,20 @@
 # Jeju
 
-> Define in config. Execute with boundaries. Trace everything. Improve with evidence.
+> Define behavior in config. Run with boundaries. Inspect every effect. Improve with evidence.
 
 ![Jeju project architecture](docs/jeju-architecture.png)
 
-Jeju is a config-defined agent runtime written in Go. It turns declarative manifests into runnable agents through a strict load, validate, compile, and run boundary.
+Jeju is an experimental local-first agent harness for developers who want to define agent behavior in config, run it with strict boundaries, inspect every effect, and improve it with evaluation evidence.
 
-A manifest describes the agent's model, instructions, runtime loop, workspace, tools, skills, permissions, context budget, and evaluation rules. The runtime then executes the compiled result with workspace controls, permission gates, auditable trajectories, file-backed artifacts, inspection views, and optional config-space self-evolution.
+A manifest describes the agent's model, instructions, runtime loop, workspace, tools, skills, permissions, context budget, and evaluation rules. Jeju executes the compiled result with workspace controls, permission gates, file-backed run artifacts, inspection views, and optional evaluation-guided config improvement.
 
 ## Features
 
-- **Config-defined agents**: define models, instructions, tools, skills, permissions, context budget, and evaluation in one manifest.
-- **Compiled runtime boundary**: Jeju follows `config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run`, so execution never depends on raw YAML.
-- **Bounded execution**: work happens inside explicit workspace, tool, skill, permission, sandbox, timeout, and context-window limits.
-- **Auditable trajectories**: every run records lifecycle, model, context, tool, permission, artifact, and evaluation events, with large payloads stored separately.
-- **Evidence-driven improvement**: inspect completed runs, evaluate outcomes, and use `jeju evolve` to search config-space patches against train and selection tasks.
+- **Config-defined behavior**: define models, instructions, tools, skills, permissions, context budget, and evaluation in one manifest.
+- **Strict execution boundaries**: work happens inside explicit workspace, tool, skill, permission, sandbox, timeout, and context-window limits.
+- **Effect-level inspection**: every run records lifecycle, model, context, tool, permission, artifact, and evaluation events, with large payloads stored separately.
+- **File-backed evidence**: each run writes metadata, a config snapshot, trajectory JSONL, artifacts, evaluation output, and `final.md`.
+- **Evaluation-guided improvement**: inspect completed runs, evaluate outcomes, and use `jeju evolve` to search config-space patches against train and selection tasks.
 
 ## Quick Start
 
@@ -94,7 +94,7 @@ jeju run agents/research.agent.yaml "Create a deep research brief on AI agent ev
 
 ## Design Philosophy
 
-Jeju treats an agent as a small, explicit runtime unit instead of an opaque application. The manifest is the source of truth for behavior, the compiler fixes the executable boundary, and the runtime records each meaningful effect:
+Jeju treats an agent as a small, explicit harness unit instead of an opaque application. The manifest is the source of truth for behavior, the compiler fixes the executable boundary, and the runtime records each meaningful effect:
 
 ```text
 Manifest -> Validate -> Compile -> Run -> Gate -> Trace -> Evaluate -> Inspect
@@ -104,7 +104,7 @@ The runtime does not read YAML directly. Configuration is loaded, validated, and
 
 The current runtime stores runs on disk, constrains file and shell tools to a configured workspace, and leaves behind enough metadata and trajectory data to inspect what happened.
 
-Self-evolution is built on top of the same contract. An evolution experiment does not mutate the source agent in place; it runs candidate bundles, scores them with task-level evaluation, applies only allowed exact patches, and materializes the best accepted config separately.
+Evaluation-guided improvement is built on top of the same contract. An evolution experiment does not mutate the source agent in place; it runs candidate bundles, scores them with task-level evaluation, applies only allowed exact patches, and materializes the best accepted config separately.
 
 ## Agent Manifest
 
@@ -186,12 +186,12 @@ The important sections are:
 - `tools`: declares built-in and custom tools plus capability metadata for permission decisions.
 - `skills`: points at skill roots and manually activates the skills that should load instructions.
 - `permissions`: gates tool execution before sensitive operations happen.
-- Run output records model calls, tool calls, permission decisions, skill events, artifacts, evaluation, and lifecycle events under `./runs`.
+- Run output records model calls, tool calls, permission decisions, skill events, artifacts, evaluation, and lifecycle events under the configured run store, defaulting to `./runs`.
 - `evaluate`: optionally runs rule-based checks after completion.
 
-## Agent Self-Evolution
+## Evaluation-Guided Improvement
 
-Jeju can optimize a config-defined agent with `jeju evolve`. An evolution experiment is a separate `kind: EvolutionExperiment` manifest that points at a target agent, datasets, an objective metric, edit boundaries, an evolver agent, search limits, and an output directory.
+Jeju can improve a config-defined agent with `jeju evolve`. An evolution experiment is a separate `kind: EvolutionExperiment` manifest that points at a target agent, datasets, an objective metric, edit boundaries, an evolver agent, search limits, and an output directory.
 
 The current implementation is an offline optimization loop:
 
@@ -342,14 +342,13 @@ See [docs/agent-evolution-manifest.md](docs/agent-evolution-manifest.md) for the
 
 ## Examples
 
-Runnable recommended scenarios live under [examples](examples/README.md).
-These are not test fixtures; they are example agent bundles for repeatable,
-evaluable workflows such as code review, privacy-aware delegation, research,
-model comparison, and agent-as-skill integration.
+Runnable recommended scenarios live under [examples](examples/README.md). These
+are example agent bundles, not test fixtures.
 
-The first example is a [code review agent](examples/code-review-agent/README.md)
-that reviews the current Git workspace diff with read-only tools and prints
-structured findings directly.
+Current examples cover a [code review agent](examples/code-review-agent/README.md)
+and a [privacy delegation agent](examples/privacy-delegation-agent/README.md).
+They show how Jeju defines behavior in config, runs with explicit boundaries,
+records effects, and uses evaluation evidence to improve an agent.
 
 ## Tests
 

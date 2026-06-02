@@ -1,8 +1,9 @@
 # Jeju BFCL Lite Benchmark
 
 This benchmark is a small Jeju-specific fixture inspired by BFCL categories. It
-does not copy BFCL test data. The goal is to exercise Jeju's custom command tool
-surface with schema-guided tool calls.
+does not copy BFCL test data and is not an official BFCL score. The goal is to
+exercise Jeju's custom command tool surface with schema-guided tool calls and
+file-backed run evidence.
 
 ## Tasks
 
@@ -36,5 +37,5 @@ A BFCL-lite run should check both behavior and artifacts:
 - `irrelevance-no-call`: trajectory contains no `tool.requested` events; final
   answer explains the concept directly.
 
-These tasks intentionally avoid parallel tool calls because Jeju V0 supports one
-tool call per action.
+These tasks intentionally avoid parallel tool calls because the current Jeju
+agent loop supports one tool call per action.

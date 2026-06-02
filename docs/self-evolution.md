@@ -1,6 +1,6 @@
-# Agent Self-Evolution
+# Evaluation-Guided Improvement
 
-Jeju agents are defined by configuration, prompts, tools, skills, permissions, and evaluators. A normal run already leaves an auditable record under `runs/<run_id>/`: the config snapshot, trajectory, final answer, evaluation result, and artifacts. Agent self-evolution builds an optimization loop on top of that record.
+Jeju agents are defined by configuration, prompts, tools, skills, permissions, and evaluators. A normal run already leaves an auditable record under `runs/<run_id>/`: the config snapshot, trajectory, final answer, evaluation result, and artifacts. Evaluation-guided improvement builds an optimization loop on top of that record.
 
 The loop is:
 
@@ -18,7 +18,7 @@ config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run
 
 ## Goals
 
-- Optimize a baseline agent manifest with `jeju evolve <experiment.yaml>`.
+- Improve a baseline agent manifest with `jeju evolve <experiment.yaml>`.
 - Let the user define the optimization objective, guardrails, editable fields, datasets, budget, and output location.
 - Treat system prompts as editable, but only through controlled exact-replacement patches inside isolated candidate bundles.
 - Validate candidates with train and selection splits before accepting a new best config.

@@ -5,16 +5,17 @@ self-contained agent bundle. A bundle can be as small as one manifest plus one
 prompt, and can add sample inputs, evaluators, tools, or a local workspace when
 the scenario needs them.
 
-Examples are different from test fixtures: they are intended to show where Jeju
-is useful as a repeatable, evaluable, local-first agent runtime.
+Examples are different from test fixtures: they show how Jeju can define agent
+behavior in config, run it with boundaries, inspect effects, and improve it with
+evaluation evidence.
 
 ## Available Examples
 
 - [Code review agent](code-review-agent/README.md): reviews a Git diff and
   returns structured findings checked by a local evaluator.
-- [Privacy delegation agent](privacy-delegation-agent/README.md): evolves a
+- [Privacy delegation agent](privacy-delegation-agent/README.md): improves a
   weak privacy-preserving delegation prompt using deterministic leakage
-  feedback.
+  evidence.
 
 ## Local Artifacts
 

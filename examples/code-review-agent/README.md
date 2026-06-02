@@ -1,9 +1,9 @@
 # Code Review Agent
 
-This example shows Jeju as a repeatable personal/domain agent. The agent
-discovers current Git workspace changes through read-only tools, inspects the
-current repository, and returns structured findings directly as the final
-answer.
+This example shows how Jeju turns a narrow developer workflow into a
+config-defined, bounded, inspectable agent. The agent discovers current Git
+workspace changes through read-only tools, inspects the current repository, and
+returns structured findings directly as the final answer.
 
 It demonstrates:
 

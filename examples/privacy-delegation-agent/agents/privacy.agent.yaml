@@ -3,7 +3,7 @@ kind: Agent
 
 metadata:
   name: privacy-delegation-target
-  description: "Target privacy delegation agent for governed self-evolution demo"
+  description: "Target privacy delegation agent for evaluation-guided improvement demo"
 
 models:
   providers:

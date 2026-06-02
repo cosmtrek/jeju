@@ -2,7 +2,7 @@
 
 ## Project Shape
 
-- Jeju is a Go 1.25 local-first, config-defined mini agent runtime.
+- Jeju is a Go 1.25 experimental local-first agent harness.
 - Keep implementation under `internal/`. Do not add `pkg/` until a public API is intentionally stabilized.
 - Agent manifest docs live in `docs/agent-manifest.md`; evolution experiment docs live in `docs/agent-evolution-manifest.md`.
 - DeepSeek setup notes live in `docs/deepseek.md`.
