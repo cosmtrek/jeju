@@ -19,24 +19,11 @@ metadata:
 target:
   agent: ../agents/triage.agent.yaml
   editable:
-    - instructions.system
-    - models.providers.primary.temperature
-    - runtime.limits.maxSteps
-    - tools[].description
-    - skills.active
-  forbidden:
-    - permissions.access
-    - permissions.approval
-    - workspace.path
-    - evaluate.evaluators[].command.run
-    - tools[].command.run
-    - tools[].command.args
-    - tools[].http.url
-    - models.providers.*.envKey
-    - models.providers.*.baseUrl
+    - harness:prompt
+    - skill:triage
+    - tool:lookup
 
 data:
-  format: jeju.task.v1
   train: ../datasets/train.jsonl
   selection: ../datasets/selection.jsonl
   test: ../datasets/test.jsonl
@@ -45,7 +32,6 @@ data:
 
 objective:
   metric: evaluation.evaluators["triage_judge"].score
-  direction: maximize
   minDelta: 0.2
   guards:
     - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
@@ -59,17 +45,10 @@ evolver:
 
 search:
   iterations: 2
-  trialsPerTask: 1
   parallelism: 2
-  seed: 42
-  budget:
-    maxRuns: 80
-    maxModelTokens: 800000
 
 output:
   dir: ../.jeju-dev/evolve-triage
-
-extensions: {}
 ```
 
 ## Top-Level Fields
@@ -83,9 +62,8 @@ extensions: {}
 | `data` | yes | Train and selection datasets plus optional rendering. |
 | `objective` | yes | Primary metric, direction, improvement threshold, guards, and guidance. |
 | `evolver` | yes | Jeju agent used to propose patches. |
-| `search` | no | Iteration, trial, parallelism, seed, and budget controls. |
+| `search` | no | Iteration, trial, parallelism, and budget controls. |
 | `output` | no | Experiment output directory. |
-| `extensions` | no | Reserved for experimental extension data. Core behavior must not depend on it. |
 
 ## Metadata
 
@@ -105,48 +83,74 @@ metadata:
 target:
   agent: ../agents/triage.agent.yaml
   editable:
-    - instructions.system
-  forbidden:
-    - permissions.access
-    - workspace.path
-    - tools[].command.run
+    - harness:prompt
+    - skill:triage
 ```
 
 | Field | Required | Description |
 | --- | --- | --- |
 | `agent` | yes | Target `kind: Agent` manifest, resolved relative to the evolution manifest. |
-| `editable` | yes | Manifest paths the evolver may change. |
-| `forbidden` | no | Manifest paths that must never change. Forbidden paths override editable paths. |
+| `editable` | yes | Harness surfaces the evolver may optimize. Prefer aliases such as `harness:prompt`, `skill:<name>`, and `tool:<name>`. |
+| `forbidden` | no | Extra case-specific paths that must never change. Jeju also applies default safety protections. Forbidden paths override editable paths. |
 
 Path syntax:
 
+- `harness:prompt` expands to `instructions.system`.
+- `skill:<name>` expands to `skills.active` plus the named skill directory
+  under each configured `skills.dirs` root.
+- `harness:skills` expands to `skills.active` plus every configured
+  `skills.dirs` root.
+- `tool:<name>` expands to the named tool's description. This is the default
+  safe surface for tool-use strategy.
+- `harness:tools` expands the same tool-use strategy surface for every tool.
 - Dot paths address object fields, for example `runtime.limits.maxSteps`.
 - `[]` matches array elements, for example `tools[].description`.
 - `*` matches one map key segment, for example `models.providers.*.temperature`.
 - `instructions.system` is special: patches edit the referenced prompt file.
+- `file:<relative-path>` edits a referenced bundle file. The path is resolved
+  relative to the target agent manifest and must remain inside the candidate
+  bundle, for example `file:../skills/triage/SKILL.md`.
+- `dir:<relative-path>` exposes files under a referenced bundle directory and
+  authorizes `file:` patches inside it, for example `dir:../skills/triage`.
 
-The controller snapshots manifest leaf fields before and after patching. Any changed field outside `editable` or inside `forbidden` rejects the candidate.
+The controller snapshots manifest leaf fields before and after patching. Any changed field outside expanded `editable` or inside effective `forbidden` rejects the candidate.
 
-Recommended forbidden paths:
+Jeju applies these default forbidden paths to every evolution run:
 
 ```yaml
 forbidden:
-  - permissions.access
-  - permissions.approval
-  - workspace.path
-  - evaluate.evaluators[].command.run
-  - tools[].command.run
-  - tools[].command.args
-  - tools[].http.url
+  - permissions
+  - workspace
   - models.providers.*.envKey
   - models.providers.*.baseUrl
+  - evaluate.evaluators[].command
+  - tools[].command
+  - tools[].http
+  - tools[].env
+  - tools[].capabilities
+  - skills.dirs
+```
+
+Only add `target.forbidden` for case-specific constraints beyond those defaults.
+
+`tool:<name>` intentionally does not grant schema files, implementation files,
+command, HTTP, environment, or capability changes. Those can alter parameter
+contracts or execution boundaries and must be listed explicitly when an
+experiment really needs them:
+
+```yaml
+target:
+  editable:
+    - tool:search
+    - file:../schemas/search.schema.json
+  forbidden:
+    - runtime.limits.maxSteps
 ```
 
 ## Data
 
 ```yaml
 data:
-  format: jeju.task.v1
   train: ../datasets/train.jsonl
   selection: ../datasets/selection.jsonl
   test: ../datasets/test.jsonl
@@ -156,7 +160,6 @@ data:
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `format` | no | Defaults to `jeju.task.v1`; other formats are rejected. |
 | `train` | yes | JSONL tasks used for proposal feedback and train filtering. |
 | `selection` | yes | JSONL tasks used for candidate acceptance. |
 | `test` | no | Final holdout tasks run only when `jeju evolve --test` is specified. |
@@ -209,7 +212,6 @@ Customer tier: {{ .Input.customer_tier }}
 ```yaml
 objective:
   metric: evaluation.score
-  direction: maximize
   minDelta: 0.02
   guards:
     - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
@@ -221,7 +223,7 @@ objective:
 | Field | Required | Description |
 | --- | --- | --- |
 | `metric` | yes | Primary metric source used for candidate selection. |
-| `direction` | yes | `maximize` or `minimize`. |
+| `direction` | no | `maximize` or `minimize`. Defaults to `maximize`. |
 | `minDelta` | no | Minimum improvement over the incumbent best. Defaults to `0`. |
 | `guards` | no | Hard constraints. A candidate that fails a guard is rejected. |
 | `guidance` | no | Qualitative instructions passed to the evolver. It does not affect scoring directly. |
@@ -282,6 +284,16 @@ Single proposal:
       "target": "instructions.system",
       "find": "You are a support assistant.\n",
       "replace": "You are a support assistant. Return only strict JSON.\n"
+    },
+    {
+      "target": "file:../skills/triage/SKILL.md",
+      "find": "Answer carefully.\n",
+      "replace": "Answer carefully. Follow the triage rubric before final output.\n"
+    },
+    {
+      "target": "file:../skills/triage/examples.md",
+      "op": "write",
+      "content": "Use the triage rubric before responding.\n"
     }
   ],
   "confidence": 0.8
@@ -314,7 +326,7 @@ Proposal fields:
 | `id` | no | Proposal id. Jeju fills one if omitted. |
 | `parent_candidate` | no | Filled by Jeju when materializing a candidate. |
 | `hypothesis` | yes | Why the change should improve the metric. |
-| `changes` | yes | Exact replacement patch operations. |
+| `changes` | yes | Patch operations. |
 | `confidence` | no | Optional evolver confidence. |
 
 Patch operation fields:
@@ -322,20 +334,17 @@ Patch operation fields:
 | Field | Required | Description |
 | --- | --- | --- |
 | `target` | yes | Editable path. |
-| `find` | yes | Text that must match exactly once. |
-| `replace` | yes | Replacement text. |
+| `op` | no | `replace` or `write`. Defaults to `replace`. |
+| `find` | for `replace` | Text that must match exactly once. |
+| `replace` | for `replace` | Replacement text. |
+| `content` | for `write` | Full file content to write. |
 
 ## Search
 
 ```yaml
 search:
   iterations: 3
-  trialsPerTask: 1
   parallelism: 2
-  seed: 42
-  budget:
-    maxRuns: 100
-    maxModelTokens: 1000000
 ```
 
 | Field | Required | Default | Description |
@@ -343,7 +352,6 @@ search:
 | `iterations` | no | `3` | Maximum proposal iterations. |
 | `trialsPerTask` | no | `1` | Repeated runs per candidate/task. |
 | `parallelism` | no | `1` | Concurrent trial workers. |
-| `seed` | no | unset | Reserved for deterministic search behavior. |
 | `budget.maxRuns` | no | unset | Stop when recorded candidate/evolver run count reaches this value. |
 | `budget.maxModelTokens` | no | unset | Stop when recorded model token usage reaches this value. |
 

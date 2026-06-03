@@ -28,16 +28,15 @@ import (
 )
 
 type Experiment struct {
-	APIVersion string         `yaml:"apiVersion"`
-	Kind       string         `yaml:"kind"`
-	Metadata   Metadata       `yaml:"metadata"`
-	Target     TargetSpec     `yaml:"target"`
-	Data       DataSpec       `yaml:"data"`
-	Objective  ObjectiveSpec  `yaml:"objective"`
-	Evolver    EvolverSpec    `yaml:"evolver"`
-	Search     SearchSpec     `yaml:"search"`
-	Output     OutputSpec     `yaml:"output"`
-	Extensions map[string]any `yaml:"extensions,omitempty"`
+	APIVersion string        `yaml:"apiVersion"`
+	Kind       string        `yaml:"kind"`
+	Metadata   Metadata      `yaml:"metadata"`
+	Target     TargetSpec    `yaml:"target"`
+	Data       DataSpec      `yaml:"data"`
+	Objective  ObjectiveSpec `yaml:"objective"`
+	Evolver    EvolverSpec   `yaml:"evolver"`
+	Search     SearchSpec    `yaml:"search"`
+	Output     OutputSpec    `yaml:"output"`
 
 	path    string
 	baseDir string
@@ -56,7 +55,6 @@ type TargetSpec struct {
 }
 
 type DataSpec struct {
-	Format    string     `yaml:"format"`
 	Train     string     `yaml:"train"`
 	Selection string     `yaml:"selection"`
 	Test      string     `yaml:"test,omitempty"`
@@ -84,7 +82,6 @@ type SearchSpec struct {
 	Iterations    int        `yaml:"iterations"`
 	TrialsPerTask int        `yaml:"trialsPerTask"`
 	Parallelism   int        `yaml:"parallelism"`
-	Seed          int64      `yaml:"seed,omitempty"`
 	Budget        BudgetSpec `yaml:"budget,omitempty"`
 }
 
@@ -116,8 +113,10 @@ type Proposal struct {
 
 type PatchOp struct {
 	Target  string `json:"target"`
+	Op      string `json:"op,omitempty"`
 	Find    string `json:"find"`
 	Replace string `json:"replace"`
+	Content string `json:"content,omitempty"`
 }
 
 type RunOptions struct {
@@ -197,6 +196,21 @@ type RunStats struct {
 	DurationSec      float64 `json:"duration_sec"`
 }
 
+const editableDirMaxFiles = 64
+
+var defaultForbiddenTargets = []string{
+	"permissions",
+	"workspace",
+	"models.providers.*.envKey",
+	"models.providers.*.baseUrl",
+	"evaluate.evaluators[].command",
+	"tools[].command",
+	"tools[].http",
+	"tools[].env",
+	"tools[].capabilities",
+	"skills.dirs",
+}
+
 type historyItem struct {
 	Iteration int                `json:"iteration"`
 	Candidate string             `json:"candidate"`
@@ -225,6 +239,9 @@ func LoadFile(path string) (*Experiment, error) {
 	if err := exp.validate(); err != nil {
 		return nil, err
 	}
+	if err := exp.validateExpandedTargetConflicts(); err != nil {
+		return nil, err
+	}
 	return &exp, nil
 }
 
@@ -238,11 +255,11 @@ func Run(ctx context.Context, specPath string, opts RunOptions) (*Result, error)
 }
 
 func (e *Experiment) applyDefaults() {
-	if e.Data.Format == "" {
-		e.Data.Format = "jeju.task.v1"
-	}
 	if e.Evolver.Proposals == 0 {
 		e.Evolver.Proposals = 2
+	}
+	if e.Objective.Direction == "" {
+		e.Objective.Direction = "maximize"
 	}
 	if e.Search.Iterations == 0 {
 		e.Search.Iterations = 3
@@ -274,9 +291,6 @@ func (e *Experiment) validate() error {
 	if len(e.Target.Editable) == 0 {
 		return fmt.Errorf("target.editable is required")
 	}
-	if e.Data.Format != "jeju.task.v1" {
-		return fmt.Errorf("data.format %q is not supported", e.Data.Format)
-	}
 	if e.Data.Train == "" || e.Data.Selection == "" {
 		return fmt.Errorf("data.train and data.selection are required")
 	}
@@ -296,6 +310,19 @@ func (e *Experiment) validate() error {
 		for _, forbidden := range e.Target.Forbidden {
 			if editable == forbidden {
 				return fmt.Errorf("target.editable %q conflicts with target.forbidden", editable)
+			}
+		}
+	}
+	return nil
+}
+
+func (e *Experiment) validateExpandedTargetConflicts() error {
+	ctrl := &controller{exp: e}
+	agentPath := ctrl.resolvePath(e.Target.Agent)
+	for _, editable := range ctrl.expandedEditableTargets(agentPath) {
+		for _, forbidden := range ctrl.expandedForbiddenTargets(agentPath) {
+			if targetsConflict(agentPath, editable, forbidden) {
+				return fmt.Errorf("target.editable %q conflicts with target.forbidden %q", editable, forbidden)
 			}
 		}
 	}
@@ -693,6 +720,19 @@ func (c *controller) createBundleFromSource(dst string) (string, error) {
 			}
 		}
 	}
+	bundleBase := commonAncestor(paths)
+	for _, target := range c.expandedEditableTargets(agentPath) {
+		if strings.HasPrefix(target, "file:") {
+			if path, err := patchTargetPathFromManifest(agentPath, target); err == nil && isUnder(bundleBase, path) {
+				paths = append(paths, path)
+			}
+		}
+		if strings.HasPrefix(target, "dir:") {
+			if path, err := dirTargetPathFromManifest(agentPath, target); err == nil && isUnder(bundleBase, path) {
+				paths = append(paths, path)
+			}
+		}
+	}
 	paths = uniqueStrings(paths)
 	c.bundleBaseDir = commonAncestor(paths)
 	for _, src := range paths {
@@ -730,25 +770,40 @@ func (c *controller) applyProposal(manifestPath string, proposal Proposal) error
 }
 
 func (c *controller) applyPatch(manifestPath string, change PatchOp) error {
-	if change.Target == "" || change.Find == "" {
-		return fmt.Errorf("patch target and find are required")
+	if strings.TrimSpace(change.Target) == "" {
+		return fmt.Errorf("patch target is required")
 	}
-	if !matchesAny(change.Target, c.exp.Target.Editable) {
+	if !c.matchesPatchTarget(manifestPath, change.Target, c.expandedEditableTargets(manifestPath)) {
 		return fmt.Errorf("target %q is not editable", change.Target)
 	}
-	if matchesAny(change.Target, c.exp.Target.Forbidden) {
+	if c.matchesPatchTarget(manifestPath, change.Target, c.expandedForbiddenTargets(manifestPath)) {
 		return fmt.Errorf("target %q is forbidden", change.Target)
 	}
-	targetPath := manifestPath
-	if change.Target == "instructions.system" {
-		manifest, _, err := config.LoadFile(manifestPath)
-		if err != nil {
-			return err
-		}
-		targetPath = manifest.Instructions.System
+	targetPath, err := c.patchTargetPath(manifestPath, change.Target)
+	if err != nil {
+		return err
 	}
 	if !isUnder(c.bundleRootFromManifest(manifestPath), targetPath) {
 		return fmt.Errorf("patch target %q resolves outside candidate bundle", change.Target)
+	}
+	op := strings.TrimSpace(change.Op)
+	if op == "" {
+		op = "replace"
+	}
+	if op == "write" {
+		if !strings.HasPrefix(change.Target, "file:") && change.Target != "instructions.system" {
+			return fmt.Errorf("write patch target %q must be instructions.system or file:<path>", change.Target)
+		}
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(targetPath, []byte(change.Content), 0o644)
+	}
+	if op != "replace" {
+		return fmt.Errorf("unsupported patch op %q", change.Op)
+	}
+	if change.Find == "" {
+		return fmt.Errorf("replace patch target and find are required")
 	}
 	data, err := os.ReadFile(targetPath)
 	if err != nil {
@@ -761,6 +816,190 @@ func (c *controller) applyPatch(manifestPath string, change PatchOp) error {
 	}
 	updated := strings.Replace(content, change.Find, change.Replace, 1)
 	return os.WriteFile(targetPath, []byte(updated), 0o644)
+}
+
+func (c *controller) expandedEditableTargets(manifestPath string) []string {
+	return c.expandTargetAliases(manifestPath, c.exp.Target.Editable)
+}
+
+func (c *controller) expandedForbiddenTargets(manifestPath string) []string {
+	targets := append([]string{}, defaultForbiddenTargets...)
+	targets = append(targets, c.exp.Target.Forbidden...)
+	return c.expandTargetAliases(manifestPath, targets)
+}
+
+func (c *controller) expandTargetAliases(manifestPath string, targets []string) []string {
+	expanded := make([]string, 0, len(targets))
+	for _, target := range targets {
+		target = strings.TrimSpace(target)
+		switch {
+		case target == "harness:prompt":
+			expanded = append(expanded, "instructions.system")
+		case target == "harness:skills":
+			expanded = append(expanded, skillHarnessTargets(manifestPath, "")...)
+		case target == "harness:tools":
+			expanded = append(expanded, toolHarnessTargets(manifestPath, "")...)
+		case strings.HasPrefix(target, "skill:"):
+			name := strings.TrimSpace(strings.TrimPrefix(target, "skill:"))
+			expanded = append(expanded, skillHarnessTargets(manifestPath, name)...)
+		case strings.HasPrefix(target, "tool:"):
+			name := strings.TrimSpace(strings.TrimPrefix(target, "tool:"))
+			expanded = append(expanded, toolHarnessTargets(manifestPath, name)...)
+		default:
+			expanded = append(expanded, target)
+		}
+	}
+	return uniqueStrings(expanded)
+}
+
+func skillHarnessTargets(manifestPath, skillName string) []string {
+	manifest, _, err := config.LoadFile(manifestPath)
+	if err != nil {
+		return nil
+	}
+	targets := []string{"skills.active"}
+	for _, dir := range manifest.Skills.Dirs {
+		dirPath := dir
+		if skillName != "" {
+			dirPath = filepath.Join(dir, skillName)
+		}
+		rel, err := filepath.Rel(filepath.Dir(manifestPath), dirPath)
+		if err != nil {
+			continue
+		}
+		targets = append(targets, "dir:"+filepath.ToSlash(rel))
+	}
+	return targets
+}
+
+func toolHarnessTargets(manifestPath, toolName string) []string {
+	manifest, _, err := config.LoadFile(manifestPath)
+	if err != nil {
+		return nil
+	}
+	var targets []string
+	for i, tool := range manifest.Tools {
+		if toolName != "" && !toolMatchesName(tool, toolName) {
+			continue
+		}
+		prefix := fmt.Sprintf("tools[%d]", i)
+		targets = append(targets, prefix+".description")
+	}
+	return targets
+}
+
+func toolMatchesName(tool config.ToolConfig, name string) bool {
+	if tool.Name == name {
+		return true
+	}
+	if strings.TrimPrefix(tool.Uses, "builtin:") == name {
+		return true
+	}
+	return false
+}
+
+func (c *controller) patchTargetPath(manifestPath, target string) (string, error) {
+	if target == "instructions.system" {
+		manifest, _, err := config.LoadFile(manifestPath)
+		if err != nil {
+			return "", err
+		}
+		return manifest.Instructions.System, nil
+	}
+	return patchTargetPathFromManifest(manifestPath, target)
+}
+
+func patchTargetPathFromManifest(manifestPath, target string) (string, error) {
+	if strings.HasPrefix(target, "file:") {
+		rel := strings.TrimSpace(strings.TrimPrefix(target, "file:"))
+		if rel == "" {
+			return "", fmt.Errorf("file patch target is empty")
+		}
+		if filepath.IsAbs(rel) {
+			return "", fmt.Errorf("file patch target %q must be relative to the agent manifest", target)
+		}
+		return filepath.Clean(filepath.Join(filepath.Dir(manifestPath), rel)), nil
+	}
+	if strings.HasPrefix(target, "dir:") {
+		return "", fmt.Errorf("dir patch target %q authorizes file patches but cannot be patched directly", target)
+	}
+	return manifestPath, nil
+}
+
+func dirTargetPathFromManifest(manifestPath, target string) (string, error) {
+	rel := strings.TrimSpace(strings.TrimPrefix(target, "dir:"))
+	if rel == "" {
+		return "", fmt.Errorf("dir patch target is empty")
+	}
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("dir patch target %q must be relative to the agent manifest", target)
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(manifestPath), rel)), nil
+}
+
+func (c *controller) matchesPatchTarget(manifestPath, target string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if matchPattern(target, pattern) {
+			return true
+		}
+		if !strings.HasPrefix(pattern, "dir:") || !strings.HasPrefix(target, "file:") {
+			continue
+		}
+		targetPath, targetErr := c.patchTargetPath(manifestPath, target)
+		dirPath, dirErr := dirTargetPathFromManifest(manifestPath, pattern)
+		if targetErr == nil && dirErr == nil && isUnder(dirPath, targetPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func targetsConflict(manifestPath, editable, forbidden string) bool {
+	if editable == forbidden {
+		return true
+	}
+	if isFileOrDirTarget(editable) || isFileOrDirTarget(forbidden) {
+		return fileOrDirTargetsConflict(manifestPath, editable, forbidden)
+	}
+	return matchesPathOrDescendant(editable, []string{forbidden}) ||
+		matchesPathOrDescendant(forbidden, []string{editable})
+}
+
+func fileOrDirTargetsConflict(manifestPath, editable, forbidden string) bool {
+	if !isFileOrDirTarget(editable) || !isFileOrDirTarget(forbidden) {
+		return false
+	}
+	editablePath, editableIsDir, err := targetPathForConflict(manifestPath, editable)
+	if err != nil {
+		return false
+	}
+	forbiddenPath, forbiddenIsDir, err := targetPathForConflict(manifestPath, forbidden)
+	if err != nil {
+		return false
+	}
+	switch {
+	case editableIsDir && forbiddenIsDir:
+		return isUnder(editablePath, forbiddenPath) || isUnder(forbiddenPath, editablePath)
+	case editableIsDir:
+		return isUnder(editablePath, forbiddenPath)
+	case forbiddenIsDir:
+		return isUnder(forbiddenPath, editablePath)
+	default:
+		return editablePath == forbiddenPath
+	}
+}
+
+func targetPathForConflict(manifestPath, target string) (string, bool, error) {
+	if strings.HasPrefix(target, "dir:") {
+		path, err := dirTargetPathFromManifest(manifestPath, target)
+		return path, true, err
+	}
+	path, err := patchTargetPathFromManifest(manifestPath, target)
+	return path, false, err
+}
+
+func isFileOrDirTarget(target string) bool {
+	return strings.HasPrefix(target, "file:") || strings.HasPrefix(target, "dir:")
 }
 
 func manifestLeafSnapshot(manifestPath string) (map[string]string, error) {
@@ -778,25 +1017,27 @@ func manifestLeafSnapshot(manifestPath string) (map[string]string, error) {
 }
 
 func (c *controller) validateManifestChanges(before, after map[string]string) error {
+	editable := c.expandedEditableTargets(c.resolvePath(c.exp.Target.Agent))
+	forbidden := c.expandedForbiddenTargets(c.resolvePath(c.exp.Target.Agent))
 	seen := map[string]bool{}
 	for path, beforeValue := range before {
 		seen[path] = true
 		afterValue, ok := after[path]
 		if !ok || afterValue != beforeValue {
-			if matchesPathOrDescendant(path, c.exp.Target.Forbidden) {
+			if matchesPathOrDescendant(path, forbidden) {
 				return fmt.Errorf("forbidden field %q changed by patch", path)
 			}
-			if !matchesPathOrDescendant(path, c.exp.Target.Editable) {
+			if !matchesPathOrDescendant(path, editable) {
 				return fmt.Errorf("manifest field %q is not editable", path)
 			}
 		}
 	}
 	for path := range after {
 		if !seen[path] {
-			if matchesPathOrDescendant(path, c.exp.Target.Forbidden) {
+			if matchesPathOrDescendant(path, forbidden) {
 				return fmt.Errorf("forbidden field %q changed by patch", path)
 			}
-			if !matchesPathOrDescendant(path, c.exp.Target.Editable) {
+			if !matchesPathOrDescendant(path, editable) {
 				return fmt.Errorf("manifest field %q is not editable", path)
 			}
 		}
@@ -1217,15 +1458,18 @@ func (c *controller) buildDigest(iteration int, best *candidate) map[string]any 
 		"iteration": iteration,
 		"objective": c.exp.Objective,
 		"target": map[string]any{
-			"editable":  c.exp.Target.Editable,
-			"forbidden": c.exp.Target.Forbidden,
+			"editable":           c.expandedEditableTargets(best.ManifestPath),
+			"forbidden":          c.expandedForbiddenTargets(best.ManifestPath),
+			"default_forbidden":  defaultForbiddenTargets,
+			"declared_editable":  c.exp.Target.Editable,
+			"declared_forbidden": c.exp.Target.Forbidden,
 		},
 		"best_candidate":   best.ID,
 		"train_results":    best.Results["train"],
 		"history":          c.history,
 		"editable_content": c.editableContent(best.ManifestPath),
 		"guidance":         c.exp.Objective.Guidance,
-		"instructions":     "Return strict JSON with a proposals array or a single proposal. Each change must use target/find/replace and find must be copied exactly from editable_content. Selection task details are intentionally withheld; use train feedback to propose general improvements.",
+		"instructions":     "Return strict JSON with a proposals array or a single proposal. Each change may use op=replace with target/find/replace, or op=write with target/content for an editable file target. For replace, find must be copied exactly from editable_content. Selection task details are intentionally withheld; use train feedback to propose general improvements.",
 	}
 }
 
@@ -1241,6 +1485,57 @@ func (c *controller) editableContent(manifestPath string) map[string]string {
 			content["instructions.system"] = string(data)
 		}
 	}
+	for _, target := range c.expandedEditableTargets(manifestPath) {
+		switch {
+		case strings.HasPrefix(target, "file:"):
+			targetPath, err := c.patchTargetPath(manifestPath, target)
+			if err != nil {
+				continue
+			}
+			if !isUnder(c.bundleRootFromManifest(manifestPath), targetPath) {
+				continue
+			}
+			if data, err := os.ReadFile(targetPath); err == nil {
+				content[target] = string(data)
+			}
+		case strings.HasPrefix(target, "dir:"):
+			for fileTarget, fileContent := range c.editableDirContent(manifestPath, target) {
+				content[fileTarget] = fileContent
+			}
+		}
+	}
+	return content
+}
+
+func (c *controller) editableDirContent(manifestPath, target string) map[string]string {
+	content := map[string]string{}
+	dirPath, err := dirTargetPathFromManifest(manifestPath, target)
+	if err != nil {
+		return content
+	}
+	if !isUnder(c.bundleRootFromManifest(manifestPath), dirPath) {
+		return content
+	}
+	count := 0
+	_ = filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if count >= editableDirMaxFiles {
+			return filepath.SkipAll
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(filepath.Dir(manifestPath), path)
+		if err != nil {
+			return nil
+		}
+		content["file:"+filepath.ToSlash(rel)] = string(data)
+		count++
+		return nil
+	})
 	return content
 }
 
@@ -1277,8 +1572,21 @@ func validateParsedProposals(proposals []Proposal) ([]Proposal, error) {
 			return nil, fmt.Errorf("proposal %d has no changes", i+1)
 		}
 		for j, change := range proposal.Changes {
-			if change.Target == "" || change.Find == "" {
-				return nil, fmt.Errorf("proposal %d change %d patch target and find are required", i+1, j+1)
+			op := strings.TrimSpace(change.Op)
+			if op == "" {
+				op = "replace"
+			}
+			if strings.TrimSpace(change.Target) == "" {
+				return nil, fmt.Errorf("proposal %d change %d patch target is required", i+1, j+1)
+			}
+			if op == "replace" && change.Find == "" {
+				return nil, fmt.Errorf("proposal %d change %d replace patch find is required", i+1, j+1)
+			}
+			if op == "write" && change.Content == "" {
+				return nil, fmt.Errorf("proposal %d change %d write patch content is required", i+1, j+1)
+			}
+			if op != "replace" && op != "write" {
+				return nil, fmt.Errorf("proposal %d change %d patch op %q is not supported", i+1, j+1, change.Op)
 			}
 		}
 	}

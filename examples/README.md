@@ -16,6 +16,8 @@ evaluation evidence.
 - [Privacy delegation agent](privacy-delegation-agent/README.md): improves a
   weak privacy-preserving delegation prompt using deterministic leakage
   evidence.
+- [SkillsBench Lite agent](skillsbench-lite-agent/README.md): replicates a
+  small SkillsBench-style harness activation and adherence experiment.
 
 ## Local Artifacts
 

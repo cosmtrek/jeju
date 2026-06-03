@@ -20,7 +20,9 @@ config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run
 
 - Improve a baseline agent manifest with `jeju evolve <experiment.yaml>`.
 - Let the user define the optimization objective, guardrails, editable fields, datasets, budget, and output location.
-- Treat system prompts as editable, but only through controlled exact-replacement patches inside isolated candidate bundles.
+- Treat system prompts and explicitly allowed harness files as editable, but
+  only through controlled exact-replacement patches inside isolated candidate
+  bundles.
 - Validate candidates with train and selection splits before accepting a new best config.
 - Optionally run `data.test` after selection on baseline and final best with `--test`.
 - Keep all evidence on disk: proposals, patches, run outputs, metrics, leaderboard, report, and event log.
@@ -28,7 +30,7 @@ config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run
 ## Non-Goals
 
 - No automatic production rollout. Evolution outputs candidates and evidence only.
-- No unrestricted schema or tool mutation. Credentials, workspace paths, tool command bodies, HTTP endpoints, and permissions should be forbidden by the experiment.
+- No unrestricted schema or tool mutation. Credentials, workspace paths, tool command bodies, HTTP endpoints, and permissions are protected by default.
 - No reinforcement learning or model fine-tuning. The current implementation is black-box config search.
 - No replacement for the evaluator system. Evolution reuses rule, LLM, and command evaluators plus task-level expectations.
 
@@ -41,7 +43,7 @@ config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run
 | Candidate | A materialized copy of the target agent bundle. `baseline` is the first candidate. |
 | Task | One JSONL dataset row with `input`, optional `expected`, optional `eval`, metadata, and weight. |
 | Trial | One run of one candidate on one task. |
-| Objective | The metric to optimize, direction, minimum improvement, guards, and qualitative guidance. |
+| Objective | The metric to optimize, optional direction, minimum improvement, guards, and qualitative guidance. |
 | Evolver | A normal Jeju agent that reads a feedback digest and returns structured proposals. |
 | Proposal | Structured JSON with a hypothesis and exact text replacements. |
 | Selection | The acceptance step that chooses whether a candidate becomes the new best config. |
@@ -128,7 +130,6 @@ The objective has one primary metric:
 ```yaml
 objective:
   metric: evaluation.evaluators["triage_judge"].score
-  direction: maximize
   minDelta: 0.2
   guards:
     - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
@@ -180,10 +181,33 @@ The current patch model is deliberately simple:
 Rules:
 
 - `target` must match `target.editable`.
-- `target` must not match `target.forbidden`.
-- `find` must match exactly once in the candidate bundle.
+- `target` must not match effective `target.forbidden`. Jeju applies default
+  forbidden paths for permissions, workspace, credentials, tool execution
+  wiring, evaluator commands, and skill directory bindings; manifest
+  `target.forbidden` is only for extra case-specific constraints.
+- Default patches use `op: "replace"`; `find` must match exactly once in the
+  candidate bundle.
+- `op: "write"` writes `content` to an editable `file:` target or to
+  `instructions.system`. This can create files inside an editable directory.
 - `instructions.system` patches edit the referenced prompt file, not the manifest scalar.
+- `harness:prompt` in `target.editable` expands to `instructions.system`.
+- `skill:<name>` expands to `skills.active` plus the named skill directory
+  under configured `skills.dirs` roots.
+- `harness:skills` expands to `skills.active` plus all configured
+  `skills.dirs` roots.
+- `tool:<name>` expands to the named tool's description. This is the default
+  safe surface for tool-use strategy.
+- `harness:tools` expands the same tool-use strategy surface for every tool.
+- `file:<relative-path>` patches edit a candidate-bundle file resolved relative
+  to the target agent manifest, for example
+  `file:../skills/research/SKILL.md`.
+- `dir:<relative-path>` exposes files under a candidate-bundle directory and
+  authorizes `file:` patches inside it.
 - Other targets edit the candidate manifest text directly.
+- Tool schema files, implementation files, command paths, HTTP URLs,
+  environment, and capabilities are not included in `tool:<name>`; list those
+  fields explicitly if the experiment needs to mutate parameter contracts or
+  execution boundaries.
 - After patching, Jeju snapshots manifest leaf fields and rejects any changed field outside the editable set or inside the forbidden set.
 - The patched candidate must pass agent validation and compilation before it can run.
 
@@ -200,7 +224,8 @@ The feedback digest contains:
 - current best candidate id
 - current best train results
 - proposal history and rejection reasons
-- editable content, including the manifest and `instructions.system`
+- editable content, including the manifest, `instructions.system`, and any
+  editable `file:` targets
 - qualitative guidance
 
 It intentionally does not include selection task details. This keeps selection useful as a validation gate and reduces overfitting.

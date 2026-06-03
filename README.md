@@ -223,18 +223,9 @@ metadata:
 target:
   agent: ../agents/triage.agent.yaml
   editable:
-    - instructions.system
-  forbidden:
-    - permissions.access
-    - permissions.approval
-    - workspace.path
-    - tools[].command.run
-    - tools[].http.url
-    - models.providers.*.envKey
-    - models.providers.*.baseUrl
+    - harness:prompt
 
 data:
-  format: jeju.task.v1
   train: ../datasets/train.jsonl
   selection: ../datasets/selection.jsonl
   render:
@@ -242,7 +233,6 @@ data:
 
 objective:
   metric: evaluation.score
-  direction: maximize
   minDelta: 0.1
   guards:
     - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
@@ -256,7 +246,6 @@ evolver:
 
 search:
   iterations: 3
-  trialsPerTask: 1
   parallelism: 2
 
 output:
@@ -302,7 +291,7 @@ The evolver is also a normal Jeju agent. It receives a deterministic feedback di
 }
 ```
 
-Patch safety is intentionally narrow. The patch target must be listed in `target.editable`, must not match `target.forbidden`, and `find` must match exactly once inside the candidate bundle. `instructions.system` patches update the referenced prompt file. After patching, Jeju validates that no forbidden or uneditable manifest leaf field changed, then compiles the candidate before running it.
+Patch safety is intentionally narrow. The patch target must be listed in expanded `target.editable`, must not match `target.forbidden`, and `replace` patches require `find` to match exactly once inside the candidate bundle. Harness aliases such as `harness:prompt`, `skill:<name>`, and `tool:<name>` expand to concrete editable paths. `file:<relative-path>` and `dir:<relative-path>` authorize explicitly scoped harness files, and `op: "write"` can write full content only to editable file targets. After patching, Jeju validates that no forbidden or uneditable manifest leaf field changed, then compiles the candidate before running it.
 
 Common commands:
 
@@ -346,10 +335,11 @@ See [docs/agent-evolution-manifest.md](docs/agent-evolution-manifest.md) for the
 Runnable recommended scenarios live under [examples](examples/README.md). These
 are example agent bundles, not test fixtures.
 
-Current examples cover a [code review agent](examples/code-review-agent/README.md)
-and a [privacy delegation agent](examples/privacy-delegation-agent/README.md).
-They show how Jeju defines behavior in config, runs with explicit boundaries,
-records effects, and uses evaluation evidence to improve an agent.
+Current examples cover a [code review agent](examples/code-review-agent/README.md),
+a [privacy delegation agent](examples/privacy-delegation-agent/README.md), and a
+[SkillsBench Lite agent](examples/skillsbench-lite-agent/README.md). They show
+how Jeju defines behavior in config, runs with explicit boundaries, records
+effects, and uses evaluation evidence to improve an agent.
 
 ## Tests
 

@@ -1,0 +1,40 @@
+apiVersion: jeju/v1alpha1
+kind: EvolutionExperiment
+
+metadata:
+  name: evolve-skillsbench-lite
+  description: "Replicate a SkillsBench-like harness activation and adherence experiment."
+
+target:
+  agent: ../agents/solver.agent.yaml
+  editable:
+    - harness:prompt
+    - skill:skillsbench-lite
+
+data:
+  train: ../datasets/train.jsonl
+  selection: ../datasets/selection.jsonl
+  test: ../datasets/test.jsonl
+  render:
+    template: ../prompts/task_input.md.tmpl
+
+objective:
+  metric: evaluation.evaluators["skillsbench_lite_judge"].score
+  minDelta: 0.2
+  guards:
+    - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
+    - "run.modelErrors <= baseline.run.modelErrors"
+  guidance:
+    - "This is a SkillsBench-like harness-benefit demo: improve reusable skill activation and adherence, not memorized answers."
+    - "Selection and test tasks are holdouts; do not depend on task ids or split names."
+    - "The strongest candidate should activate and rewrite the disclosed skillsbench-lite skill, then force strict JSON output."
+
+evolver:
+  agent: ../agents/evolver.agent.yaml
+  proposals: 2
+
+search:
+  iterations: 2
+  parallelism: 2
+output:
+  dir: ../../../.jeju-dev/evolve/skillsbench-lite

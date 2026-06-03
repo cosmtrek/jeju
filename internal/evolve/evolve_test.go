@@ -153,6 +153,408 @@ func TestCreateCandidateAppliesExactReplacement(t *testing.T) {
 	}
 }
 
+func TestCreateCandidateAppliesEditableFilePatch(t *testing.T) {
+	root := writeFixture(t)
+	exp, err := LoadFile(filepath.Join(root, "experiments", "research-evolve.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile failed: %v", err)
+	}
+	exp.Target.Editable = append(exp.Target.Editable, "file:../skills/research/SKILL.md")
+	ctrl := &controller{
+		exp:    exp,
+		outDir: filepath.Join(root, ".jeju-dev", "evolve", "test"),
+		id:     "test",
+	}
+	if err := os.MkdirAll(ctrl.outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := ctrl.createBaseline()
+	if err != nil {
+		t.Fatalf("createBaseline failed: %v", err)
+	}
+	proposal := Proposal{
+		ID:         "p1",
+		Hypothesis: "improve reusable skill guidance",
+		Changes: []PatchOp{{
+			Target:  "file:../skills/research/SKILL.md",
+			Find:    "Always answer with Jeju Mock Result.\n",
+			Replace: "Always answer with Jeju Mock Result and cite the active skill.\n",
+		}},
+	}
+	cand, err := ctrl.createCandidate(1, 1, base, proposal)
+	if err != nil {
+		t.Fatalf("createCandidate failed: %v", err)
+	}
+	skillPath := filepath.Join(filepath.Dir(cand.ManifestPath), "..", "skills", "research", "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read candidate skill: %v", err)
+	}
+	if !strings.Contains(string(data), "cite the active skill") {
+		t.Fatalf("candidate skill was not patched:\n%s", string(data))
+	}
+	sourceData, err := os.ReadFile(filepath.Join(root, "skills", "research", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read source skill: %v", err)
+	}
+	if strings.Contains(string(sourceData), "cite the active skill") {
+		t.Fatalf("source skill was modified:\n%s", string(sourceData))
+	}
+}
+
+func TestCreateCandidateAppliesPatchUnderEditableDir(t *testing.T) {
+	root := writeFixture(t)
+	exp, err := LoadFile(filepath.Join(root, "experiments", "research-evolve.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile failed: %v", err)
+	}
+	exp.Target.Editable = append(exp.Target.Editable, "dir:../skills/research")
+	ctrl := &controller{
+		exp:    exp,
+		outDir: filepath.Join(root, ".jeju-dev", "evolve", "test"),
+		id:     "test",
+	}
+	if err := os.MkdirAll(ctrl.outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := ctrl.createBaseline()
+	if err != nil {
+		t.Fatalf("createBaseline failed: %v", err)
+	}
+	digestContent := ctrl.editableContent(base.ManifestPath)
+	if !strings.Contains(digestContent["file:../skills/research/SKILL.md"], "Always answer with Jeju Mock Result") {
+		t.Fatalf("digest missing editable dir file content: %#v", digestContent)
+	}
+	proposal := Proposal{
+		ID:         "p1",
+		Hypothesis: "improve a skill under an editable dir",
+		Changes: []PatchOp{{
+			Target:  "file:../skills/research/SKILL.md",
+			Find:    "Always answer with Jeju Mock Result.\n",
+			Replace: "Always answer with Jeju Mock Result and cite the active skill.\n",
+		}},
+	}
+	cand, err := ctrl.createCandidate(1, 1, base, proposal)
+	if err != nil {
+		t.Fatalf("createCandidate failed: %v", err)
+	}
+	skillPath := filepath.Join(filepath.Dir(cand.ManifestPath), "..", "skills", "research", "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read candidate skill: %v", err)
+	}
+	if !strings.Contains(string(data), "cite the active skill") {
+		t.Fatalf("candidate skill was not patched:\n%s", string(data))
+	}
+}
+
+func TestCreateCandidateUsesSkillAliasForActivationAndFiles(t *testing.T) {
+	root := writeFixture(t)
+	exp, err := LoadFile(filepath.Join(root, "experiments", "research-evolve.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile failed: %v", err)
+	}
+	exp.Target.Editable = []string{"skill:research"}
+	ctrl := &controller{
+		exp:    exp,
+		outDir: filepath.Join(root, ".jeju-dev", "evolve", "test"),
+		id:     "test",
+	}
+	if err := os.MkdirAll(ctrl.outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := ctrl.createBaseline()
+	if err != nil {
+		t.Fatalf("createBaseline failed: %v", err)
+	}
+	digestContent := ctrl.editableContent(base.ManifestPath)
+	if !strings.Contains(digestContent["file:../skills/research/SKILL.md"], "Always answer with Jeju Mock Result") {
+		t.Fatalf("digest missing skill alias content: %#v", digestContent)
+	}
+	proposal := Proposal{
+		ID:         "p1",
+		Hypothesis: "improve the research skill",
+		Changes: []PatchOp{{
+			Target:  "file:../skills/research/SKILL.md",
+			Find:    "Always answer with Jeju Mock Result.\n",
+			Replace: "Always answer with Jeju Mock Result and cite the active skill.\n",
+		}},
+	}
+	cand, err := ctrl.createCandidate(1, 1, base, proposal)
+	if err != nil {
+		t.Fatalf("createCandidate failed: %v", err)
+	}
+	skillPath := filepath.Join(filepath.Dir(cand.ManifestPath), "..", "skills", "research", "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read candidate skill: %v", err)
+	}
+	if !strings.Contains(string(data), "cite the active skill") {
+		t.Fatalf("candidate skill was not patched:\n%s", string(data))
+	}
+}
+
+func TestCreateCandidateWritesFileUnderEditableDir(t *testing.T) {
+	root := writeFixture(t)
+	exp, err := LoadFile(filepath.Join(root, "experiments", "research-evolve.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile failed: %v", err)
+	}
+	exp.Target.Editable = append(exp.Target.Editable, "dir:../skills/research")
+	ctrl := &controller{
+		exp:    exp,
+		outDir: filepath.Join(root, ".jeju-dev", "evolve", "test"),
+		id:     "test",
+	}
+	if err := os.MkdirAll(ctrl.outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := ctrl.createBaseline()
+	if err != nil {
+		t.Fatalf("createBaseline failed: %v", err)
+	}
+	proposal := Proposal{
+		ID:         "p1",
+		Hypothesis: "add a note under the editable skill directory",
+		Changes: []PatchOp{{
+			Target:  "file:../skills/research/NOTES.md",
+			Op:      "write",
+			Content: "Use the research skill for all mock result tasks.\n",
+		}},
+	}
+	cand, err := ctrl.createCandidate(1, 1, base, proposal)
+	if err != nil {
+		t.Fatalf("createCandidate failed: %v", err)
+	}
+	notePath := filepath.Join(filepath.Dir(cand.ManifestPath), "..", "skills", "research", "NOTES.md")
+	data, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("read candidate note: %v", err)
+	}
+	if !strings.Contains(string(data), "mock result tasks") {
+		t.Fatalf("candidate note was not written:\n%s", string(data))
+	}
+}
+
+func TestCreateCandidateUsesToolAliasForDescriptionOnly(t *testing.T) {
+	root := writeFixture(t)
+	addLookupToolFixture(t, root)
+	exp, err := LoadFile(filepath.Join(root, "experiments", "research-evolve.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile failed: %v", err)
+	}
+	exp.Target.Editable = []string{"tool:lookup"}
+	ctrl := &controller{
+		exp:    exp,
+		outDir: filepath.Join(root, ".jeju-dev", "evolve", "test"),
+		id:     "test",
+	}
+	if err := os.MkdirAll(ctrl.outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := ctrl.createBaseline()
+	if err != nil {
+		t.Fatalf("createBaseline failed: %v", err)
+	}
+	digestContent := ctrl.editableContent(base.ManifestPath)
+	if !strings.Contains(digestContent["manifest"], "description: Lookup things.") {
+		t.Fatalf("digest missing tool manifest: %#v", digestContent)
+	}
+	if _, ok := digestContent["file:../schemas/lookup.schema.json"]; ok {
+		t.Fatalf("tool alias should not expose schema file by default: %#v", digestContent)
+	}
+	proposal := Proposal{
+		ID:         "p1",
+		Hypothesis: "improve lookup tool disclosure",
+		Changes: []PatchOp{{
+			Target:  "tools[0].description",
+			Find:    "description: Lookup things.",
+			Replace: "description: Search workspace notes by query before answering evidence-backed questions.",
+		}},
+	}
+	cand, err := ctrl.createCandidate(1, 1, base, proposal)
+	if err != nil {
+		t.Fatalf("createCandidate failed: %v", err)
+	}
+	data, err := os.ReadFile(cand.ManifestPath)
+	if err != nil {
+		t.Fatalf("read candidate manifest: %v", err)
+	}
+	if !strings.Contains(string(data), "Search workspace notes") {
+		t.Fatalf("candidate tool description was not patched:\n%s", string(data))
+	}
+}
+
+func TestCreateCandidateRequiresExplicitFileForToolSchema(t *testing.T) {
+	root := writeFixture(t)
+	addLookupToolFixture(t, root)
+	exp, err := LoadFile(filepath.Join(root, "experiments", "research-evolve.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile failed: %v", err)
+	}
+	exp.Target.Editable = []string{"tool:lookup"}
+	ctrl := &controller{
+		exp:    exp,
+		outDir: filepath.Join(root, ".jeju-dev", "evolve", "test"),
+		id:     "test",
+	}
+	if err := os.MkdirAll(ctrl.outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := ctrl.createBaseline()
+	if err != nil {
+		t.Fatalf("createBaseline failed: %v", err)
+	}
+	proposal := Proposal{
+		ID:         "p1",
+		Hypothesis: "attempt to edit schema without explicit file permission",
+		Changes: []PatchOp{{
+			Target:  "file:../schemas/lookup.schema.json",
+			Op:      "write",
+			Content: "{}\n",
+		}},
+	}
+	_, err = ctrl.createCandidate(1, 1, base, proposal)
+	if err == nil {
+		t.Fatalf("expected schema write to be rejected")
+	}
+	if !strings.Contains(err.Error(), `target "file:../schemas/lookup.schema.json" is not editable`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateCandidateRejectsFilePatchOutsideBundle(t *testing.T) {
+	root := writeFixture(t)
+	exp, err := LoadFile(filepath.Join(root, "experiments", "research-evolve.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile failed: %v", err)
+	}
+	exp.Target.Editable = append(exp.Target.Editable, "file:../../outside.txt")
+	ctrl := &controller{
+		exp:    exp,
+		outDir: filepath.Join(root, ".jeju-dev", "evolve", "test"),
+		id:     "test",
+	}
+	if err := os.MkdirAll(ctrl.outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := ctrl.createBaseline()
+	if err != nil {
+		t.Fatalf("createBaseline failed: %v", err)
+	}
+	proposal := Proposal{
+		ID:         "p1",
+		Hypothesis: "attempt to edit outside the bundle",
+		Changes: []PatchOp{{
+			Target:  "file:../../outside.txt",
+			Find:    "x",
+			Replace: "y",
+		}},
+	}
+	_, err = ctrl.createCandidate(1, 1, base, proposal)
+	if err == nil {
+		t.Fatalf("expected outside file patch to be rejected")
+	}
+	if !strings.Contains(err.Error(), "resolves outside candidate bundle") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateCandidateRejectsForbiddenDirPatch(t *testing.T) {
+	root := writeFixture(t)
+	exp, err := LoadFile(filepath.Join(root, "experiments", "research-evolve.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile failed: %v", err)
+	}
+	exp.Target.Editable = append(exp.Target.Editable, "dir:../skills")
+	exp.Target.Forbidden = append(exp.Target.Forbidden, "dir:../skills/research")
+	ctrl := &controller{
+		exp:    exp,
+		outDir: filepath.Join(root, ".jeju-dev", "evolve", "test"),
+		id:     "test",
+	}
+	if err := os.MkdirAll(ctrl.outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := ctrl.createBaseline()
+	if err != nil {
+		t.Fatalf("createBaseline failed: %v", err)
+	}
+	proposal := Proposal{
+		ID:         "p1",
+		Hypothesis: "attempt to edit forbidden dir",
+		Changes: []PatchOp{{
+			Target:  "file:../skills/research/SKILL.md",
+			Find:    "Always answer with Jeju Mock Result.\n",
+			Replace: "Always answer with Jeju Mock Result and cite the active skill.\n",
+		}},
+	}
+	_, err = ctrl.createCandidate(1, 1, base, proposal)
+	if err == nil {
+		t.Fatalf("expected forbidden dir patch to be rejected")
+	}
+	if !strings.Contains(err.Error(), `target "file:../skills/research/SKILL.md" is forbidden`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadFileRejectsExpandedAliasConflict(t *testing.T) {
+	root := writeFixture(t)
+	expPath := filepath.Join(root, "experiments", "research-evolve.yaml")
+	data, err := os.ReadFile(expPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(data), `  editable:
+    - instructions.system
+    - runtime.limits.maxSteps
+data:
+`, `  editable:
+    - harness:prompt
+    - runtime.limits.maxSteps
+  forbidden:
+    - instructions.system
+data:
+`, 1)
+	writeFile(t, expPath, updated)
+
+	_, err = LoadFile(expPath)
+	if err == nil {
+		t.Fatalf("expected expanded alias conflict to be rejected")
+	}
+	if !strings.Contains(err.Error(), `target.editable "instructions.system" conflicts with target.forbidden "instructions.system"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadFileRejectsExpandedDirFileConflict(t *testing.T) {
+	root := writeFixture(t)
+	expPath := filepath.Join(root, "experiments", "research-evolve.yaml")
+	data, err := os.ReadFile(expPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(data), `  editable:
+    - instructions.system
+    - runtime.limits.maxSteps
+data:
+`, `  editable:
+    - dir:../skills
+  forbidden:
+    - file:../skills/research/SKILL.md
+data:
+`, 1)
+	writeFile(t, expPath, updated)
+
+	_, err = LoadFile(expPath)
+	if err == nil {
+		t.Fatalf("expected expanded file/dir conflict to be rejected")
+	}
+	if !strings.Contains(err.Error(), `target.editable "dir:../skills" conflicts with target.forbidden "file:../skills/research/SKILL.md"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCreateCandidateRejectsForbiddenTextReplacement(t *testing.T) {
 	root := writeFixture(t)
 	exp, err := LoadFile(filepath.Join(root, "experiments", "research-evolve.yaml"))
@@ -220,7 +622,7 @@ func TestCreateCandidateRejectsUneditableTextReplacement(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected uneditable patch to be rejected")
 	}
-	if !strings.Contains(err.Error(), `manifest field "permissions.approval" is not editable`) {
+	if !strings.Contains(err.Error(), `forbidden field "permissions.approval" changed`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -249,7 +651,7 @@ func TestParseProposalsRejectsEmptyOrInvalidChanges(t *testing.T) {
 		{
 			name:    "invalid patch",
 			input:   `{"proposals":[{"hypothesis":"noop","changes":[{"target":"","find":"old","replace":"new"}]}]}`,
-			wantErr: "proposal 1 change 1 patch target and find are required",
+			wantErr: "proposal 1 change 1 patch target is required",
 		},
 	}
 	for _, tt := range tests {
@@ -364,13 +766,20 @@ func TestBuildDigestWithholdsSelectionDetails(t *testing.T) {
 func writeFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	mkdirs := []string{"agents", "prompts", "workspace", "datasets", "experiments"}
+	mkdirs := []string{"agents", "prompts", "workspace", "datasets", "experiments", "skills/research"}
 	for _, dir := range mkdirs {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	writeFile(t, filepath.Join(root, "prompts", "research.md"), "You are a concise research agent.\n")
+	writeFile(t, filepath.Join(root, "skills", "research", "SKILL.md"), `---
+name: research
+description: Research fixture skill.
+---
+
+Always answer with Jeju Mock Result.
+`)
 	writeFile(t, filepath.Join(root, "agents", "research.agent.yaml"), `apiVersion: jeju/v1alpha1
 kind: Agent
 metadata:
@@ -388,6 +797,11 @@ runtime:
     maxSteps: 20
 workspace:
   path: ../workspace
+skills:
+  dirs:
+    - ../skills
+  active:
+    - research
 permissions:
   access: readOnly
   approval: onRequest
@@ -431,16 +845,12 @@ target:
   editable:
     - instructions.system
     - runtime.limits.maxSteps
-  forbidden:
-    - permissions.access
 data:
-  format: jeju.task.v1
   train: ../datasets/train.jsonl
   selection: ../datasets/selection.jsonl
   test: ../datasets/test.jsonl
 objective:
   metric: evaluation.score
-  direction: maximize
   minDelta: 0.01
   guards:
     - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
@@ -449,12 +859,46 @@ evolver:
   proposals: 1
 search:
   iterations: 1
-  trialsPerTask: 1
   parallelism: 1
 output:
   dir: ../.jeju-dev/evolve/research
 `)
 	return root
+}
+
+func addLookupToolFixture(t *testing.T, root string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "schemas"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "workspace", "lookup.sh"), "#!/bin/sh\nprintf lookup\n")
+	writeFile(t, filepath.Join(root, "schemas", "lookup.schema.json"), `{
+  "type": "object",
+  "properties": {
+    "query": {"type": "string"}
+  },
+  "required": ["query"]
+}
+`)
+	manifestPath := filepath.Join(root, "agents", "research.agent.yaml")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	insert := `tools:
+  - name: lookup
+    uses: command
+    description: Lookup things.
+    capabilities: [workspaceRead]
+    command:
+      run: ../workspace/lookup.sh
+    input:
+      schema: ../schemas/lookup.schema.json
+`
+	text := strings.Replace(string(data), "permissions:\n", insert+"permissions:\n", 1)
+	if err := os.WriteFile(manifestPath, []byte(text), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {

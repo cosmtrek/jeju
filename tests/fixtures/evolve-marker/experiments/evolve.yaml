@@ -8,19 +8,9 @@ metadata:
 target:
   agent: ../agents/support.agent.yaml
   editable:
-    - instructions.system
-  forbidden:
-    - permissions.access
-    - permissions.approval
-    - workspace.path
-    - tools[].command.run
-    - tools[].command.args
-    - tools[].http.url
-    - models.providers.*.envKey
-    - models.providers.*.baseUrl
+    - harness:prompt
 
 data:
-  format: jeju.task.v1
   train: ../datasets/train.jsonl
   selection: ../datasets/selection.jsonl
   render:
@@ -28,7 +18,6 @@ data:
 
 objective:
   metric: evaluation.score
-  direction: maximize
   minDelta: 0.5
   guards:
     - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
@@ -43,12 +32,6 @@ evolver:
 
 search:
   iterations: 2
-  trialsPerTask: 1
   parallelism: 1
-  seed: 42
-  budget:
-    maxRuns: 20
-    maxModelTokens: 200000
-
 output:
   dir: ../.jeju-dev/evolve-marker

@@ -1,0 +1,54 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: skillsbench-lite-solver
+  description: "Target solver for a SkillsBench-like harness activation and adherence demo"
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-flash
+      temperature: 0.2
+      thinking:
+        type: disabled
+      maxOutputTokens: 2048
+      contextWindow: 128000
+      timeoutSec: 120
+
+instructions:
+  system: ../prompts/solver.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  limits:
+    maxSteps: 4
+    maxDurationSec: 180
+    maxToolCalls: 0
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace/solver
+
+skills:
+  dirs:
+    - ../skills
+  active: []
+
+permissions:
+  access: readOnly
+  approval: onRequest
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: skillsbench_lite_judge
+      uses: command
+      command:
+        run: ../eval/skillsbench_lite_judge.py
+        timeoutSec: 20

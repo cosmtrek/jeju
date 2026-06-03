@@ -8,20 +8,9 @@ metadata:
 target:
   agent: ../agents/privacy.agent.yaml
   editable:
-    - instructions.system
-  forbidden:
-    - permissions.access
-    - permissions.approval
-    - workspace.path
-    - evaluate.evaluators[].command.run
-    - tools[].command.run
-    - tools[].command.args
-    - tools[].http.url
-    - models.providers.*.envKey
-    - models.providers.*.baseUrl
+    - harness:prompt
 
 data:
-  format: jeju.task.v1
   train: ../datasets/train.jsonl
   selection: ../datasets/selection.jsonl
   test: ../datasets/test.jsonl
@@ -30,7 +19,6 @@ data:
 
 objective:
   metric: evaluation.evaluators["privacy_judge"].score
-  direction: maximize
   minDelta: 0.2
   guards:
     - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
@@ -47,12 +35,6 @@ evolver:
 
 search:
   iterations: 2
-  trialsPerTask: 1
   parallelism: 2
-  seed: 42
-  budget:
-    maxRuns: 80
-    maxModelTokens: 800000
-
 output:
   dir: ../../../.jeju-dev/evolve/privacy-delegation
