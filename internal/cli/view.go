@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/yuin/goldmark/extension"
 	"gopkg.in/yaml.v3"
 
+	"github.com/cosmtrek/jeju/internal/config"
 	"github.com/cosmtrek/jeju/internal/evaluate"
 	"github.com/cosmtrek/jeju/internal/runs"
 	"github.com/cosmtrek/jeju/internal/trajectory"
@@ -92,8 +94,7 @@ type runReport struct {
 	ConfigSnapshot   string
 	Evaluation       *evaluate.Result
 	EvaluationExists bool
-	EvalScoreLabel   string
-	EvalScorePercent string
+	Metrics          runMetrics
 	Artifacts        []artifactView
 	Steps            []stepView
 	Blocks           []stepBlock
@@ -107,6 +108,215 @@ type artifactView struct {
 	Content     string
 	ContentType string
 	ContentNote string
+}
+
+// runMetrics aggregates the headline indicators surfaced in the report header:
+// the model that produced the run, its key parameters, and the cumulative
+// step/tool/token counts derived from the trajectory.
+type runMetrics struct {
+	// model identity and parameters
+	Provider string        // friendly provider name (preset, then type, then event)
+	ModelID  string        // model id, e.g. deepseek-v4-flash
+	Params   []metricParam // temperature, thinking, context window, max output
+	Skills   []string      // skills loaded at startup (skill.loaded events)
+
+	// counts
+	Steps        int
+	ToolCalls    int
+	ToolDist     []toolStat // per-tool counts, sorted high → low (capped)
+	ToolDistMore int        // tools beyond the displayed cap
+	TokensIn     int
+	TokensOut    int
+	TokensTotal  int
+
+	TokensInLabel    string
+	TokensOutLabel   string
+	TokensTotalLabel string
+}
+
+type metricParam struct {
+	Label string
+	Value string
+}
+
+type toolStat struct {
+	Name    string
+	Count   int
+	Percent int // share of the most-used tool's count, 0-100, for bar width
+}
+
+// buildRunMetrics walks the trajectory once to tally steps, tool calls (by
+// name), and token usage, then layers in model identity/parameters from the
+// config snapshot (falling back to the provider/model recorded on model events).
+func buildRunMetrics(events []trajectory.Event, snapshot string) runMetrics {
+	m := runMetrics{}
+	toolCounts := map[string]int{}
+	var evProvider, evModel string
+	for _, event := range events {
+		switch event.Type {
+		case trajectory.EventStepStarted:
+			m.Steps++
+		case trajectory.EventToolRequested:
+			name := stringPayload(event.Payload, "tool")
+			if name == "" {
+				name = "(unknown)"
+			}
+			toolCounts[name]++
+			m.ToolCalls++
+		case trajectory.EventModelCompleted:
+			m.TokensIn += intPayload(event.Payload, "tokens_in")
+			m.TokensOut += intPayload(event.Payload, "tokens_out")
+			if evProvider == "" {
+				evProvider = stringPayload(event.Payload, "provider")
+			}
+			if evModel == "" {
+				evModel = stringPayload(event.Payload, "model")
+			}
+		case trajectory.EventSkillLoaded:
+			if name := stringPayload(event.Payload, "name"); name != "" {
+				m.Skills = append(m.Skills, name)
+			}
+		}
+	}
+	m.TokensTotal = m.TokensIn + m.TokensOut
+	m.TokensInLabel = formatCount(m.TokensIn)
+	m.TokensOutLabel = formatCount(m.TokensOut)
+	m.TokensTotalLabel = formatCount(m.TokensTotal)
+
+	for name, count := range toolCounts {
+		m.ToolDist = append(m.ToolDist, toolStat{Name: name, Count: count})
+	}
+	sort.Slice(m.ToolDist, func(i, j int) bool {
+		if m.ToolDist[i].Count != m.ToolDist[j].Count {
+			return m.ToolDist[i].Count > m.ToolDist[j].Count
+		}
+		return m.ToolDist[i].Name < m.ToolDist[j].Name
+	})
+	maxCount := 0
+	for _, ts := range m.ToolDist {
+		if ts.Count > maxCount {
+			maxCount = ts.Count
+		}
+	}
+	for i := range m.ToolDist {
+		if maxCount > 0 {
+			m.ToolDist[i].Percent = m.ToolDist[i].Count * 100 / maxCount
+		}
+	}
+	const maxToolRows = 6
+	if len(m.ToolDist) > maxToolRows {
+		m.ToolDistMore = len(m.ToolDist) - maxToolRows
+		m.ToolDist = m.ToolDist[:maxToolRows]
+	}
+
+	if cfg, ok := activeModelConfig(snapshot); ok {
+		switch {
+		case cfg.Preset != "":
+			m.Provider = cfg.Preset
+		case cfg.Type != "":
+			m.Provider = cfg.Type
+		}
+		m.ModelID = cfg.Model
+		m.Params = modelParams(cfg)
+	}
+	if m.Provider == "" {
+		m.Provider = evProvider
+	}
+	if m.ModelID == "" {
+		m.ModelID = evModel
+	}
+	return m
+}
+
+// activeModelConfig resolves the model provider the run actually used from the
+// config snapshot. It honours runtime.model, then falls back to "primary", then
+// to any provider, so reports render even for loosely-specified manifests.
+func activeModelConfig(snapshot string) (config.ModelConfig, bool) {
+	if snapshot == "" {
+		return config.ModelConfig{}, false
+	}
+	var manifest config.AgentManifest
+	if err := yaml.Unmarshal([]byte(snapshot), &manifest); err != nil {
+		return config.ModelConfig{}, false
+	}
+	providers := manifest.Models.Providers
+	if len(providers) == 0 {
+		return config.ModelConfig{}, false
+	}
+	if key := manifest.Runtime.Model; key != "" {
+		if cfg, ok := providers[key]; ok {
+			return cfg, true
+		}
+	}
+	if cfg, ok := providers["primary"]; ok {
+		return cfg, true
+	}
+	for _, cfg := range providers {
+		return cfg, true
+	}
+	return config.ModelConfig{}, false
+}
+
+func modelParams(cfg config.ModelConfig) []metricParam {
+	var params []metricParam
+	if cfg.Temperature != nil {
+		params = append(params, metricParam{Label: "temp", Value: strconv.FormatFloat(*cfg.Temperature, 'g', -1, 64)})
+	}
+	if label := thinkingLabel(cfg.Thinking); label != "" {
+		params = append(params, metricParam{Label: "thinking", Value: label})
+	}
+	if cfg.ContextWindow > 0 {
+		params = append(params, metricParam{Label: "ctx", Value: formatTokensShort(cfg.ContextWindow)})
+	}
+	if cfg.MaxOutputTokens > 0 {
+		params = append(params, metricParam{Label: "max out", Value: formatTokensShort(cfg.MaxOutputTokens)})
+	}
+	return params
+}
+
+func thinkingLabel(t config.ThinkingConfig) string {
+	switch t.Type {
+	case "", "disabled":
+		return "off"
+	case "enabled":
+		if t.Effort != "" {
+			return t.Effort
+		}
+		return "on"
+	default:
+		if t.Effort != "" {
+			return t.Type + " · " + t.Effort
+		}
+		return t.Type
+	}
+}
+
+// formatCount renders an integer with thousands separators (e.g. 27023 → "27,023").
+func formatCount(n int) string {
+	negative := n < 0
+	if negative {
+		n = -n
+	}
+	digits := strconv.Itoa(n)
+	var b strings.Builder
+	for i, c := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(c)
+	}
+	if negative {
+		return "-" + b.String()
+	}
+	return b.String()
+}
+
+// formatTokensShort renders token-window sizes compactly (e.g. 128000 → "128k").
+func formatTokensShort(n int) string {
+	if n >= 1000 {
+		return strconv.Itoa(n/1000) + "k"
+	}
+	return strconv.Itoa(n)
 }
 
 type stepView struct {
@@ -262,17 +472,6 @@ func buildRunReport(store *runs.Store, runDir *runs.RunDir) (runReport, error) {
 		duration = meta.EndedAt.Sub(meta.StartedAt).Round(time.Millisecond).String()
 	}
 
-	evalScoreLabel := ""
-	evalScorePercent := ""
-	if evaluationExists && evaluation != nil {
-		if evaluation.Passed {
-			evalScoreLabel = "eval passed"
-		} else {
-			evalScoreLabel = fmt.Sprintf("eval %.0f%%", evaluation.Score*100)
-		}
-		evalScorePercent = fmt.Sprintf("%.0f%%", evaluation.Score*100)
-	}
-
 	return runReport{
 		GeneratedAt:      time.Now(),
 		RunDir:           runDir.Path,
@@ -284,8 +483,7 @@ func buildRunReport(store *runs.Store, runDir *runs.RunDir) (runReport, error) {
 		ConfigSnapshot:   configSnapshot,
 		Evaluation:       evaluation,
 		EvaluationExists: evaluationExists,
-		EvalScoreLabel:   evalScoreLabel,
-		EvalScorePercent: evalScorePercent,
+		Metrics:          buildRunMetrics(events, configSnapshot),
 		Artifacts:        artifacts,
 		Steps:            steps,
 		Blocks:           blocks,
@@ -1030,49 +1228,148 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
     }
     .header-inner {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 12px 32px;
-      align-items: baseline;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 28px 64px;
+      align-items: start;
     }
+
+    /* ----- left: identity + setup ----- */
+    .header-setup { min-width: 0; }
     .header-id {
       display: flex;
-      gap: 14px;
+      gap: 12px;
       align-items: baseline;
       flex-wrap: wrap;
     }
-    .header-id h1 {
+    .agent-name {
       margin: 0;
-      font-size: 19px;
+      font-size: 22px;
       font-weight: 650;
-      letter-spacing: -.01em;
+      letter-spacing: -.015em;
     }
-    .run-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .header-score-wrap {
-      text-align: right;
-      grid-row: 1 / span 2;
-      grid-column: 2;
-      align-self: center;
-    }
-    .header-score-label {
-      font-size: 11px;
+    .run-id {
+      margin-top: 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12.5px;
       color: var(--muted);
-      letter-spacing: .04em;
-      margin-bottom: 2px;
     }
-    .header-score {
-      font: 700 28px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    .kv {
+      margin: 20px 0 0;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+    .kv-row {
+      display: flex;
+      gap: 16px;
+      align-items: baseline;
+    }
+    .kv dt {
+      flex: 0 0 52px;
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: .02em;
+    }
+    .kv dd {
+      margin: 0;
+      flex: 1;
+      min-width: 0;
+      font-size: 13px;
+      color: var(--ink);
+      overflow-wrap: anywhere;
+    }
+    .kv dd.mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+    .kv .sep { color: var(--faint); margin: 0 6px; }
+    .kv .param-k { color: var(--muted); }
+    .kv .param-v { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .kv .skill {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    .model-slash { color: var(--faint); margin: 0 1px; }
+
+    /* ----- right: result ledger (big numbers + drill-down) ----- */
+    .header-result {
+      display: flex;
+      flex-direction: column;
+    }
+    .metric-group {
+      border-top: 1px solid var(--line);
+      padding: 9px 0;
+    }
+    .metric-group:first-child { border-top: 0; padding-top: 0; }
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+    }
+    .metric-label {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: .03em;
+    }
+    .metric-val {
+      font: 700 22px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       letter-spacing: -.02em;
       font-variant-numeric: tabular-nums;
+      color: var(--ink);
     }
-    .header-score.ok { color: var(--ok); }
-    .header-score.bad { color: var(--bad); }
-    .header-meta {
+    .metric-val.bad { color: var(--bad); }
+    .metric-sub {
+      margin-top: 6px;
+      font-size: 12px;
       color: var(--muted);
-      font-size: 12.5px;
       font-variant-numeric: tabular-nums;
-      grid-column: 1;
+      text-align: right;
     }
-    .header-meta .sep { color: var(--faint); margin: 0 8px; }
+    .metric-sub .sep { color: var(--faint); margin: 0 5px; }
+
+    /* tool-call distribution list (drill-down under "tool calls") */
+    .tool-dist {
+      margin-top: 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .tool-row {
+      display: grid;
+      grid-template-columns: minmax(48px, max-content) 1fr auto;
+      align-items: center;
+      gap: 10px;
+    }
+    .tool-name {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      color: var(--ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tool-bar {
+      height: 5px;
+      background: var(--soft);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .tool-bar-fill {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+      border-radius: 999px;
+    }
+    .tool-count {
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+      min-width: 1.5em;
+      text-align: right;
+    }
+    .tool-more { font-size: 11.5px; color: var(--faint); padding-left: 2px; }
 
     /* ---------- Main layout ---------- */
     main { padding: 40px 0 56px; }
@@ -1504,26 +1801,64 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
       main { padding: 24px 20px 32px; }
       .layout { grid-template-columns: 1fr; gap: 36px; }
       .step-body { padding-left: 0; }
+      .header-inner { grid-template-columns: 1fr; gap: 18px; }
+      .header-stats { gap: 28px; }
+      .stat { text-align: left; }
+      .header-tools { grid-template-columns: 1fr; gap: 10px; }
     }
   </style>
 </head>
 <body>
   <header>
     <div class="wrap header-inner">
-      <div class="header-id">
-        <h1><span class="run-id">{{.Metadata.RunID}}</span></h1>
-        {{if eq .Metadata.Status "completed"}}<span class="badge ok">{{.Metadata.Status}}</span>{{else}}<span class="badge warn">{{.Metadata.Status}}</span>{{end}}
+      <div class="header-setup">
+        <div class="header-id">
+          <h1 class="agent-name">{{if .Metadata.Agent}}{{.Metadata.Agent}}{{else}}{{.Metadata.RunID}}{{end}}</h1>
+          {{if eq .Metadata.Status "completed"}}<span class="badge ok">{{.Metadata.Status}}</span>{{else}}<span class="badge warn">{{.Metadata.Status}}</span>{{end}}
+        </div>
+        <div class="run-id">{{.Metadata.RunID}}</div>
+        <dl class="kv">
+          {{if .Metrics.ModelID}}<div class="kv-row">
+            <dt>model</dt>
+            <dd class="mono">{{if .Metrics.Provider}}{{.Metrics.Provider}}<span class="model-slash">/</span>{{end}}{{.Metrics.ModelID}}</dd>
+          </div>{{end}}
+          {{if .Metrics.Params}}<div class="kv-row">
+            <dt>params</dt>
+            <dd>{{range $i, $p := .Metrics.Params}}{{if $i}}<span class="sep">·</span>{{end}}<span class="param-k">{{$p.Label}}</span> <span class="param-v">{{$p.Value}}</span>{{end}}</dd>
+          </div>{{end}}
+          {{if .Metrics.Skills}}<div class="kv-row">
+            <dt>skills</dt>
+            <dd>{{range $i, $s := .Metrics.Skills}}{{if $i}}<span class="sep">·</span>{{end}}<span class="skill">{{$s}}</span>{{end}}</dd>
+          </div>{{end}}
+        </dl>
       </div>
-      {{if .EvalScorePercent}}<div class="header-score-wrap">
-        <div class="header-score-label">评估分</div>
-        <div class="header-score {{if .Evaluation.Passed}}ok{{else}}bad{{end}}">{{.EvalScorePercent}}</div>
-      </div>{{end}}
-      <div class="header-meta">
-        {{if .Metadata.Agent}}{{.Metadata.Agent}}<span class="sep">·</span>{{end}}
-        {{.Summary.Steps}} steps<span class="sep">·</span>
-        {{if .Duration}}{{.Duration}}{{else}}running{{end}}
-        {{if .Summary.ToolFailed}}<span class="sep">·</span>{{.Summary.ToolFailed}} tool failure{{if ne .Summary.ToolFailed 1}}s{{end}}{{end}}
-        <span class="sep">·</span>{{.Metadata.StartedAt.Format "15:04:05"}} → {{if .Metadata.EndedAt}}{{.Metadata.EndedAt.Format "15:04:05"}}{{else}}running{{end}}
+
+      <div class="header-result">
+        <div class="metric-group">
+          <div class="metric"><span class="metric-label">steps</span><span class="metric-val">{{.Metrics.Steps}}</span></div>
+        </div>
+        <div class="metric-group">
+          <div class="metric"><span class="metric-label">tool calls</span><span class="metric-val">{{.Metrics.ToolCalls}}</span></div>
+          {{if .Metrics.ToolDist}}<div class="tool-dist">
+            {{range .Metrics.ToolDist}}<div class="tool-row">
+              <span class="tool-name">{{.Name}}</span>
+              <span class="tool-bar"><span class="tool-bar-fill" style="width:{{.Percent}}%"></span></span>
+              <span class="tool-count">{{.Count}}</span>
+            </div>{{end}}
+            {{if .Metrics.ToolDistMore}}<div class="tool-more">+{{.Metrics.ToolDistMore}} more</div>{{end}}
+          </div>{{end}}
+        </div>
+        <div class="metric-group">
+          <div class="metric"><span class="metric-label">tokens</span><span class="metric-val">{{.Metrics.TokensTotalLabel}}</span></div>
+          <div class="metric-sub">in {{.Metrics.TokensInLabel}} <span class="sep">·</span> out {{.Metrics.TokensOutLabel}}</div>
+        </div>
+        <div class="metric-group">
+          <div class="metric"><span class="metric-label">duration</span><span class="metric-val">{{if .Duration}}{{.Duration}}{{else}}running{{end}}</span></div>
+          <div class="metric-sub">{{.Metadata.StartedAt.Format "15:04:05"}} → {{if .Metadata.EndedAt}}{{.Metadata.EndedAt.Format "15:04:05"}}{{else}}running{{end}}</div>
+        </div>
+        {{if .Summary.ToolFailed}}<div class="metric-group">
+          <div class="metric"><span class="metric-label">tool failures</span><span class="metric-val bad">{{.Summary.ToolFailed}}</span></div>
+        </div>{{end}}
       </div>
     </div>
   </header>
