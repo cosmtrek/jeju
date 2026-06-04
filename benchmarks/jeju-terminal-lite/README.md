@@ -25,13 +25,12 @@ integration during development.
 | `fix-git` | shell tool, git state mutation, permission gate |
 | `openssl-selfsigned-cert` | shell tool, file permissions, generated artifacts |
 
-Every task also checks that Jeju produced the expected run artifacts:
+Every task also checks that Jeju produced the expected run record:
 
-- `metadata.json`
-- `config.snapshot.yaml`
 - `trajectory.jsonl`
-- `final.md`
-- `evaluation.json`
+
+The trajectory contains typed artifacts for the config snapshot, final answer,
+tool outputs, and evaluation result.
 
 ## Run
 

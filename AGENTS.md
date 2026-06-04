@@ -17,9 +17,9 @@
 ## Runtime Invariants
 
 - Every run creates a run directory through `runs.Store`.
-- Every run saves `metadata.json`, `config.snapshot.yaml`, `trajectory.jsonl`, and `final.md`; when evaluation is enabled it also saves `evaluation.json`.
-- Trajectory is JSONL. Record model calls, tool calls, permission decisions, skill events, artifacts, evaluation, and run lifecycle events.
-- Large model/tool payloads go under run `artifacts/`; events should store artifact refs instead of large content.
+- Every run saves `trajectory.jsonl`; `report.html` is a derived inspection view when generated.
+- Trajectory is the canonical JSONL event log. Record model calls, tool calls, permission decisions, skill events, artifacts, optional evaluation, and run lifecycle events.
+- Config snapshots, final answers, evaluation results, and large model/tool payloads are trajectory artifacts. Do not write separate canonical sidecar files for them.
 - All tool calls must pass through `policy.Gate` before execution.
 - File tools must stay inside the configured local workspace. Shell runs must use the sandbox workdir and enforce timeout.
 - Skills use disclosure plus manual active loading. Do not inject all skill assets by default.

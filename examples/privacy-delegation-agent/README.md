@@ -68,9 +68,10 @@ go run ./cmd/jeju inspect \
   20260602-204954-privacy-delegation-target
 ```
 
-The inspect output reports one completed model call, three artifacts, a passing
-`privacy_judge` evaluation with score `1`, and file paths for `final.md`,
-`trajectory.jsonl`, `metadata.json`, `config.snapshot.yaml`, and `artifacts/`.
+The inspect output reports one completed model call, the trajectory artifacts,
+and a passing `privacy_judge` evaluation with score `1`. The canonical trial
+record is `trajectory.jsonl`; final answers, config snapshots, and evaluation
+results are artifact entries inside that log.
 
 The target and evolver agents use the DeepSeek preset. To use another provider,
 edit the `models.providers.primary` blocks in `agents/privacy.agent.yaml` and

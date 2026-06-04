@@ -12,8 +12,8 @@ A manifest describes the agent's model, instructions, runtime loop, workspace, t
 
 - **Config-defined behavior**: define models, instructions, tools, skills, permissions, context budget, and evaluation in one manifest.
 - **Strict execution boundaries**: work happens inside explicit workspace, tool, skill, permission, sandbox, timeout, and context-window limits.
-- **Effect-level inspection**: every run records lifecycle, model, context, tool, permission, artifact, and evaluation events, with large payloads stored separately.
-- **File-backed evidence**: each run writes metadata, a config snapshot, trajectory JSONL, artifacts, evaluation output, and `final.md`.
+- **Effect-level inspection**: every run records lifecycle, model, context, tool, permission, artifact, and evaluation events.
+- **File-backed evidence**: each run writes one append-only `trajectory.jsonl`; config snapshots, final answers, evaluation results, and generated artifacts are recorded as trajectory artifacts.
 - **Evaluation-guided improvement**: inspect completed runs, evaluate outcomes, and use `jeju evolve` to search config-space patches against train and selection tasks.
 
 ## Quick Start
@@ -39,7 +39,7 @@ jeju runs
 jeju inspect <run_id>
 ```
 
-The run writes metadata, a config snapshot, trajectory JSONL, artifacts, and `final.md` under `runs/<run_id>/`. The first inspect view should show the full loop: skill loading, model calls, permission checking, a workspace write, artifacts, and evaluation.
+The run writes an append-only `trajectory.jsonl` under `runs/<run_id>/`; `report.html` is a derived inspection view generated from that log. The first inspect view should show the full loop: skill loading, model calls, permission checking, a workspace write, artifacts, and evaluation.
 
 The default `mock` provider is deterministic, so this first run demonstrates Jeju's execution lifecycle rather than live web research.
 

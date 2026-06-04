@@ -1,6 +1,6 @@
 # Evaluation-Guided Improvement
 
-Jeju agents are defined by configuration, prompts, tools, skills, permissions, and evaluators. A normal run already leaves an auditable record under `runs/<run_id>/`: the config snapshot, trajectory, final answer, evaluation result, and artifacts. Evaluation-guided improvement builds an optimization loop on top of that record.
+Jeju agents are defined by configuration, prompts, tools, skills, permissions, and evaluators. A normal run already leaves an auditable append-only record under `runs/<run_id>/trajectory.jsonl`: the config snapshot, final answer, evaluation result, and artifacts are typed trajectory artifacts. Evaluation-guided improvement builds an optimization loop on top of that record.
 
 The loop is:
 
@@ -121,7 +121,7 @@ Task rows use `jeju.task.v1` JSONL. The fixed fields are small and the user owns
 
 `data.render.template` is a Go template over the task object. The rendered string becomes the `runtime.Run` input. `expected`, `eval`, and `metadata` are passed to evaluators but are not part of the rendered task unless the template includes them.
 
-Task-level `expected` and `eval` take precedence over the target agent's default evaluator behavior. The controller writes an effective `evaluation.json` for each trial after the run completes.
+Task-level `expected` and `eval` take precedence over the target agent's default evaluator behavior. The controller appends the effective evaluator span and updated run summary to each trial's `trajectory.jsonl` after the run completes.
 
 ## Objective and Selection
 
