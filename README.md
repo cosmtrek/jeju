@@ -24,7 +24,7 @@ The same harness supports several local agent workflows: quick agent experiments
 The generated agent bundle includes a manifest, prompt, workspace, skills, run store, and a `mock` model, so the full lifecycle runs without API credentials or approval prompts. Install the CLI, then choose any local directory for the generated agent project.
 
 ```bash
-# Install the latest released CLI.
+# Install the latest released CLI on macOS or Linux.
 curl -fsSL https://raw.githubusercontent.com/cosmtrek/jeju/master/scripts/install.sh | sh
 jeju version
 
@@ -46,6 +46,10 @@ The run writes an append-only `trajectory.jsonl` under `runs/<run_id>/`; `report
 
 The default `mock` provider is deterministic, so this first run demonstrates Jeju's execution lifecycle rather than live web research.
 
+The install script targets macOS and Linux. Windows release archives are
+published as zip assets; download the matching `jeju_windows_<arch>.zip` from
+GitHub Releases and put `jeju.exe` on `PATH`, or use the source install below.
+
 When running demos or fixture scenarios from the Jeju source checkout, keep
 generated artifacts under the ignored `.jeju-dev/` directory:
 
@@ -60,7 +64,8 @@ user-facing run history.
 
 ### Install From Source
 
-Developers can also install Jeju from the Go module:
+Developers can also install Jeju from the Go module. This is a fallback path
+when a platform-specific installer is unavailable:
 
 ```bash
 go install github.com/cosmtrek/jeju/cmd/jeju@latest

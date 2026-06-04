@@ -279,6 +279,34 @@ The system prompt should make the specialist boundary obvious:
   and missing tests.
 - Avoid broad "be a helpful coding agent" instructions.
 
+## Install Jeju If Needed
+
+Before validating or running a generated agent, check whether Jeju is available:
+
+```bash
+jeju version
+```
+
+If the command is missing, use the README binary install command on macOS or
+Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cosmtrek/jeju/master/scripts/install.sh | sh
+jeju version
+```
+
+On Windows, do not run the shell installer. Prefer the matching
+`jeju_windows_<arch>.zip` release asset if available, or use the README source
+install path when Go is already installed:
+
+```bash
+go install github.com/cosmtrek/jeju/cmd/jeju@latest
+jeju version
+```
+
+Do not install Go automatically. Ask the user before taking the source-install
+path when Go is missing.
+
 ## Validation
 
 From the Jeju source checkout, write local run artifacts under `.jeju-dev/`:
