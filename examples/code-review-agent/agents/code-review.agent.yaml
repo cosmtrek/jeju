@@ -31,9 +31,9 @@ runtime:
     type: react
   compressionThreshold: 0.8
   limits:
-    maxSteps: 100
-    maxDurationSec: 180
-    maxToolCalls: 100
+    maxSteps: 50
+    maxDurationSec: 420
+    maxToolCalls: 45
     maxConsecutiveErrors: 2
 
 workspace:
@@ -51,6 +51,40 @@ tools:
       run: git
       args: ["status", "--short"]
       timeoutSec: 20
+
+  - name: git_diff_stat
+    uses: command
+    description: "Show unstaged diffstat to size and cluster large changes before reading hunks."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--stat", "--", "{{path}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to summarize."
+
+  - name: git_diff_name_only
+    uses: command
+    description: "List changed unstaged files without diff hunks."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--name-only", "--", "{{path}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to list."
 
   - name: git_diff
     uses: command
@@ -85,6 +119,40 @@ tools:
             type: string
             default: "."
             description: "Optional repository-relative path to diff."
+
+  - name: git_diff_cached_stat
+    uses: command
+    description: "Show staged diffstat to size and cluster large staged changes before reading hunks."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--cached", "--stat", "--", "{{path}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to summarize."
+
+  - name: git_diff_cached_name_only
+    uses: command
+    description: "List changed staged files without diff hunks."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--cached", "--name-only", "--", "{{path}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to list."
 
 permissions:
   access: readOnly
