@@ -6,7 +6,9 @@
 
 Jeju is an experimental local-first agent harness for developers who want to define agent behavior in config, run it with strict boundaries, inspect every effect, and improve it with evaluation evidence.
 
-A manifest describes the agent's model, instructions, runtime loop, workspace, tools, skills, permissions, context budget, and evaluation rules. Jeju executes the compiled result with workspace controls, permission gates, file-backed run artifacts, inspection views, and optional evaluation-guided config improvement.
+A manifest describes the agent's model, instructions, runtime loop, workspace, tools, skills, permissions, context budget, and evaluation rules. Jeju compiles that manifest, runs it against a local workspace, records every meaningful effect in an append-only trajectory, and can improve the agent with evaluation evidence.
+
+The same harness supports several local agent workflows: quick agent experiments, source-backed evaluations, portable specialist agent bundles, and repeated high-frequency tasks that developers or higher-level AI agents want to turn into reusable Jeju agents.
 
 ## Features
 
@@ -15,6 +17,7 @@ A manifest describes the agent's model, instructions, runtime loop, workspace, t
 - **Effect-level inspection**: every run records lifecycle, model, context, tool, permission, artifact, and evaluation events.
 - **File-backed evidence**: each run writes one append-only `trajectory.jsonl`; config snapshots, final answers, evaluation results, and generated artifacts are recorded as trajectory artifacts.
 - **Evaluation-guided improvement**: inspect completed runs, evaluate outcomes, and use `jeju evolve` to search config-space patches against train and selection tasks.
+- **Portable agent bundles**: package focused agent workflows so developers or higher-level AI agents can reuse them in local workspaces.
 
 ## Quick Start
 
@@ -92,6 +95,49 @@ jeju run agents/research.agent.yaml "Create a deep research brief on AI agent ev
 ```
 
 `preset: deepseek` fills the DeepSeek base URL and context window defaults. See [DeepSeek setup notes](docs/deepseek.md) for provider details.
+
+## Use Cases
+
+Jeju is a harness, not a broad multi-agent platform. The current implementation
+is strongest when the work can be expressed as a focused local agent with clear
+tools, permissions, run evidence, and optional evaluation.
+
+- **Agent experiments**: prototype a local agent by changing manifest fields,
+  prompts, skills, tools, model providers, and runtime limits.
+- **Evaluation harnesses**: run a fixed agent against task cases, inspect
+  trajectory evidence, and compare outcomes with rule, command, or LLM
+  evaluators.
+- **Reusable specialist agents**: package review, triage, research, docs, or
+  benchmark workflows into portable agent bundles.
+- **High-frequency workflow capture**: turn repeated local tasks into bounded
+  agents that can be run by a developer or invoked by a higher-level AI agent.
+
+Prefer a script for deterministic automation. Prefer an authoring-agent skill
+when the value is only reusable instructions or prompt guidance. Use Jeju when
+the workflow needs model reasoning plus explicit tools, permissions, run
+evidence, or evaluation.
+
+### Agent Authoring Skill
+
+Higher-level AI agents can use the authoring skill to create Jeju agent bundles.
+The skill helps them decide whether Jeju is the right artifact, choose a narrow
+task boundary, generate a minimal manifest and prompt, set permissions and
+runtime limits, add smoke evaluation, and validate the result.
+
+Install the skill with `npx skills`:
+
+```bash
+npx skills add cosmtrek/jeju --skill jeju-agent-builder
+```
+
+Or ask Codex to install it for you:
+
+```text
+Use skill-installer to install the jeju-agent-builder skill from cosmtrek/jeju.
+```
+
+The skill is [skills/jeju-agent-builder/SKILL.md](skills/jeju-agent-builder/SKILL.md).
+The full authoring manual is [docs/manual-for-agents.md](docs/manual-for-agents.md).
 
 ## Design Philosophy
 
