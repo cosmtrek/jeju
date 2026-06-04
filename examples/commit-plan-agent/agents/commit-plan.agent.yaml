@@ -1,0 +1,176 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: commit-plan
+  description: "Cluster large Git changes into reviewable commit themes"
+  labels:
+    scenario: personal-agent
+    example: commit-plan
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-flash
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.1
+      thinking:
+        type: disabled
+      maxOutputTokens: 4096
+      contextWindow: 128000
+      timeoutSec: 90
+
+instructions:
+  system: ../prompts/commit-plan.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  limits:
+    maxSteps: 45
+    maxDurationSec: 360
+    maxToolCalls: 40
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace
+
+tools:
+  - read
+  - search
+
+  - name: git_status
+    uses: command
+    description: "Show current working tree changes with git status --short."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["status", "--short"]
+      timeoutSec: 20
+
+  - name: git_diff_stat
+    uses: command
+    description: "Show unstaged diffstat for change sizing and clustering."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--stat", "--", "{{path}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to summarize."
+
+  - name: git_diff_name_only
+    uses: command
+    description: "List changed unstaged files without diff hunks."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--name-only", "--", "{{path}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to list."
+
+  - name: git_diff_cached_stat
+    uses: command
+    description: "Show staged diffstat for change sizing and clustering."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--cached", "--stat", "--", "{{path}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to summarize."
+
+  - name: git_diff_cached_name_only
+    uses: command
+    description: "List changed staged files without diff hunks."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--cached", "--name-only", "--", "{{path}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to list."
+
+  - name: git_untracked_name_only
+    uses: command
+    description: "List untracked files that are not ignored."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["ls-files", "--others", "--exclude-standard", "--", "{{path}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          path:
+            type: string
+            default: "."
+            description: "Optional repository-relative path to list."
+
+  - name: git_diff
+    uses: command
+    description: "Show unstaged working tree diff for one path."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--", "{{path}}"]
+      timeoutSec: 30
+    input:
+      schema:
+        type: object
+        required: ["path"]
+        properties:
+          path:
+            type: string
+            description: "Repository-relative path to inspect. Do not use '.' for large changes."
+
+  - name: git_diff_cached
+    uses: command
+    description: "Show staged diff for one path."
+    capabilities: [workspaceRead]
+    command:
+      run: git
+      args: ["diff", "--cached", "--", "{{path}}"]
+      timeoutSec: 30
+    input:
+      schema:
+        type: object
+        required: ["path"]
+        properties:
+          path:
+            type: string
+            description: "Repository-relative path to inspect. Do not use '.' for large changes."
+
+permissions:
+  access: readOnly
+  approval: never

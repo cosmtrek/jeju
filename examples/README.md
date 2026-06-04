@@ -13,6 +13,8 @@ evaluation evidence.
 
 - [Code review agent](code-review-agent/README.md): reviews a Git diff and
   returns structured findings checked by a local evaluator.
+- [Commit plan agent](commit-plan-agent/README.md): clusters large Git changes
+  into reviewable commit themes before staging or committing.
 - [Privacy delegation agent](privacy-delegation-agent/README.md): improves a
   weak privacy-preserving delegation prompt using deterministic leakage
   evidence.
