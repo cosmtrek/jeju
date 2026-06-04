@@ -1,7 +1,6 @@
 package runs
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
 type Store struct {
@@ -35,52 +36,26 @@ func (s *Store) CreateRun(agentName string, input string) (*RunDir, error) {
 		runID = fmt.Sprintf("%s-%02d", time.Now().Format("20060102-150405")+"-"+sanitize(agentName), i)
 		path = filepath.Join(s.BasePath, runID)
 	}
-	artifacts := filepath.Join(path, ArtifactsDir)
-	if err := os.MkdirAll(artifacts, 0o755); err != nil {
+	if err := os.MkdirAll(path, 0o755); err != nil {
 		return nil, err
 	}
-	return &RunDir{RunID: runID, Path: path, ArtifactsDir: artifacts}, nil
-}
-
-func (s *Store) WriteMetadata(runID string, metadata Metadata) error {
-	return writeJSON(filepath.Join(s.BasePath, runID, MetadataFile), metadata)
+	return &RunDir{RunID: runID, Path: path}, nil
 }
 
 func (s *Store) ReadMetadata(runID string) (Metadata, error) {
 	var metadata Metadata
-	data, err := os.ReadFile(filepath.Join(s.BasePath, runID, MetadataFile))
+	record, err := s.ReadRunRecord(runID)
 	if err != nil {
 		return metadata, err
 	}
-	err = json.Unmarshal(data, &metadata)
-	return metadata, err
-}
-
-func (s *Store) WriteConfigSnapshot(runID string, data []byte) error {
-	return os.WriteFile(filepath.Join(s.BasePath, runID, ConfigSnapshotFile), data, 0o644)
-}
-
-func (s *Store) WriteArtifact(runID string, name string, data []byte) (string, error) {
-	cleaned := filepath.Clean(name)
-	if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "..") {
-		return "", fmt.Errorf("invalid artifact name %q", name)
-	}
-	path := filepath.Join(s.BasePath, runID, ArtifactsDir, cleaned)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return "", err
-	}
-	return filepath.ToSlash(filepath.Join(ArtifactsDir, cleaned)), nil
-}
-
-func (s *Store) WriteFinal(runID string, content string) error {
-	return os.WriteFile(filepath.Join(s.BasePath, runID, FinalFile), []byte(content), 0o644)
-}
-
-func (s *Store) WriteEvaluation(runID string, data []byte) error {
-	return os.WriteFile(filepath.Join(s.BasePath, runID, EvaluationFile), data, 0o644)
+	metadata.RunID = record.RunID
+	metadata.Agent = record.Agent
+	metadata.Status = record.Status
+	metadata.Integrity = record.Integrity
+	metadata.StartedAt = record.StartedAt
+	metadata.EndedAt = record.EndedAt
+	metadata.Input = record.Input
+	return metadata, nil
 }
 
 func (s *Store) ListRuns() ([]Metadata, error) {
@@ -117,15 +92,15 @@ func (s *Store) LoadRun(runID string) (*RunDir, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("run %q is not a directory", runID)
 	}
-	return &RunDir{RunID: runID, Path: path, ArtifactsDir: filepath.Join(path, ArtifactsDir)}, nil
+	return &RunDir{RunID: runID, Path: path}, nil
 }
 
-func writeJSON(path string, value any) error {
-	data, err := json.MarshalIndent(value, "", "  ")
+func (s *Store) ReadRunRecord(runID string) (trajectory.RunRecord, error) {
+	events, err := trajectory.ReadFile(filepath.Join(s.BasePath, runID, TrajectoryFile))
 	if err != nil {
-		return err
+		return trajectory.RunRecord{}, err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return trajectory.Project(events), nil
 }
 
 var nonRunChar = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)

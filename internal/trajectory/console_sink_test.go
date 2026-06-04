@@ -8,11 +8,11 @@ import (
 
 func TestFormatConsoleStructuredOutput(t *testing.T) {
 	runLine := formatConsole(Event{
-		Type:  EventRunStarted,
+		Type:  EventTrajectoryHeader,
 		RunID: "20260526-000000-basic",
 		TS:    time.Now(),
 		Payload: map[string]any{
-			"agent": "basic",
+			"agent": map[string]any{"name": "basic"},
 			"input": "write notes",
 		},
 	})
@@ -23,44 +23,46 @@ func TestFormatConsoleStructuredOutput(t *testing.T) {
 	}
 
 	toolLine := formatConsole(Event{
-		Type: EventToolRequested,
+		Type: EventActionCreated,
 		Payload: map[string]any{
-			"tool": "write",
-			"input": map[string]any{
+			"kind":          "tool_call",
+			"function_name": "write",
+			"arguments": map[string]any{
 				"path": "notes.md",
 			},
 		},
 	})
-	if !strings.Contains(toolLine, "tool   write") ||
-		!strings.Contains(toolLine, "path=notes.md") {
+	if !strings.Contains(toolLine, "action tool_call  write") {
 		t.Fatalf("unexpected tool line: %s", toolLine)
 	}
 
 	modelLine := formatConsole(Event{
-		Type: EventModelCompleted,
+		Type:  EventSpanEnded,
+		Actor: "model:primary",
 		Payload: map[string]any{
-			"provider":          "mimo",
-			"model":             "mimo-v2.5-pro",
-			"latency_ms":        int64(2876),
-			"tokens_in":         538,
-			"tokens_out":        49,
-			"output_ref":        "artifacts/step001_model_output.txt",
-			"reasoning_ref":     "artifacts/step001_model_reasoning.txt",
-			"reasoning_preview": "I need to inspect the task.",
+			"kind":   "llm",
+			"status": "ok",
+			"metrics": map[string]any{
+				"latency_ms":        int64(2876),
+				"prompt_tokens":     538,
+				"completion_tokens": 49,
+			},
+			"attrs":     map[string]any{"provider": "mock", "model": "mock-react"},
+			"output":    map[string]any{"content_ref": "art_model_output"},
+			"reasoning": map[string]any{"content_ref": "art_model_reasoning"},
 		},
 	})
-	if !strings.Contains(modelLine, "model  mimo/mimo-v2.5-pro  2.88s  tokens 538->49") ||
-		!strings.Contains(modelLine, "output artifacts/step001_model_output.txt") ||
-		!strings.Contains(modelLine, "thinking artifacts/step001_model_reasoning.txt") ||
-		!strings.Contains(modelLine, "thought  I need to inspect the task.") {
+	if !strings.Contains(modelLine, "model  mock/mock-react  2.88s  tokens 538->49") ||
+		!strings.Contains(modelLine, "output art_model_output") ||
+		!strings.Contains(modelLine, "thinking art_model_reasoning") {
 		t.Fatalf("unexpected model line: %s", modelLine)
 	}
 
-	if line := formatConsole(Event{Type: EventModelStarted}); line != "" {
-		t.Fatalf("model.started should be hidden in console output, got %q", line)
+	if line := formatConsole(Event{Type: EventSpanStarted, Payload: map[string]any{"kind": "llm"}}); line != "" {
+		t.Fatalf("llm span.started should be hidden in console output, got %q", line)
 	}
-	if line := formatConsole(Event{Type: EventPermissionApproved}); line != "" {
-		t.Fatalf("permission.approved should be hidden in console output, got %q", line)
+	if line := formatConsole(Event{Type: EventPermissionDecided, Payload: map[string]any{"decision": "approved", "tool": "write"}}); !strings.Contains(line, "approved") {
+		t.Fatalf("permission.decided should be shown in console output, got %q", line)
 	}
 
 	if line := formatConsole(Event{Type: EventArtifactCreated}); line != "" {

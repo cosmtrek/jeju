@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/cosmtrek/jeju/internal/config"
-	"github.com/cosmtrek/jeju/internal/evaluate"
 	"github.com/cosmtrek/jeju/internal/runs"
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
@@ -75,11 +73,7 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 		t.Fatalf("view --out failed: %v", err)
 	}
 
-	assertFileExists(t, filepath.Join(runDir, runs.MetadataFile))
-	assertFileExists(t, filepath.Join(runDir, runs.ConfigSnapshotFile))
 	assertFileExists(t, filepath.Join(runDir, runs.TrajectoryFile))
-	assertFileExists(t, filepath.Join(runDir, runs.FinalFile))
-	assertFileExists(t, filepath.Join(runDir, runs.EvaluationFile))
 	assertFileExists(t, filepath.Join(runDir, runs.ReportFile))
 	assertFileExists(t, customReport)
 	assertFileExists(t, filepath.Join(tmp, "jeju-work", "workspace", "research", "notes.md"))
@@ -89,34 +83,18 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 		t.Fatalf("ReadFile trajectory failed: %v", err)
 	}
 	requireEventTypes(t, events,
-		trajectory.EventRunStarted,
-		trajectory.EventSkillDisclosed,
-		trajectory.EventSkillLoaded,
-		trajectory.EventStepStarted,
-		trajectory.EventModelStarted,
-		trajectory.EventModelCompleted,
-		trajectory.EventActionParsed,
-		trajectory.EventToolRequested,
-		trajectory.EventPermissionChecked,
-		trajectory.EventPermissionApproved,
-		trajectory.EventToolStarted,
-		trajectory.EventToolCompleted,
-		trajectory.EventStepCompleted,
-		trajectory.EventEvaluationStarted,
-		trajectory.EventEvaluationCompleted,
-		trajectory.EventRunCompleted,
+		trajectory.EventTrajectoryHeader,
+		trajectory.EventSpanStarted,
+		trajectory.EventSpanEnded,
+		trajectory.EventActionCreated,
+		trajectory.EventPermissionDecided,
+		trajectory.EventArtifactCreated,
+		trajectory.EventRunSummary,
 	)
 
-	var result evaluate.Result
-	data, err := os.ReadFile(filepath.Join(runDir, runs.EvaluationFile))
-	if err != nil {
-		t.Fatalf("read evaluation failed: %v", err)
-	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("unmarshal evaluation failed: %v", err)
-	}
-	if !result.Passed || result.Score != 1 {
-		t.Fatalf("expected passing evaluation score=1, got passed=%v score=%v", result.Passed, result.Score)
+	record := trajectory.Project(events)
+	if record.Evaluation == nil && record.EvaluationRef == "" {
+		t.Fatalf("expected evaluation in trajectory")
 	}
 }
 
@@ -154,11 +132,13 @@ func TestRunWorkspaceOverride(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected 1 run, got %d", len(items))
 	}
-	snapshot, err := os.ReadFile(filepath.Join("runs", items[0].RunID, runs.ConfigSnapshotFile))
+	events, err := trajectory.ReadFile(filepath.Join("runs", items[0].RunID, runs.TrajectoryFile))
 	if err != nil {
-		t.Fatalf("read config snapshot failed: %v", err)
+		t.Fatalf("read trajectory failed: %v", err)
 	}
-	if !strings.Contains(string(snapshot), targetWorkspace) {
+	record := trajectory.Project(events)
+	snapshot := record.ArtifactContent(record.ConfigRef)
+	if !strings.Contains(snapshot, targetWorkspace) {
 		t.Fatalf("config snapshot does not include workspace override %q:\n%s", targetWorkspace, snapshot)
 	}
 }
@@ -199,10 +179,7 @@ func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
 		t.Fatalf("expected 1 run, got %d", len(items))
 	}
 	runDir := filepath.Join(tmp, "jeju-work", "runs", items[0].RunID)
-	assertFileExists(t, filepath.Join(runDir, runs.MetadataFile))
-	assertFileExists(t, filepath.Join(runDir, runs.ConfigSnapshotFile))
 	assertFileExists(t, filepath.Join(runDir, runs.TrajectoryFile))
-	assertFileExists(t, filepath.Join(runDir, runs.FinalFile))
 	assertFileExists(t, filepath.Join(runDir, runs.ReportFile))
 
 	events, err := trajectory.ReadFile(filepath.Join(runDir, runs.TrajectoryFile))
@@ -210,9 +187,9 @@ func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
 		t.Fatalf("ReadFile trajectory failed: %v", err)
 	}
 	requireEventTypes(t, events,
-		trajectory.EventRunStarted,
-		trajectory.EventModelCompleted,
-		trajectory.EventRunCompleted,
+		trajectory.EventTrajectoryHeader,
+		trajectory.EventSpanEnded,
+		trajectory.EventRunSummary,
 	)
 }
 
@@ -243,9 +220,9 @@ func TestRunCommandsUseCustomRunsDir(t *testing.T) {
 		t.Fatalf("expected 1 custom run, got %d", len(items))
 	}
 	runID := items[0].RunID
-	assertFileExists(t, filepath.Join(customRuns, runID, runs.MetadataFile))
-	if _, err := os.Stat(filepath.Join("runs", runID, runs.MetadataFile)); !os.IsNotExist(err) {
-		t.Fatalf("run unexpectedly wrote metadata to default ./runs")
+	assertFileExists(t, filepath.Join(customRuns, runID, runs.TrajectoryFile))
+	if _, err := os.Stat(filepath.Join("runs", runID, runs.TrajectoryFile)); !os.IsNotExist(err) {
+		t.Fatalf("run unexpectedly wrote trajectory to default ./runs")
 	}
 
 	if err := Execute(ctx, []string{"runs", "--runs-dir", customRuns}); err != nil {

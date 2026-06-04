@@ -36,72 +36,87 @@ func (s *ConsoleSink) Close() error {
 
 func formatConsole(event Event) string {
 	switch event.Type {
-	case EventRunStarted:
-		return fmt.Sprintf("\nJeju Run %s\nAgent   %v\nTask    %v", event.RunID, payload(event, "agent"), payload(event, "input"))
-	case EventRunCompleted:
-		return fmt.Sprintf("\nCompleted\n  run    %v\n  status %v", payload(event, "run_dir"), payload(event, "status"))
-	case EventRunFailed:
-		return fmt.Sprintf("\nFailed\n  run    %v\n  status %v", payload(event, "run_dir"), payload(event, "status"))
-	case EventRunCancelled:
-		return fmt.Sprintf("\nCancelled\n  run    %v", payload(event, "run_dir"))
-	case EventSkillDisclosed:
-		return fmt.Sprintf("\nSkills\n  loaded  %s", formatNames(payload(event, "names")))
-	case EventSkillLoaded:
-		return ""
-	case EventStepStarted:
-		return fmt.Sprintf("\nStep %d", event.Step)
-	case EventStepCompleted:
-		status := fmt.Sprint(payload(event, "status"))
-		if status == "" || status == "running" {
-			return ""
+	case EventTrajectoryHeader:
+		return fmt.Sprintf("\nJeju Run %s\nAgent   %v\nTask    %v", event.RunID, nestedPayload(event, "agent", "name"), payload(event, "input"))
+	case EventSpanStarted:
+		if payload(event, "kind") == string(SpanStep) {
+			return fmt.Sprintf("\nStep %d", event.StepID)
 		}
-		return fmt.Sprintf("  status %s", status)
-	case EventModelStarted:
 		return ""
-	case EventModelCompleted:
-		line := fmt.Sprintf("  model  %v/%v  %s  tokens %v->%v\n         output %v", payload(event, "provider"), payload(event, "model"), formatLatency(payload(event, "latency_ms")), payload(event, "tokens_in"), payload(event, "tokens_out"), payload(event, "output_ref"))
-		if ref := payload(event, "reasoning_ref"); ref != "" {
-			line += fmt.Sprintf("\n         thinking %v", ref)
-			if preview := payload(event, "reasoning_preview"); preview != "" {
-				line += fmt.Sprintf("\n         thought  %v", preview)
-			}
-		}
-		return line
-	case EventModelFailed:
-		return fmt.Sprintf("  model  failed  error=%v", payload(event, "error"))
-	case EventActionParsed:
+	case EventSpanEnded:
+		return formatSpanEnded(event)
+	case EventActionCreated:
 		return formatAction(event)
-	case EventActionParseFailed:
-		return fmt.Sprintf("  action parse_failed  error=%v", payload(event, "error"))
-	case EventToolRequested:
-		return fmt.Sprintf("  tool   %v\n         input  %s", payload(event, "tool"), formatAny(payload(event, "input")))
-	case EventToolStarted:
-		return ""
-	case EventPermissionChecked:
-		return fmt.Sprintf("  gate   %v  %s", payload(event, "decision"), formatNames(payload(event, "capabilities")))
-	case EventPermissionApproved:
-		return ""
-	case EventPermissionDenied:
-		return fmt.Sprintf("  gate   deny  tool=%v reason=%v", payload(event, "tool"), payload(event, "reason"))
-	case EventToolCompleted:
-		return fmt.Sprintf("  tool   %v  %s  ok\n         output %v", payload(event, "tool"), formatLatency(payload(event, "latency_ms")), payload(event, "output_ref"))
-	case EventToolFailed:
-		return fmt.Sprintf("  tool   %v  %s  failed\n         error  %v", payload(event, "tool"), formatLatency(payload(event, "latency_ms")), payload(event, "error"))
+	case EventPermissionDecided:
+		return fmt.Sprintf("  gate   %v  tool=%v %s", payload(event, "decision"), payload(event, "tool"), formatNames(payload(event, "capabilities")))
 	case EventArtifactCreated:
 		return ""
-	case EventUserInputRequested:
-		return fmt.Sprintf("  user   input requested  question=%v", payload(event, "question"))
-	case EventUserInputReceived:
-		return "  user   input received"
-	case EventEvaluationStarted:
-		return "\nEvaluation"
-	case EventEvaluationCompleted:
-		return fmt.Sprintf("  passed %v  score=%v", payload(event, "passed"), payload(event, "score"))
-	case EventEvaluationFailed:
-		return fmt.Sprintf("  failed error=%v", payload(event, "error"))
+	case EventMessageCreated, EventArtifactChunk, EventArtifactFinalized:
+		return ""
+	case EventRunSummary:
+		return fmt.Sprintf("\nCompleted\n  run    %s\n  status %v", event.RunID, payload(event, "status"))
 	default:
 		return fmt.Sprintf("  event  %s", event.Type)
 	}
+}
+
+func formatModelName(event Event) string {
+	attrs, ok := payload(event, "attrs").(map[string]any)
+	if !ok {
+		return event.Actor
+	}
+	provider, _ := attrs["provider"].(string)
+	model, _ := attrs["model"].(string)
+	switch {
+	case provider != "" && model != "":
+		return provider + "/" + model
+	case model != "":
+		return model
+	case provider != "":
+		return provider
+	default:
+		return event.Actor
+	}
+}
+
+func formatSpanEnded(event Event) string {
+	kind := fmt.Sprint(payload(event, "kind"))
+	status := fmt.Sprint(payload(event, "status"))
+	if kind == string(SpanRun) || kind == string(SpanStep) {
+		if status == "" || status == string(SpanStatusOK) {
+			return ""
+		}
+		return fmt.Sprintf("  status %s", status)
+	}
+	if kind == string(SpanLLM) {
+		metrics, _ := payload(event, "metrics").(map[string]any)
+		line := fmt.Sprintf("  model  %s  %s  tokens %v->%v\n         output %v", formatModelName(event), formatLatency(metrics["latency_ms"]), metrics["prompt_tokens"], metrics["completion_tokens"], nestedPayload(event, "output", "content_ref"))
+		if ref := nestedPayload(event, "reasoning", "content_ref"); ref != "" {
+			line += fmt.Sprintf("\n         thinking %v", ref)
+		}
+		if status == string(SpanStatusError) {
+			line += fmt.Sprintf("\n         error %v", nestedPayload(event, "error", "message"))
+		}
+		return line
+	}
+	if kind == string(SpanTool) {
+		metrics, _ := payload(event, "metrics").(map[string]any)
+		name := event.Actor
+		if tool := payload(event, "tool"); tool != "" {
+			name = fmt.Sprint(tool)
+		}
+		if status == string(SpanStatusError) {
+			return fmt.Sprintf("  tool   %s  %s  failed\n         error  %v", name, formatLatency(metrics["latency_ms"]), nestedPayload(event, "error", "message"))
+		}
+		return fmt.Sprintf("  tool   %s  %s  ok\n         output %v", name, formatLatency(metrics["latency_ms"]), nestedPayload(event, "output", "content_ref"))
+	}
+	if kind == string(SpanEvaluator) {
+		if status == string(SpanStatusError) {
+			return fmt.Sprintf("\nEvaluation\n  failed error=%v", nestedPayload(event, "error", "message"))
+		}
+		return fmt.Sprintf("\nEvaluation\n  passed %v  score=%v", nestedPayload(event, "output", "passed"), nestedPayload(event, "output", "score"))
+	}
+	return ""
 }
 
 func payload(event Event, key string) any {
@@ -114,9 +129,20 @@ func payload(event Event, key string) any {
 	return ""
 }
 
+func nestedPayload(event Event, key, nested string) any {
+	value, ok := payload(event, key).(map[string]any)
+	if !ok {
+		return ""
+	}
+	if nestedValue, ok := value[nested]; ok {
+		return nestedValue
+	}
+	return ""
+}
+
 func formatAction(event Event) string {
-	actionType := payload(event, "type")
-	tool := payload(event, "tool")
+	actionType := payload(event, "kind")
+	tool := payload(event, "function_name")
 	if tool != "" {
 		return fmt.Sprintf("  action %v  %v", actionType, tool)
 	}

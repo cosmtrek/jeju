@@ -2,55 +2,59 @@ package trajectory
 
 import "time"
 
+const SchemaVersion = "jeju.trajectory.v1"
+
 type EventType string
 
 const (
-	EventRunStarted     EventType = "run.started"
-	EventRunCompleted   EventType = "run.completed"
-	EventRunFailed      EventType = "run.failed"
-	EventRunCancelled   EventType = "run.cancelled"
-	EventStepStarted    EventType = "step.started"
-	EventStepCompleted  EventType = "step.completed"
-	EventModelStarted   EventType = "model.started"
-	EventModelCompleted EventType = "model.completed"
-	EventModelFailed    EventType = "model.failed"
+	EventTrajectoryHeader  EventType = "trajectory.header"
+	EventSpanStarted       EventType = "span.started"
+	EventSpanEnded         EventType = "span.ended"
+	EventMessageCreated    EventType = "message.created"
+	EventActionCreated     EventType = "action.created"
+	EventPermissionDecided EventType = "permission.decided"
+	EventArtifactCreated   EventType = "artifact.created"
+	EventArtifactChunk     EventType = "artifact.chunk"
+	EventArtifactFinalized EventType = "artifact.finalized"
+	EventRunSummary        EventType = "run.summary"
+)
 
-	EventContextEstimated            EventType = "context.estimated"
-	EventContextSummaryStarted       EventType = "context.summary.started"
-	EventContextSummaryCompleted     EventType = "context.summary.completed"
-	EventContextSummaryFailed        EventType = "context.summary.failed"
-	EventContextCompressionStarted   EventType = "context.compression.started"
-	EventContextCompressionCompleted EventType = "context.compression.completed"
-	EventContextCompressionFailed    EventType = "context.compression.failed"
+type SpanKind string
 
-	EventActionParsed      EventType = "action.parsed"
-	EventActionParseFailed EventType = "action.parse_failed"
+const (
+	SpanRun       SpanKind = "run"
+	SpanStep      SpanKind = "step"
+	SpanLLM       SpanKind = "llm"
+	SpanTool      SpanKind = "tool"
+	SpanPolicy    SpanKind = "policy"
+	SpanContext   SpanKind = "context"
+	SpanEvaluator SpanKind = "evaluator"
+	SpanSkill     SpanKind = "skill"
+	SpanSubagent  SpanKind = "subagent"
+	SpanShell     SpanKind = "shell"
+)
 
-	EventToolRequested EventType = "tool.requested"
-	EventToolStarted   EventType = "tool.started"
-	EventToolCompleted EventType = "tool.completed"
-	EventToolFailed    EventType = "tool.failed"
+type SpanStatus string
 
-	EventPermissionChecked  EventType = "permission.checked"
-	EventPermissionApproved EventType = "permission.approved"
-	EventPermissionDenied   EventType = "permission.denied"
-
-	EventArtifactCreated     EventType = "artifact.created"
-	EventUserInputRequested  EventType = "user.input.requested"
-	EventUserInputReceived   EventType = "user.input.received"
-	EventEvaluationStarted   EventType = "evaluation.started"
-	EventEvaluationCompleted EventType = "evaluation.completed"
-	EventEvaluationFailed    EventType = "evaluation.failed"
-	EventSkillDisclosed      EventType = "skill.disclosed"
-	EventSkillLoaded         EventType = "skill.loaded"
+const (
+	SpanStatusOK        SpanStatus = "ok"
+	SpanStatusError     SpanStatus = "error"
+	SpanStatusCancelled SpanStatus = "cancelled"
+	SpanStatusSkipped   SpanStatus = "skipped"
 )
 
 type Event struct {
-	ID      string         `json:"id"`
-	Type    EventType      `json:"type"`
-	RunID   string         `json:"run_id"`
-	Step    int            `json:"step,omitempty"`
-	TS      time.Time      `json:"ts"`
-	Actor   string         `json:"actor"`
-	Payload map[string]any `json:"payload,omitempty"`
+	SchemaVersion string         `json:"schema_version"`
+	Seq           uint64         `json:"seq"`
+	EventID       string         `json:"event_id"`
+	Type          EventType      `json:"type"`
+	TS            time.Time      `json:"ts"`
+	TrajectoryID  string         `json:"trajectory_id"`
+	SessionID     string         `json:"session_id"`
+	RunID         string         `json:"run_id"`
+	StepID        int            `json:"step_id,omitempty"`
+	SpanID        string         `json:"span_id,omitempty"`
+	ParentSpanID  string         `json:"parent_span_id,omitempty"`
+	Actor         string         `json:"actor"`
+	Payload       map[string]any `json:"payload"`
 }

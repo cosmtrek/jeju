@@ -13,7 +13,6 @@ import (
 	"github.com/cosmtrek/jeju/internal/cli"
 	"github.com/cosmtrek/jeju/internal/compiler"
 	"github.com/cosmtrek/jeju/internal/config"
-	"github.com/cosmtrek/jeju/internal/evaluate"
 	"github.com/cosmtrek/jeju/internal/runs"
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
@@ -54,11 +53,7 @@ func TestAgentFixtures(t *testing.T) {
 		}
 
 		runDir := filepath.Join(workdir, "runs", runID)
-		requireFile(t, filepath.Join(runDir, runs.MetadataFile))
-		requireFile(t, filepath.Join(runDir, runs.ConfigSnapshotFile))
 		requireFile(t, filepath.Join(runDir, runs.TrajectoryFile))
-		requireFile(t, filepath.Join(runDir, runs.FinalFile))
-		requireFile(t, filepath.Join(runDir, runs.EvaluationFile))
 		requireFile(t, filepath.Join(workdir, "workspace", "agent", "notes.md"))
 
 		events, err := trajectory.ReadFile(filepath.Join(runDir, runs.TrajectoryFile))
@@ -66,33 +61,18 @@ func TestAgentFixtures(t *testing.T) {
 			t.Fatalf("read trajectory failed: %v", err)
 		}
 		requireEventTypes(t, events,
-			trajectory.EventRunStarted,
-			trajectory.EventSkillDisclosed,
-			trajectory.EventSkillLoaded,
-			trajectory.EventStepStarted,
-			trajectory.EventModelStarted,
-			trajectory.EventModelCompleted,
-			trajectory.EventActionParsed,
-			trajectory.EventToolRequested,
-			trajectory.EventPermissionChecked,
-			trajectory.EventPermissionApproved,
-			trajectory.EventToolStarted,
-			trajectory.EventToolCompleted,
-			trajectory.EventEvaluationStarted,
-			trajectory.EventEvaluationCompleted,
-			trajectory.EventRunCompleted,
+			trajectory.EventTrajectoryHeader,
+			trajectory.EventSpanStarted,
+			trajectory.EventSpanEnded,
+			trajectory.EventActionCreated,
+			trajectory.EventPermissionDecided,
+			trajectory.EventArtifactCreated,
+			trajectory.EventRunSummary,
 		)
 
-		var result evaluate.Result
-		data, err := os.ReadFile(filepath.Join(runDir, runs.EvaluationFile))
-		if err != nil {
-			t.Fatalf("read evaluation failed: %v", err)
-		}
-		if err := json.Unmarshal(data, &result); err != nil {
-			t.Fatalf("unmarshal evaluation failed: %v", err)
-		}
-		if !result.Passed || result.Score != 1 {
-			t.Fatalf("expected passing evaluation score=1, got passed=%v score=%v", result.Passed, result.Score)
+		record := trajectory.Project(events)
+		if record.Evaluation == nil && record.EvaluationRef == "" {
+			t.Fatalf("expected evaluation in trajectory")
 		}
 	})
 

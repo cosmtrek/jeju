@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -12,7 +14,6 @@ import (
 	"github.com/cosmtrek/jeju/internal/evaluate"
 	"github.com/cosmtrek/jeju/internal/model"
 	"github.com/cosmtrek/jeju/internal/policy"
-	"github.com/cosmtrek/jeju/internal/runs"
 	"github.com/cosmtrek/jeju/internal/tools"
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
@@ -20,9 +21,6 @@ import (
 func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input string) (*RunResult, error) {
 	runDir, err := agent.RunStore.CreateRun(agent.Name, input)
 	if err != nil {
-		return nil, err
-	}
-	if err := agent.RunStore.WriteConfigSnapshot(runDir.RunID, agent.ConfigSnapshot); err != nil {
 		return nil, err
 	}
 	recorder, err := trajectory.NewRecorderWithOptions(runDir.Path, trajectory.RecorderOptions{
@@ -34,27 +32,12 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 	defer recorder.Close()
 
 	state := NewRunState(runDir.RunID, agent.Name, input)
-	metadata := runs.Metadata{
-		RunID:          runDir.RunID,
-		Agent:          agent.Name,
-		Status:         string(state.Status),
-		StartedAt:      state.StartedAt,
-		Input:          input,
-		ConfigSnapshot: runs.ConfigSnapshotFile,
-		Trajectory:     runs.TrajectoryFile,
-		Final:          runs.FinalFile,
-	}
-	if agent.Config.Evaluate.Enabled {
-		metadata.Evaluation = runs.EvaluationFile
-	}
-	if err := agent.RunStore.WriteMetadata(runDir.RunID, metadata); err != nil {
-		return nil, err
-	}
-
-	recorder.Emit(ctx, trajectory.EventRunStarted, state.RunID, 0, "runtime", map[string]any{
-		"agent": agent.Name,
+	recorder.Emit(ctx, trajectory.EventTrajectoryHeader, state.RunID, 0, "runtime", map[string]any{
+		"agent": map[string]any{"name": agent.Name},
 		"input": input,
 	})
+	writeArtifact(ctx, recorder, state, "config_snapshot", "", []byte(agent.ConfigSnapshot), "config_snapshot", "application/x-yaml")
+	recorder.EmitSpanStarted(ctx, state.RunID, 0, runSpanID(), "", "runtime", trajectory.SpanRun, agent.Name, nil)
 	r.emitSkillEvents(ctx, recorder, state, agent)
 
 	for !state.IsTerminal() {
@@ -65,7 +48,7 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 		}
 		state.Step++
 		modelName := agent.Config.Runtime.Model
-		recorder.Emit(ctx, trajectory.EventStepStarted, state.RunID, state.Step, "runtime", map[string]any{
+		recorder.EmitSpanStarted(ctx, state.RunID, state.Step, stepSpanID(state.Step), runSpanID(), "runtime", trajectory.SpanStep, fmt.Sprintf("step %d", state.Step), map[string]any{
 			"model": modelName,
 		})
 
@@ -75,9 +58,7 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 				state.Status = StatusFailed
 			}
 		}
-		recorder.Emit(ctx, trajectory.EventStepCompleted, state.RunID, state.Step, "runtime", map[string]any{
-			"status": state.Status,
-		})
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, stepSpanID(state.Step), runSpanID(), "runtime", trajectory.SpanStep, spanStatusForRun(state.Status), nil)
 	}
 
 	if state.Status == StatusRunning {
@@ -86,33 +67,39 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 	if state.Final == "" && state.Status == StatusFailed {
 		state.Final = "Run failed before producing a final answer."
 	}
-	if err := agent.RunStore.WriteFinal(state.RunID, state.Final); err != nil {
-		return nil, err
+	finalRef := state.FinalRef
+	if finalRef == "" {
+		finalRef = writeArtifact(ctx, recorder, state, "final", "", []byte(state.Final), "final", "text/markdown")
+		state.FinalRef = finalRef
 	}
 
+	var evalResult *evaluate.Result
 	if agent.Config.Evaluate.Enabled {
-		r.runEvaluation(ctx, agent, recorder, state)
+		evalResult = r.runEvaluation(ctx, agent, recorder, state)
 	}
 
 	now := time.Now()
 	state.EndedAt = &now
-	eventType := trajectory.EventRunCompleted
-	if state.Status == StatusFailed {
-		eventType = trajectory.EventRunFailed
+	recorder.EmitSpanEnded(ctx, state.RunID, 0, runSpanID(), "", "runtime", trajectory.SpanRun, spanStatusForRun(state.Status), nil)
+	summary := map[string]any{
+		"status":      string(state.Status),
+		"started_at":  state.StartedAt.Format(time.RFC3339Nano),
+		"ended_at":    now.Format(time.RFC3339Nano),
+		"duration_ms": now.Sub(state.StartedAt).Milliseconds(),
+		"final":       map[string]any{"content_ref": finalRef},
+		"stats": map[string]any{
+			"steps":             state.Step,
+			"model_calls":       state.ModelCalls,
+			"tool_calls":        state.ToolCalls,
+			"permission_denied": state.PermissionDenied,
+			"model_errors":      state.ModelErrors,
+			"tool_errors":       state.ToolErrors,
+		},
 	}
-	if state.Status == StatusCancelled {
-		eventType = trajectory.EventRunCancelled
+	if evalResult != nil {
+		summary["evaluation"] = map[string]any{"passed": evalResult.Passed, "score": evalResult.Score}
 	}
-	recorder.Emit(ctx, eventType, state.RunID, state.Step, "runtime", map[string]any{
-		"status":  state.Status,
-		"run_dir": runDir.Path,
-	})
-
-	metadata.Status = string(state.Status)
-	metadata.EndedAt = state.EndedAt
-	if err := agent.RunStore.WriteMetadata(runDir.RunID, metadata); err != nil {
-		return nil, err
-	}
+	recorder.Emit(ctx, trajectory.EventRunSummary, state.RunID, 0, "runtime", summary)
 	return &RunResult{RunID: state.RunID, Status: state.Status, Final: state.Final}, nil
 }
 
@@ -129,19 +116,23 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 		return err
 	}
 	inputData, _ := json.MarshalIndent(req, "", "  ")
-	inputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "model_input", "", "json"), inputData, "model_input")
-	recorder.Emit(ctx, trajectory.EventModelStarted, state.RunID, state.Step, "model:"+modelName, map[string]any{
-		"provider":  cfg.Provider,
-		"model":     cfg.Model,
-		"input_ref": inputRef,
+	inputRef := writeArtifact(ctx, recorder, state, "model_input", "", inputData, "model_input", "application/json")
+	modelSpanID := llmSpanID(state.Step, "primary")
+	recorder.EmitSpanStarted(ctx, state.RunID, state.Step, modelSpanID, stepSpanID(state.Step), "model:"+modelName, trajectory.SpanLLM, modelName, map[string]any{
+		"input": map[string]any{"content_ref": inputRef},
+		"attrs": map[string]any{
+			"provider": cfg.Provider,
+			"model":    cfg.Model,
+		},
 	})
 
 	resp, err := client.Generate(ctx, req)
 	state.ModelCalls++
 	if err != nil {
 		state.ModelErrors++
-		recorder.Emit(ctx, trajectory.EventModelFailed, state.RunID, state.Step, "model:"+modelName, map[string]any{
-			"error": err.Error(),
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, modelSpanID, stepSpanID(state.Step), "model:"+modelName, trajectory.SpanLLM, trajectory.SpanStatusError, map[string]any{
+			"input": map[string]any{"content_ref": inputRef},
+			"error": map[string]any{"message": err.Error()},
 		})
 		return err
 	}
@@ -149,7 +140,7 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 	state.ResetErrors()
 	reasoningRef := ""
 	if resp.ReasoningContent != "" {
-		reasoningRef, _ = writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "model_reasoning", "", "txt"), []byte(resp.ReasoningContent), "model_reasoning")
+		reasoningRef = writeArtifact(ctx, recorder, state, "model_reasoning", "", []byte(resp.ReasoningContent), "model_reasoning", "text/plain")
 	}
 	outputData := []byte(resp.Text)
 	outputExt := "txt"
@@ -157,18 +148,38 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 		outputData, _ = json.MarshalIndent(resp.ToolCalls, "", "  ")
 		outputExt = "json"
 	}
-	outputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "model_output", "", outputExt), outputData, "model_output")
-	recorder.Emit(ctx, trajectory.EventModelCompleted, state.RunID, state.Step, "model:"+modelName, map[string]any{
-		"provider":          resp.Provider,
-		"model":             resp.Model,
-		"input_ref":         inputRef,
-		"output_ref":        outputRef,
-		"latency_ms":        resp.LatencyMS,
-		"tokens_in":         resp.Usage.InputTokens,
-		"tokens_out":        resp.Usage.OutputTokens,
-		"tokens_total":      resp.Usage.TotalTokens,
-		"reasoning_ref":     reasoningRef,
-		"reasoning_preview": reasoningPreview(resp.ReasoningContent),
+	outputMediaType := "text/plain"
+	if outputExt == "json" {
+		outputMediaType = "application/json"
+	}
+	outputRef := writeArtifact(ctx, recorder, state, "model_output", "", outputData, "model_output", outputMediaType)
+	modelEnd := map[string]any{
+		"input":  map[string]any{"content_ref": inputRef},
+		"output": map[string]any{"content_ref": outputRef},
+		"attrs": map[string]any{
+			"provider": resp.Provider,
+			"model":    resp.Model,
+		},
+		"metrics": map[string]any{
+			"latency_ms":        resp.LatencyMS,
+			"prompt_tokens":     resp.Usage.InputTokens,
+			"completion_tokens": resp.Usage.OutputTokens,
+			"total_tokens":      resp.Usage.TotalTokens,
+		},
+	}
+	if reasoningRef != "" {
+		modelEnd["reasoning"] = map[string]any{
+			"content_ref": reasoningRef,
+			"preview":     reasoningPreview(resp.ReasoningContent),
+		}
+	}
+	recorder.EmitSpanEnded(ctx, state.RunID, state.Step, modelSpanID, stepSpanID(state.Step), "model:"+modelName, trajectory.SpanLLM, trajectory.SpanStatusOK, modelEnd)
+	recorder.Emit(ctx, trajectory.EventMessageCreated, state.RunID, state.Step, "runtime", map[string]any{
+		"message_id":    fmt.Sprintf("msg_assistant_%03d", state.Step),
+		"role":          "assistant",
+		"source":        "agent",
+		"content":       []map[string]any{{"type": "text", "text": resp.Text}},
+		"reasoning_ref": reasoningRef,
 	})
 	if cfg.ToolCalling {
 		return r.handleNativeModelResponse(ctx, agent, recorder, state, resp)
@@ -182,17 +193,18 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 	action, err := ParseAction(resp.Text)
 	if err != nil {
 		state.AddError("action_parse", err)
-		recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
-			"error": err.Error(),
+		recorder.Emit(ctx, trajectory.EventActionCreated, state.RunID, state.Step, "runtime", map[string]any{
+			"action_id": fmt.Sprintf("act_%03d_parse_failed", state.Step),
+			"kind":      "parse_failed",
+			"error":     map[string]any{"message": err.Error()},
 		})
 		state.AddObservation("Invalid action JSON. Return only a valid Jeju action JSON object.")
 		return nil
 	}
-	recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
-		"type":    action.Type,
-		"thought": action.Thought,
-		"tool":    action.Tool,
-	})
+	if action.Type == ActionToolCall && action.ToolCallID == "" {
+		action.ToolCallID = fmt.Sprintf("call_%03d_%s", state.Step, sanitizeArtifactSuffix(action.Tool))
+	}
+	emitAction(ctx, recorder, state, action)
 
 	switch action.Type {
 	case ActionFinal:
@@ -247,52 +259,60 @@ func (r *Runtime) prepareModelRequest(ctx context.Context, agent *compiler.Compi
 	if compressionRequired || result.Report.Compressed || err != nil {
 		beforeReq := contextmgr.RequestWithSummary(req, state.Messages, state.Summary)
 		beforeData, _ := json.MarshalIndent(beforeReq, "", "  ")
-		beforeRef, _ = writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_before", "", "json"), beforeData, "context_before")
+		beforeRef = writeArtifact(ctx, recorder, state, "context_before", "", beforeData, "context_before", "application/json")
 		if result.PendingSummary == nil {
 			afterData, _ := json.MarshalIndent(result.Request, "", "  ")
-			afterRef, _ = writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_after", "", "json"), afterData, "context_after")
+			afterRef = writeArtifact(ctx, recorder, state, "context_after", "", afterData, "context_after", "application/json")
 		}
 	}
 	reportRef := ""
 	writeReport := func() string {
 		reportData, _ := json.MarshalIndent(result.Report, "", "  ")
-		ref, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_report", "", "json"), reportData, "context_report")
+		ref := writeArtifact(ctx, recorder, state, "context_report", "", reportData, "context_report", "application/json")
 		return ref
 	}
 	if result.PendingSummary == nil {
 		reportRef = writeReport()
 	}
-	recorder.Emit(ctx, trajectory.EventContextEstimated, state.RunID, state.Step, "context", map[string]any{
-		"estimator":             result.Report.Estimator,
-		"estimated_tokens":      result.Report.BeforeTokens,
-		"raw_estimated_tokens":  result.Report.BeforeRawTokens,
-		"threshold_tokens":      result.Report.ThresholdTokens,
-		"context_window":        result.Report.ContextWindow,
-		"max_output_tokens":     result.Report.MaxOutputTokens,
-		"effective_input_limit": result.Report.EffectiveInputLimit,
-		"compression_required":  compressionRequired,
-		"correction_factor":     result.Report.CorrectionFactor,
-		"report_ref":            reportRef,
-		"before_ref":            beforeRef,
+	contextSpan := contextSpanID(state.Step, "estimate")
+	recorder.EmitSpanStarted(ctx, state.RunID, state.Step, contextSpan, stepSpanID(state.Step), "context", trajectory.SpanContext, "context estimate", map[string]any{
+		"operation": "estimate",
+	})
+	recorder.EmitSpanEnded(ctx, state.RunID, state.Step, contextSpan, stepSpanID(state.Step), "context", trajectory.SpanContext, trajectory.SpanStatusOK, map[string]any{
+		"operation": "estimate",
+		"metrics": map[string]any{
+			"estimated_tokens":      result.Report.BeforeTokens,
+			"raw_estimated_tokens":  result.Report.BeforeRawTokens,
+			"threshold_tokens":      result.Report.ThresholdTokens,
+			"context_window":        result.Report.ContextWindow,
+			"max_output_tokens":     result.Report.MaxOutputTokens,
+			"effective_input_limit": result.Report.EffectiveInputLimit,
+		},
+		"attrs": map[string]any{
+			"estimator":            result.Report.Estimator,
+			"compression_required": compressionRequired,
+			"correction_factor":    result.Report.CorrectionFactor,
+			"report_ref":           reportRef,
+			"before_ref":           beforeRef,
+		},
 	})
 	if compressionRequired {
-		recorder.Emit(ctx, trajectory.EventContextCompressionStarted, state.RunID, state.Step, "context", map[string]any{
-			"before_tokens":    result.Report.BeforeTokens,
-			"threshold_tokens": result.Report.ThresholdTokens,
-			"before_ref":       beforeRef,
+		recorder.EmitSpanStarted(ctx, state.RunID, state.Step, contextSpanID(state.Step, "compression"), stepSpanID(state.Step), "context", trajectory.SpanContext, "context compression", map[string]any{
+			"operation": "compaction",
+			"before":    map[string]any{"tokens": result.Report.BeforeTokens, "content_ref": beforeRef},
 		})
 	}
 	if err != nil {
-		recorder.Emit(ctx, trajectory.EventContextCompressionFailed, state.RunID, state.Step, "context", map[string]any{
-			"error":                  err.Error(),
-			"before_tokens":          result.Report.BeforeTokens,
-			"after_tokens":           result.Report.AfterTokens,
-			"effective_input_limit":  result.Report.EffectiveInputLimit,
-			"strategies":             result.Report.Strategies,
-			"truncated_tool_results": result.Report.TruncatedToolResult,
-			"before_ref":             beforeRef,
-			"after_ref":              afterRef,
-			"report_ref":             reportRef,
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, contextSpanID(state.Step, "compression"), stepSpanID(state.Step), "context", trajectory.SpanContext, trajectory.SpanStatusError, map[string]any{
+			"operation": "compaction",
+			"error":     map[string]any{"message": err.Error()},
+			"before":    map[string]any{"tokens": result.Report.BeforeTokens, "content_ref": beforeRef},
+			"after":     map[string]any{"tokens": result.Report.AfterTokens, "content_ref": afterRef},
+			"metrics": map[string]any{
+				"effective_input_limit":  result.Report.EffectiveInputLimit,
+				"truncated_tool_results": result.Report.TruncatedToolResult,
+			},
+			"attrs": map[string]any{"strategies": result.Report.Strategies, "report_ref": reportRef},
 		})
 		return model.Request{}, err
 	}
@@ -304,49 +324,42 @@ func (r *Runtime) prepareModelRequest(ctx context.Context, agent *compiler.Compi
 			result = contextmgr.CompleteSummary(result, summary, contextOpts)
 		}
 		afterData, _ := json.MarshalIndent(result.Request, "", "  ")
-		afterRef, _ = writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_after", "", "json"), afterData, "context_after")
+		afterRef = writeArtifact(ctx, recorder, state, "context_after", "", afterData, "context_after", "application/json")
 		reportRef = writeReport()
 	}
 	if err := contextmgr.Overflow(result, contextOpts); err != nil {
-		recorder.Emit(ctx, trajectory.EventContextCompressionFailed, state.RunID, state.Step, "context", map[string]any{
-			"error":                  err.Error(),
-			"before_tokens":          result.Report.BeforeTokens,
-			"after_tokens":           result.Report.AfterTokens,
-			"effective_input_limit":  result.Report.EffectiveInputLimit,
-			"strategies":             result.Report.Strategies,
-			"truncated_tool_results": result.Report.TruncatedToolResult,
-			"before_ref":             beforeRef,
-			"after_ref":              afterRef,
-			"report_ref":             reportRef,
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, contextSpanID(state.Step, "compression"), stepSpanID(state.Step), "context", trajectory.SpanContext, trajectory.SpanStatusError, map[string]any{
+			"operation": "compaction",
+			"error":     map[string]any{"message": err.Error()},
+			"before":    map[string]any{"tokens": result.Report.BeforeTokens, "content_ref": beforeRef},
+			"after":     map[string]any{"tokens": result.Report.AfterTokens, "content_ref": afterRef},
+			"metrics": map[string]any{
+				"effective_input_limit":  result.Report.EffectiveInputLimit,
+				"truncated_tool_results": result.Report.TruncatedToolResult,
+			},
+			"attrs": map[string]any{"strategies": result.Report.Strategies, "report_ref": reportRef},
 		})
 		return model.Request{}, err
 	}
 	if result.Report.Compressed {
+		summaryRef := ""
 		if result.Summary != "" {
-			summaryRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_summary", "", "md"), []byte(result.Summary), "context_summary")
-			recorder.Emit(ctx, trajectory.EventContextCompressionCompleted, state.RunID, state.Step, "context", map[string]any{
-				"before_tokens":          result.Report.BeforeTokens,
-				"after_tokens":           result.Report.AfterTokens,
-				"strategies":             result.Report.Strategies,
-				"preserved_blocks":       result.Report.PreservedBlocks,
-				"truncated_tool_results": result.Report.TruncatedToolResult,
-				"summary_ref":            summaryRef,
-				"before_ref":             beforeRef,
-				"after_ref":              afterRef,
-				"report_ref":             reportRef,
-			})
-		} else {
-			recorder.Emit(ctx, trajectory.EventContextCompressionCompleted, state.RunID, state.Step, "context", map[string]any{
-				"before_tokens":          result.Report.BeforeTokens,
-				"after_tokens":           result.Report.AfterTokens,
-				"strategies":             result.Report.Strategies,
-				"preserved_blocks":       result.Report.PreservedBlocks,
-				"truncated_tool_results": result.Report.TruncatedToolResult,
-				"before_ref":             beforeRef,
-				"after_ref":              afterRef,
-				"report_ref":             reportRef,
-			})
+			summaryRef = writeArtifact(ctx, recorder, state, "context_summary", "", []byte(result.Summary), "context_summary", "text/markdown")
 		}
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, contextSpanID(state.Step, "compression"), stepSpanID(state.Step), "context", trajectory.SpanContext, trajectory.SpanStatusOK, map[string]any{
+			"operation":   "compaction",
+			"boundary":    "replace",
+			"before":      map[string]any{"tokens": result.Report.BeforeTokens, "content_ref": beforeRef},
+			"after":       map[string]any{"tokens": result.Report.AfterTokens, "content_ref": afterRef},
+			"summary_ref": summaryRef,
+			"metrics": map[string]any{
+				"before_tokens":          result.Report.BeforeTokens,
+				"after_tokens":           result.Report.AfterTokens,
+				"preserved_blocks":       result.Report.PreservedBlocks,
+				"truncated_tool_results": result.Report.TruncatedToolResult,
+			},
+			"attrs": map[string]any{"strategies": result.Report.Strategies, "report_ref": reportRef},
+		})
 	}
 	state.Messages = result.StateMessages
 	state.Summary = result.Summary
@@ -382,17 +395,17 @@ func (r *Runtime) summarizeContext(ctx context.Context, agent *compiler.Compiled
 	rawTokens := contextmgr.EstimateRequestTokensRaw(req)
 	effectiveLimit := cfg.ContextWindow - req.MaxTokens
 	inputData, _ := json.MarshalIndent(req, "", "  ")
-	inputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_summary_input", "", "json"), inputData, "context_summary_input")
-	recorder.Emit(ctx, trajectory.EventContextSummaryStarted, state.RunID, state.Step, "model:"+cfg.Name, map[string]any{
-		"provider":  cfg.Provider,
-		"model":     cfg.Model,
-		"input_ref": inputRef,
+	inputRef := writeArtifact(ctx, recorder, state, "context_summary_input", "", inputData, "context_summary_input", "application/json")
+	spanID := llmSpanID(state.Step, "context_summary")
+	recorder.EmitSpanStarted(ctx, state.RunID, state.Step, spanID, contextSpanID(state.Step, "compression"), "model:"+cfg.Name, trajectory.SpanLLM, "context summary", map[string]any{
+		"input": map[string]any{"content_ref": inputRef},
+		"attrs": map[string]any{"provider": cfg.Provider, "model": cfg.Model, "operation": "context_summary"},
 	})
 	if cfg.ContextWindow > 0 && rawTokens > effectiveLimit {
 		err := fmt.Errorf("context summary request estimate %d exceeds effective input limit %d", rawTokens, effectiveLimit)
-		recorder.Emit(ctx, trajectory.EventContextSummaryFailed, state.RunID, state.Step, "model:"+cfg.Name, map[string]any{
-			"error":     err.Error(),
-			"input_ref": inputRef,
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, contextSpanID(state.Step, "compression"), "model:"+cfg.Name, trajectory.SpanLLM, trajectory.SpanStatusError, map[string]any{
+			"input": map[string]any{"content_ref": inputRef},
+			"error": map[string]any{"message": err.Error()},
 		})
 		return "", err
 	}
@@ -400,33 +413,34 @@ func (r *Runtime) summarizeContext(ctx context.Context, agent *compiler.Compiled
 	state.ModelCalls++
 	if err != nil {
 		state.ModelErrors++
-		recorder.Emit(ctx, trajectory.EventContextSummaryFailed, state.RunID, state.Step, "model:"+cfg.Name, map[string]any{
-			"error":     err.Error(),
-			"input_ref": inputRef,
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, contextSpanID(state.Step, "compression"), "model:"+cfg.Name, trajectory.SpanLLM, trajectory.SpanStatusError, map[string]any{
+			"input": map[string]any{"content_ref": inputRef},
+			"error": map[string]any{"message": err.Error()},
 		})
 		return "", err
 	}
 	outputData := []byte(resp.Text)
-	outputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "context_summary_output", "", "txt"), outputData, "context_summary_output")
+	outputRef := writeArtifact(ctx, recorder, state, "context_summary_output", "", outputData, "context_summary_output", "text/plain")
 	summary, err := parseSummaryResponse(resp.Text)
 	if err != nil {
 		state.ModelErrors++
-		recorder.Emit(ctx, trajectory.EventContextSummaryFailed, state.RunID, state.Step, "model:"+cfg.Name, map[string]any{
-			"error":      err.Error(),
-			"input_ref":  inputRef,
-			"output_ref": outputRef,
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, contextSpanID(state.Step, "compression"), "model:"+cfg.Name, trajectory.SpanLLM, trajectory.SpanStatusError, map[string]any{
+			"input":  map[string]any{"content_ref": inputRef},
+			"output": map[string]any{"content_ref": outputRef},
+			"error":  map[string]any{"message": err.Error()},
 		})
 		return "", err
 	}
-	recorder.Emit(ctx, trajectory.EventContextSummaryCompleted, state.RunID, state.Step, "model:"+cfg.Name, map[string]any{
-		"provider":     resp.Provider,
-		"model":        resp.Model,
-		"input_ref":    inputRef,
-		"output_ref":   outputRef,
-		"latency_ms":   resp.LatencyMS,
-		"tokens_in":    resp.Usage.InputTokens,
-		"tokens_out":   resp.Usage.OutputTokens,
-		"tokens_total": resp.Usage.TotalTokens,
+	recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, contextSpanID(state.Step, "compression"), "model:"+cfg.Name, trajectory.SpanLLM, trajectory.SpanStatusOK, map[string]any{
+		"input":  map[string]any{"content_ref": inputRef},
+		"output": map[string]any{"content_ref": outputRef},
+		"attrs":  map[string]any{"provider": resp.Provider, "model": resp.Model, "operation": "context_summary"},
+		"metrics": map[string]any{
+			"latency_ms":        resp.LatencyMS,
+			"prompt_tokens":     resp.Usage.InputTokens,
+			"completion_tokens": resp.Usage.OutputTokens,
+			"total_tokens":      resp.Usage.TotalTokens,
+		},
 	})
 	return summary, nil
 }
@@ -588,18 +602,13 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 			}
 			if err := json.Unmarshal(call.Arguments, &input); err != nil {
 				state.AddError("action_parse", err)
-				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
-					"error": err.Error(),
-				})
+				emitActionParseFailed(ctx, recorder, state, err)
 				addNativeToolFeedback(state, call, fmt.Sprintf("Tool ask_user failed: invalid JSON arguments: %s. Re-issue ask_user with valid JSON arguments.", err.Error()))
 				return nil
 			}
 			action.Question = input.Question
 			state.Messages[len(state.Messages)-1] = model.Message{Role: "assistant", Content: input.Question, ReasoningContent: resp.ReasoningContent}
-			recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
-				"type": action.Type,
-				"tool": "ask_user",
-			})
+			emitAction(ctx, recorder, state, action)
 			r.handleAskUser(ctx, recorder, state, action)
 			return nil
 		}
@@ -610,26 +619,19 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 			}
 			if err := json.Unmarshal(call.Arguments, &input); err != nil {
 				state.AddError("action_parse", err)
-				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
-					"error": err.Error(),
-				})
+				emitActionParseFailed(ctx, recorder, state, err)
 				addNativeToolFeedback(state, call, fmt.Sprintf("Tool final_answer failed: invalid JSON arguments: %s. Re-issue final_answer with valid JSON arguments and keep content concise.", err.Error()))
 				return nil
 			}
 			if strings.TrimSpace(input.Content) == "" {
 				err := fmt.Errorf("final_answer missing content")
 				state.AddError("action_parse", err)
-				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
-					"error": err.Error(),
-				})
+				emitActionParseFailed(ctx, recorder, state, err)
 				addNativeToolFeedback(state, call, "Tool final_answer failed: content must be a non-empty string. Re-issue final_answer with concise non-empty content.")
 				return nil
 			}
 			state.Messages[len(state.Messages)-1] = model.Message{Role: "assistant", Content: input.Content, ReasoningContent: resp.ReasoningContent}
-			recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
-				"type": ActionFinal,
-				"tool": "final_answer",
-			})
+			emitAction(ctx, recorder, state, Action{Type: ActionFinal, Content: input.Content})
 			state.Final = input.Content
 			state.Status = StatusCompleted
 			return nil
@@ -639,9 +641,7 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 			if call.Name == "ask_user" || call.Name == "final_answer" {
 				err := fmt.Errorf("control tool %q must be the only native tool call", call.Name)
 				state.AddError("action_parse", err)
-				recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
-					"error": err.Error(),
-				})
+				emitActionParseFailed(ctx, recorder, state, err)
 				for _, feedbackCall := range resp.ToolCalls {
 					addNativeToolFeedback(state, feedbackCall, fmt.Sprintf("Tool %s failed: %s. Return ask_user or final_answer as a single function tool call.", feedbackCall.Name, err.Error()))
 				}
@@ -659,10 +659,7 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 			if len(action.Input) == 0 {
 				action.Input = json.RawMessage(`{}`)
 			}
-			recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
-				"type": action.Type,
-				"tool": action.Tool,
-			})
+			emitAction(ctx, recorder, state, action)
 			messageCount := len(state.Messages)
 			r.handleToolCall(ctx, agent, recorder, state, action)
 			if len(state.Messages) > messageCount {
@@ -684,24 +681,18 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 	content, err := parseFinalContent(resp.Text)
 	if err != nil {
 		state.AddError("action_parse", err)
-		recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
-			"error": err.Error(),
-		})
+		emitActionParseFailed(ctx, recorder, state, err)
 		state.AddObservation("Final response must be a JSON object with a non-empty content string. Use function tools for tool calls; do not simulate tool calls in text.")
 		return nil
 	}
 	if strings.TrimSpace(content) == "" {
 		err := fmt.Errorf("native model response missing final content")
 		state.AddError("action_parse", err)
-		recorder.Emit(ctx, trajectory.EventActionParseFailed, state.RunID, state.Step, "runtime", map[string]any{
-			"error": err.Error(),
-		})
+		emitActionParseFailed(ctx, recorder, state, err)
 		state.AddObservation("Return a final response with a non-empty content field.")
 		return nil
 	}
-	recorder.Emit(ctx, trajectory.EventActionParsed, state.RunID, state.Step, "runtime", map[string]any{
-		"type": ActionFinal,
-	})
+	emitAction(ctx, recorder, state, Action{Type: ActionFinal, Content: content})
 	state.Final = content
 	state.Status = StatusCompleted
 	return nil
@@ -746,18 +737,24 @@ func reasoningPreview(text string) string {
 }
 
 func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, action Action) {
-	recorder.Emit(ctx, trajectory.EventToolRequested, state.RunID, state.Step, "model", map[string]any{
-		"tool":  action.Tool,
-		"input": compactToolInput(action.Input),
-	})
+	if action.ToolCallID == "" {
+		action.ToolCallID = fmt.Sprintf("call_%03d_%s", state.Step, sanitizeArtifactSuffix(action.Tool))
+	}
+	toolSpan := toolSpanID(state.Step, action.ToolCallID)
 	tool, ok := agent.Tools.Get(action.Tool)
 	if !ok {
 		err := fmt.Errorf("unknown tool %q", action.Tool)
 		state.ToolErrors++
 		state.AddError("tool", err)
-		recorder.Emit(ctx, trajectory.EventToolFailed, state.RunID, state.Step, "tool:"+action.Tool, map[string]any{
-			"tool":  action.Tool,
-			"error": err.Error(),
+		recorder.EmitSpanStarted(ctx, state.RunID, state.Step, toolSpan, stepSpanID(state.Step), "tool:"+action.Tool, trajectory.SpanTool, action.Tool, map[string]any{
+			"tool":         action.Tool,
+			"tool_call_id": action.ToolCallID,
+			"input":        map[string]any{"value": compactToolInput(action.Input)},
+		})
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, toolSpan, stepSpanID(state.Step), "tool:"+action.Tool, trajectory.SpanTool, trajectory.SpanStatusError, map[string]any{
+			"tool":         action.Tool,
+			"tool_call_id": action.ToolCallID,
+			"error":        map[string]any{"message": err.Error()},
 		})
 		state.AddObservation(err.Error())
 		return
@@ -770,19 +767,17 @@ func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAg
 		Input: action.Input,
 	}
 	decision := agent.Policy.Check(req, spec)
-	recorder.Emit(ctx, trajectory.EventPermissionChecked, state.RunID, state.Step, "policy", map[string]any{
+	permissionPayload := map[string]any{
+		"tool_call_id": action.ToolCallID,
 		"tool":         action.Tool,
 		"capabilities": spec.Capabilities,
-		"decision":     decision.Action,
+		"decision":     decisionName(decision.Action),
 		"reason":       decision.Reason,
-	})
+	}
 	approvalReason := ""
 	if decision.Action == policy.DecisionDeny {
 		state.PermissionDenied++
-		recorder.Emit(ctx, trajectory.EventPermissionDenied, state.RunID, state.Step, "policy", map[string]any{
-			"tool":   action.Tool,
-			"reason": decision.Reason,
-		})
+		recorder.Emit(ctx, trajectory.EventPermissionDecided, state.RunID, state.Step, "policy", permissionPayload)
 		state.AddObservation(fmt.Sprintf("Tool %s denied by policy: %s", action.Tool, decision.Reason))
 		return
 	}
@@ -798,37 +793,38 @@ func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAg
 			}
 			if !approved {
 				state.PermissionDenied++
-				recorder.Emit(ctx, trajectory.EventPermissionDenied, state.RunID, state.Step, "policy", map[string]any{
-					"tool":   action.Tool,
-					"reason": "user denied",
-				})
+				permissionPayload["decision"] = "denied"
+				permissionPayload["reason"] = "user denied"
+				recorder.Emit(ctx, trajectory.EventPermissionDecided, state.RunID, state.Step, "policy", permissionPayload)
 				state.AddObservation(fmt.Sprintf("Tool %s denied by user.", action.Tool))
 				return
 			}
 		}
 	}
-	approvalPayload := map[string]any{
-		"tool": action.Tool,
-	}
 	if approvalReason != "" {
-		approvalPayload["reason"] = approvalReason
+		permissionPayload["decision"] = "auto_approved"
+		permissionPayload["reason"] = approvalReason
+	} else {
+		permissionPayload["decision"] = "approved"
 	}
-	recorder.Emit(ctx, trajectory.EventPermissionApproved, state.RunID, state.Step, "policy", approvalPayload)
+	recorder.Emit(ctx, trajectory.EventPermissionDecided, state.RunID, state.Step, "policy", permissionPayload)
 
 	start := time.Now()
-	recorder.Emit(ctx, trajectory.EventToolStarted, state.RunID, state.Step, "tool:"+action.Tool, map[string]any{
-		"tool":  action.Tool,
-		"input": compactToolInput(action.Input),
+	recorder.EmitSpanStarted(ctx, state.RunID, state.Step, toolSpan, stepSpanID(state.Step), "tool:"+action.Tool, trajectory.SpanTool, action.Tool, map[string]any{
+		"tool":         action.Tool,
+		"tool_call_id": action.ToolCallID,
+		"input":        map[string]any{"value": compactToolInput(action.Input)},
 	})
 	result, err := runToolWithTimeout(ctx, tool, spec, action.Input)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		state.ToolErrors++
 		state.AddError("tool", err)
-		recorder.Emit(ctx, trajectory.EventToolFailed, state.RunID, state.Step, "tool:"+action.Tool, map[string]any{
-			"tool":       action.Tool,
-			"error":      err.Error(),
-			"latency_ms": latency,
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, toolSpan, stepSpanID(state.Step), "tool:"+action.Tool, trajectory.SpanTool, trajectory.SpanStatusError, map[string]any{
+			"tool":         action.Tool,
+			"tool_call_id": action.ToolCallID,
+			"error":        map[string]any{"message": err.Error()},
+			"metrics":      map[string]any{"latency_ms": latency},
 		})
 		state.AddObservation(fmt.Sprintf("Tool %s failed: %s", action.Tool, err.Error()))
 		return
@@ -840,34 +836,30 @@ func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAg
 	if action.ToolCallID != "" {
 		artifactSuffix += "_" + sanitizeArtifactSuffix(action.ToolCallID)
 	}
-	outputRef, _ := writeArtifact(ctx, agent, recorder, state, stepArtifactName(state.Step, "tool_output", artifactSuffix, "json"), outputData, "tool_output")
-	recorder.Emit(ctx, trajectory.EventToolCompleted, state.RunID, state.Step, "tool:"+action.Tool, map[string]any{
-		"tool":       action.Tool,
-		"input":      compactToolInput(action.Input),
-		"output_ref": outputRef,
-		"latency_ms": latency,
-		"status":     "ok",
+	outputRef := writeArtifact(ctx, recorder, state, "tool_output", artifactSuffix, outputData, "tool_output", "application/json")
+	recorder.EmitSpanEnded(ctx, state.RunID, state.Step, toolSpan, stepSpanID(state.Step), "tool:"+action.Tool, trajectory.SpanTool, trajectory.SpanStatusOK, map[string]any{
+		"tool":         action.Tool,
+		"tool_call_id": action.ToolCallID,
+		"input":        map[string]any{"value": compactToolInput(action.Input)},
+		"output":       map[string]any{"content_ref": outputRef},
+		"metrics":      map[string]any{"latency_ms": latency},
 	})
 	for _, artifact := range result.Artifacts {
-		recorder.Emit(ctx, trajectory.EventArtifactCreated, state.RunID, state.Step, "tool:"+action.Tool, map[string]any{
-			"name": artifact.Name,
-			"path": artifact.Path,
-			"type": artifact.Type,
-		})
+		writeArtifact(ctx, recorder, state, "workspace_file", artifact.Name, []byte(artifact.Path), "workspace_file", "text/plain")
 	}
 	state.AddObservation(fmt.Sprintf("Tool %s completed: %s", action.Tool, result.Output))
 }
 
 func (r *Runtime) handleAskUser(ctx context.Context, recorder *trajectory.Recorder, state *RunState, action Action) {
 	state.Status = StatusWaitingUser
-	recorder.Emit(ctx, trajectory.EventUserInputRequested, state.RunID, state.Step, "runtime", map[string]any{
-		"question": action.Question,
-	})
 	if r.autoUserInput != nil {
 		answer := *r.autoUserInput
-		recorder.Emit(ctx, trajectory.EventUserInputReceived, state.RunID, state.Step, "user", map[string]any{
-			"input":  answer,
-			"reason": "auto_answered_by_evolve",
+		recorder.Emit(ctx, trajectory.EventMessageCreated, state.RunID, state.Step, "user", map[string]any{
+			"message_id": fmt.Sprintf("msg_user_%03d", state.Step),
+			"role":       "user",
+			"source":     "user",
+			"content":    []map[string]any{{"type": "text", "text": answer}},
+			"reason":     "auto_answered_by_evolve",
 		})
 		state.Messages = append(state.Messages, model.Message{Role: "user", Content: answer})
 		state.Status = StatusRunning
@@ -879,15 +871,19 @@ func (r *Runtime) handleAskUser(ctx context.Context, recorder *trajectory.Record
 		state.Status = StatusCancelled
 		return
 	}
-	recorder.Emit(ctx, trajectory.EventUserInputReceived, state.RunID, state.Step, "user", map[string]any{
-		"input": answer,
+	recorder.Emit(ctx, trajectory.EventMessageCreated, state.RunID, state.Step, "user", map[string]any{
+		"message_id": fmt.Sprintf("msg_user_%03d", state.Step),
+		"role":       "user",
+		"source":     "user",
+		"content":    []map[string]any{{"type": "text", "text": answer}},
 	})
 	state.Messages = append(state.Messages, model.Message{Role: "user", Content: answer})
 	state.Status = StatusRunning
 }
 
-func (r *Runtime) runEvaluation(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState) {
-	recorder.Emit(ctx, trajectory.EventEvaluationStarted, state.RunID, state.Step, "evaluate", nil)
+func (r *Runtime) runEvaluation(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState) *evaluate.Result {
+	spanID := "span_eval_001"
+	recorder.EmitSpanStarted(ctx, state.RunID, state.Step, spanID, runSpanID(), "evaluate", trajectory.SpanEvaluator, "evaluation", nil)
 	result, err := evaluate.Run(ctx, state.RunID, agent.Evaluators, evaluate.Context{
 		RunID:            state.RunID,
 		Input:            state.Input,
@@ -902,22 +898,22 @@ func (r *Runtime) runEvaluation(ctx context.Context, agent *compiler.CompiledAge
 		MaxToolCalls:     agent.Config.Runtime.Limits.MaxToolCalls,
 	})
 	if err != nil {
-		recorder.Emit(ctx, trajectory.EventEvaluationFailed, state.RunID, state.Step, "evaluate", map[string]any{
-			"error": err.Error(),
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, runSpanID(), "evaluate", trajectory.SpanEvaluator, trajectory.SpanStatusError, map[string]any{
+			"error": map[string]any{"message": err.Error()},
 		})
-		return
+		return nil
 	}
 	data, _ := json.MarshalIndent(result, "", "  ")
-	if err := agent.RunStore.WriteEvaluation(state.RunID, data); err != nil {
-		recorder.Emit(ctx, trajectory.EventEvaluationFailed, state.RunID, state.Step, "evaluate", map[string]any{
-			"error": err.Error(),
-		})
-		return
-	}
-	recorder.Emit(ctx, trajectory.EventEvaluationCompleted, state.RunID, state.Step, "evaluate", map[string]any{
-		"passed": result.Passed,
-		"score":  result.Score,
+	evalRef := writeArtifact(ctx, recorder, state, "evaluation", "", data, "evaluation", "application/json")
+	recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, runSpanID(), "evaluate", trajectory.SpanEvaluator, trajectory.SpanStatusOK, map[string]any{
+		"output": map[string]any{
+			"content_ref": evalRef,
+			"passed":      result.Passed,
+			"score":       result.Score,
+			"evaluators":  result.Evaluators,
+		},
 	})
+	return &result
 }
 
 func (r *Runtime) emitSkillEvents(ctx context.Context, recorder *trajectory.Recorder, state *RunState, agent *compiler.CompiledAgent) {
@@ -926,13 +922,22 @@ func (r *Runtime) emitSkillEvents(ctx context.Context, recorder *trajectory.Reco
 	for _, skill := range all {
 		names = append(names, skill.Manifest.Metadata.Name)
 	}
-	recorder.Emit(ctx, trajectory.EventSkillDisclosed, state.RunID, 0, "skills", map[string]any{
-		"count": len(names),
-		"names": names,
+	disclosureSpan := "span_skill_disclosure"
+	recorder.EmitSpanStarted(ctx, state.RunID, 0, disclosureSpan, runSpanID(), "skills", trajectory.SpanSkill, "skill disclosure", map[string]any{
+		"operation": "disclosure",
+	})
+	recorder.EmitSpanEnded(ctx, state.RunID, 0, disclosureSpan, runSpanID(), "skills", trajectory.SpanSkill, trajectory.SpanStatusOK, map[string]any{
+		"operation": "disclosure",
+		"output":    map[string]any{"count": len(names), "names": names},
 	})
 	for _, skill := range agent.Skills.Active() {
-		recorder.Emit(ctx, trajectory.EventSkillLoaded, state.RunID, 0, "skills", map[string]any{
-			"name": skill.Manifest.Metadata.Name,
+		spanID := "span_skill_" + sanitizeArtifactSuffix(skill.Manifest.Metadata.Name)
+		recorder.EmitSpanStarted(ctx, state.RunID, 0, spanID, runSpanID(), "skills", trajectory.SpanSkill, skill.Manifest.Metadata.Name, map[string]any{
+			"operation": "load",
+		})
+		recorder.EmitSpanEnded(ctx, state.RunID, 0, spanID, runSpanID(), "skills", trajectory.SpanSkill, trajectory.SpanStatusOK, map[string]any{
+			"operation": "load",
+			"output":    map[string]any{"name": skill.Manifest.Metadata.Name},
 		})
 	}
 }
@@ -965,28 +970,138 @@ func (r *Runtime) readLine() string {
 	return strings.TrimRight(text, "\r\n")
 }
 
-func writeArtifact(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, name string, data []byte, typ string) (string, error) {
-	ref, err := agent.RunStore.WriteArtifact(state.RunID, name, data)
-	if err != nil {
-		return "", err
+func writeArtifact(ctx context.Context, recorder *trajectory.Recorder, state *RunState, typ string, suffix string, data []byte, role string, mediaType string) string {
+	id := artifactID(state.Step, typ, suffix)
+	const inlineLimit = 64 * 1024
+	payload := map[string]any{
+		"artifact_id": id,
+		"role":        role,
+		"media_type":  mediaType,
 	}
-	recorder.Emit(ctx, trajectory.EventArtifactCreated, state.RunID, state.Step, "runtime", map[string]any{
-		"name": name,
-		"path": ref,
-		"type": typ,
+	if len(data) <= inlineLimit {
+		if mediaType == "application/json" {
+			var value any
+			if err := json.Unmarshal(data, &value); err == nil {
+				payload["encoding"] = "json"
+				payload["value"] = value
+			} else {
+				payload["encoding"] = "utf-8"
+				payload["text"] = string(data)
+			}
+		} else {
+			payload["encoding"] = "utf-8"
+			payload["text"] = string(data)
+		}
+		recorder.Emit(ctx, trajectory.EventArtifactCreated, state.RunID, state.Step, "runtime", payload)
+		return id
+	}
+	payload["chunked"] = true
+	recorder.Emit(ctx, trajectory.EventArtifactCreated, state.RunID, state.Step, "runtime", payload)
+	for index, start := 0, 0; start < len(data); index, start = index+1, start+inlineLimit {
+		end := start + inlineLimit
+		if end > len(data) {
+			end = len(data)
+		}
+		recorder.Emit(ctx, trajectory.EventArtifactChunk, state.RunID, state.Step, "runtime", map[string]any{
+			"artifact_id": id,
+			"index":       index,
+			"encoding":    "base64",
+			"data":        base64.StdEncoding.EncodeToString(data[start:end]),
+		})
+	}
+	sum := sha256.Sum256(data)
+	recorder.Emit(ctx, trajectory.EventArtifactFinalized, state.RunID, state.Step, "runtime", map[string]any{
+		"artifact_id": id,
+		"bytes":       len(data),
+		"sha256":      fmt.Sprintf("%x", sum[:]),
 	})
-	return ref, nil
+	return id
 }
 
-func stepArtifactName(step int, typ string, suffix string, ext string) string {
-	name := fmt.Sprintf("step%03d_%s", step, typ)
-	if suffix != "" {
-		name += "_" + suffix
+func artifactID(step int, typ string, suffix string) string {
+	if step <= 0 {
+		if suffix != "" {
+			return "art_" + typ + "_" + sanitizeArtifactSuffix(suffix)
+		}
+		return "art_" + typ
 	}
-	if ext != "" {
-		name += "." + ext
+	name := fmt.Sprintf("art_step%03d_%s", step, typ)
+	if suffix != "" {
+		name += "_" + sanitizeArtifactSuffix(suffix)
 	}
 	return name
+}
+
+func runSpanID() string { return "span_run" }
+
+func stepSpanID(step int) string { return fmt.Sprintf("span_step_%03d", step) }
+
+func llmSpanID(step int, suffix string) string {
+	return fmt.Sprintf("span_llm_%03d_%s", step, sanitizeArtifactSuffix(suffix))
+}
+
+func toolSpanID(step int, callID string) string {
+	return fmt.Sprintf("span_tool_%03d_%s", step, sanitizeArtifactSuffix(callID))
+}
+
+func contextSpanID(step int, suffix string) string {
+	return fmt.Sprintf("span_context_%03d_%s", step, sanitizeArtifactSuffix(suffix))
+}
+
+func spanStatusForRun(status RunStatus) trajectory.SpanStatus {
+	switch status {
+	case StatusCompleted, StatusRunning, StatusWaitingUser, StatusWaitingApproval, StatusPaused:
+		return trajectory.SpanStatusOK
+	case StatusCancelled:
+		return trajectory.SpanStatusCancelled
+	default:
+		return trajectory.SpanStatusError
+	}
+}
+
+func emitAction(ctx context.Context, recorder *trajectory.Recorder, state *RunState, action Action) {
+	payload := map[string]any{
+		"action_id": fmt.Sprintf("act_%03d_%s", state.Step, sanitizeArtifactSuffix(string(action.Type))),
+		"kind":      string(action.Type),
+	}
+	if action.Thought != "" {
+		payload["thought"] = action.Thought
+	}
+	if action.Tool != "" {
+		payload["tool_call_id"] = action.ToolCallID
+		payload["function_name"] = action.Tool
+		payload["arguments"] = compactToolInput(action.Input)
+	}
+	if action.Question != "" {
+		payload["question"] = action.Question
+	}
+	if action.Content != "" {
+		ref := writeArtifact(ctx, recorder, state, "final", "", []byte(action.Content), "final", "text/markdown")
+		state.FinalRef = ref
+		payload["final"] = map[string]any{"content_ref": ref}
+	}
+	recorder.Emit(ctx, trajectory.EventActionCreated, state.RunID, state.Step, "runtime", payload)
+}
+
+func emitActionParseFailed(ctx context.Context, recorder *trajectory.Recorder, state *RunState, err error) {
+	recorder.Emit(ctx, trajectory.EventActionCreated, state.RunID, state.Step, "runtime", map[string]any{
+		"action_id": fmt.Sprintf("act_%03d_parse_failed", state.Step),
+		"kind":      "parse_failed",
+		"error":     map[string]any{"message": err.Error()},
+	})
+}
+
+func decisionName(decision policy.DecisionAction) string {
+	switch decision {
+	case policy.DecisionAllow:
+		return "approved"
+	case policy.DecisionAsk:
+		return "ask"
+	case policy.DecisionDeny:
+		return "denied"
+	default:
+		return string(decision)
+	}
 }
 
 func sanitizeArtifactSuffix(text string) string {

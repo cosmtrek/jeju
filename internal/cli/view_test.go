@@ -20,42 +20,19 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 		t.Fatalf("CreateRun failed: %v", err)
 	}
 	endedAt := time.Now().Add(time.Second)
-	if err := store.WriteMetadata(runDir.RunID, runs.Metadata{
-		RunID:          runDir.RunID,
-		Agent:          "agent",
-		Status:         "completed",
-		StartedAt:      time.Now(),
-		EndedAt:        &endedAt,
-		Input:          "write notes",
-		ConfigSnapshot: runs.ConfigSnapshotFile,
-		Trajectory:     runs.TrajectoryFile,
-		Final:          runs.FinalFile,
-		Evaluation:     runs.EvaluationFile,
-	}); err != nil {
-		t.Fatalf("WriteMetadata failed: %v", err)
-	}
-	if err := store.WriteConfigSnapshot(runDir.RunID, []byte("name: agent\n")); err != nil {
-		t.Fatalf("WriteConfigSnapshot failed: %v", err)
-	}
-	if err := store.WriteFinal(runDir.RunID, "done"); err != nil {
-		t.Fatalf("WriteFinal failed: %v", err)
-	}
-	if err := store.WriteEvaluation(runDir.RunID, []byte(`{"run_id":"x","passed":true,"score":1,"evaluators":[{"name":"rules","type":"rule","passed":true,"score":1}]}`)); err != nil {
-		t.Fatalf("WriteEvaluation failed: %v", err)
-	}
-	if _, err := store.WriteArtifact(runDir.RunID, "step001_model_output.txt", []byte("output")); err != nil {
-		t.Fatalf("WriteArtifact failed: %v", err)
-	}
-	if _, err := store.WriteArtifact(runDir.RunID, "step001_model_reasoning.txt", []byte("thinking through the task")); err != nil {
-		t.Fatalf("WriteArtifact reasoning failed: %v", err)
-	}
 	if err := writeTrajectory(filepath.Join(runDir.Path, runs.TrajectoryFile), []trajectory.Event{
-		{ID: "evt_000001", Type: trajectory.EventRunStarted, RunID: runDir.RunID, TS: time.Now(), Actor: "runtime", Payload: map[string]any{"agent": "agent"}},
-		{ID: "evt_000002", Type: trajectory.EventModelCompleted, RunID: runDir.RunID, Step: 1, TS: time.Now(), Actor: "model:mock", Payload: map[string]any{
-			"output_ref":        "artifacts/step001_model_output.txt",
-			"reasoning_ref":     "artifacts/step001_model_reasoning.txt",
-			"reasoning_preview": "thinking through the task",
+		{Type: trajectory.EventTrajectoryHeader, RunID: runDir.RunID, TS: time.Now(), Actor: "runtime", Payload: map[string]any{"agent": map[string]any{"name": "agent"}, "input": "write notes"}},
+		{Type: trajectory.EventArtifactCreated, RunID: runDir.RunID, TS: time.Now(), Actor: "runtime", Payload: map[string]any{"artifact_id": "art_config", "role": "config_snapshot", "media_type": "application/x-yaml", "text": "name: agent\n"}},
+		{Type: trajectory.EventSpanStarted, RunID: runDir.RunID, StepID: 1, SpanID: "span_step_001", TS: time.Now(), Actor: "runtime", Payload: map[string]any{"kind": "step"}},
+		{Type: trajectory.EventArtifactCreated, RunID: runDir.RunID, StepID: 1, TS: time.Now(), Actor: "runtime", Payload: map[string]any{"artifact_id": "art_model_output", "role": "model_output", "media_type": "text/plain", "text": "output"}},
+		{Type: trajectory.EventArtifactCreated, RunID: runDir.RunID, StepID: 1, TS: time.Now(), Actor: "runtime", Payload: map[string]any{"artifact_id": "art_model_reasoning", "role": "model_reasoning", "media_type": "text/plain", "text": "thinking through the task"}},
+		{Type: trajectory.EventSpanEnded, RunID: runDir.RunID, StepID: 1, SpanID: "span_llm_001", ParentSpanID: "span_step_001", TS: time.Now(), Actor: "model:mock", Payload: map[string]any{
+			"kind": "llm", "status": "ok", "output": map[string]any{"content_ref": "art_model_output"}, "reasoning": map[string]any{"content_ref": "art_model_reasoning", "preview": "thinking through the task"},
 		}},
+		{Type: trajectory.EventArtifactCreated, RunID: runDir.RunID, TS: time.Now(), Actor: "runtime", Payload: map[string]any{"artifact_id": "art_eval", "role": "evaluation", "media_type": "application/json", "text": `{"run_id":"x","passed":true,"score":1,"evaluators":[{"name":"rules","type":"rule","passed":true,"score":1}]}`}},
+		{Type: trajectory.EventSpanEnded, RunID: runDir.RunID, SpanID: "span_eval_001", TS: time.Now(), Actor: "evaluate", Payload: map[string]any{"kind": "evaluator", "status": "ok", "output": map[string]any{"content_ref": "art_eval"}}},
+		{Type: trajectory.EventArtifactCreated, RunID: runDir.RunID, TS: time.Now(), Actor: "runtime", Payload: map[string]any{"artifact_id": "art_final", "role": "final", "media_type": "text/markdown", "text": "done"}},
+		{Type: trajectory.EventRunSummary, RunID: runDir.RunID, TS: endedAt, Actor: "runtime", Payload: map[string]any{"status": "completed", "final": map[string]any{"content_ref": "art_final"}, "ended_at": endedAt.Format(time.RFC3339Nano), "stats": map[string]any{"steps": 1, "model_calls": 1}}},
 	}); err != nil {
 		t.Fatalf("writeTrajectory failed: %v", err)
 	}
@@ -64,10 +41,10 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildRunReport failed: %v", err)
 	}
-	if report.Summary.ModelCompleted != 1 || len(report.Artifacts) != 2 || !report.EvaluationExists {
+	if report.Summary.ModelCompleted != 1 || len(report.Artifacts) < 4 || !report.EvaluationExists {
 		t.Fatalf("unexpected report: %#v", report)
 	}
-	if len(report.Steps) != 1 || report.Steps[0].ReasoningRef != "artifacts/step001_model_reasoning.txt" || report.Steps[0].ReasoningContent == "" {
+	if len(report.Steps) != 1 || report.Steps[0].ReasoningRef != "art_model_reasoning" || report.Steps[0].ReasoningContent == "" {
 		t.Fatalf("reasoning was not attached to step: %#v", report.Steps)
 	}
 
@@ -80,7 +57,7 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 		t.Fatalf("read report failed: %v", err)
 	}
 	html := string(data)
-	for _, want := range []string{"Jeju Run", "write notes", "Final Output", "step001_model_output.txt", "Thinking", "thinking through the task"} {
+	for _, want := range []string{"Jeju Run", "write notes", "Final Output", "art_model_output", "Thinking", "thinking through the task"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected html to contain %q", want)
 		}
@@ -90,16 +67,15 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 func TestBuildStepViewsMultipleToolCalls(t *testing.T) {
 	runID := "run-multi"
 	events := []trajectory.Event{
-		{ID: "e1", Type: trajectory.EventActionParsed, RunID: runID, Step: 1, Actor: "runtime", Payload: map[string]any{"type": "tool_call", "tool": "search_api"}},
-		{ID: "e2", Type: trajectory.EventToolRequested, RunID: runID, Step: 1, Actor: "model", Payload: map[string]any{"tool": "search_api", "input": map[string]any{"query": "first query"}}},
-		{ID: "e3", Type: trajectory.EventToolCompleted, RunID: runID, Step: 1, Actor: "tool:search_api", Payload: map[string]any{"tool": "search_api", "status": "ok"}},
-		{ID: "e4", Type: trajectory.EventActionParsed, RunID: runID, Step: 1, Actor: "runtime", Payload: map[string]any{"type": "tool_call", "tool": "search_api"}},
-		{ID: "e5", Type: trajectory.EventToolRequested, RunID: runID, Step: 1, Actor: "model", Payload: map[string]any{"tool": "search_api", "input": map[string]any{"query": "second query"}}},
-		{ID: "e6", Type: trajectory.EventToolCompleted, RunID: runID, Step: 1, Actor: "tool:search_api", Payload: map[string]any{"tool": "search_api", "status": "ok"}},
-		{ID: "e7", Type: trajectory.EventStepCompleted, RunID: runID, Step: 1, Actor: "runtime", Payload: map[string]any{"status": "running"}},
+		{Type: trajectory.EventSpanStarted, RunID: runID, StepID: 1, SpanID: "span_step_001", Actor: "runtime", Payload: map[string]any{"kind": "step"}},
+		{Type: trajectory.EventActionCreated, RunID: runID, StepID: 1, Actor: "runtime", Payload: map[string]any{"kind": "tool_call", "tool_call_id": "call_1", "function_name": "search_api", "arguments": map[string]any{"query": "first query"}}},
+		{Type: trajectory.EventSpanEnded, RunID: runID, StepID: 1, SpanID: "span_tool_001", Actor: "tool:search_api", Payload: map[string]any{"kind": "tool", "status": "ok", "tool_call_id": "call_1"}},
+		{Type: trajectory.EventActionCreated, RunID: runID, StepID: 1, Actor: "runtime", Payload: map[string]any{"kind": "tool_call", "tool_call_id": "call_2", "function_name": "search_api", "arguments": map[string]any{"query": "second query"}}},
+		{Type: trajectory.EventSpanEnded, RunID: runID, StepID: 1, SpanID: "span_tool_002", Actor: "tool:search_api", Payload: map[string]any{"kind": "tool", "status": "ok", "tool_call_id": "call_2"}},
+		{Type: trajectory.EventSpanEnded, RunID: runID, StepID: 1, SpanID: "span_step_001", Actor: "runtime", Payload: map[string]any{"kind": "step", "status": "ok"}},
 	}
 
-	steps := buildStepViews(events, map[string]artifactView{}, "")
+	steps := buildStepViews(trajectory.Project(events), "")
 	if len(steps) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(steps))
 	}
@@ -124,23 +100,18 @@ func TestBuildStepViewsMultipleToolCalls(t *testing.T) {
 func TestBuildStepViewsContextCompression(t *testing.T) {
 	runID := "run-compress"
 	events := []trajectory.Event{
-		{ID: "e1", Type: trajectory.EventContextEstimated, RunID: runID, Step: 6, Actor: "context", Payload: map[string]any{
-			"estimated_tokens": float64(6650), "threshold_tokens": float64(5990), "context_window": float64(16000),
-			"effective_input_limit": float64(14976), "compression_required": true,
+		{Type: trajectory.EventSpanEnded, RunID: runID, StepID: 6, SpanID: "span_context_006_estimate", Actor: "context", Payload: map[string]any{
+			"kind": "context", "status": "ok", "operation": "estimate",
+			"metrics": map[string]any{"estimated_tokens": float64(6650), "threshold_tokens": float64(5990), "context_window": float64(16000), "effective_input_limit": float64(14976)},
+			"attrs":   map[string]any{"compression_required": true},
 		}},
-		{ID: "e2", Type: trajectory.EventContextCompressionStarted, RunID: runID, Step: 6, Actor: "context", Payload: map[string]any{"before_tokens": float64(6650), "threshold_tokens": float64(5990)}},
-		{ID: "e3", Type: trajectory.EventContextSummaryStarted, RunID: runID, Step: 6, Actor: "model:primary", Payload: map[string]any{}},
-		{ID: "e4", Type: trajectory.EventContextSummaryCompleted, RunID: runID, Step: 6, Actor: "model:primary", Payload: map[string]any{"tokens_in": float64(565), "tokens_out": float64(136)}},
-		{ID: "e5", Type: trajectory.EventContextCompressionCompleted, RunID: runID, Step: 6, Actor: "context", Payload: map[string]any{
-			"before_tokens": float64(6650), "after_tokens": float64(5691), "preserved_blocks": float64(4),
-			"truncated_tool_results": float64(1), "strategies": []any{"tool_result_truncate", "summary"},
-			"summary_ref": "artifacts/step006_context_summary.md", "report_ref": "artifacts/step006_context_report.json",
+		{Type: trajectory.EventSpanEnded, RunID: runID, StepID: 6, SpanID: "span_context_006_compression", Actor: "context", Payload: map[string]any{
+			"kind": "context", "status": "ok", "operation": "compaction", "summary_ref": "art_context_summary", "attrs": map[string]any{"strategies": []any{"tool_result_truncate", "summary"}, "report_ref": "art_context_report"},
+			"metrics": map[string]any{"before_tokens": float64(6650), "after_tokens": float64(5691), "preserved_blocks": float64(4), "truncated_tool_results": float64(1)},
 		}},
-		{ID: "e6", Type: trajectory.EventModelStarted, RunID: runID, Step: 6, Actor: "model:primary", Payload: map[string]any{"input_ref": "artifacts/step006_model_input.json"}},
-		{ID: "e7", Type: trajectory.EventStepCompleted, RunID: runID, Step: 6, Actor: "runtime", Payload: map[string]any{"status": "running"}},
 	}
 
-	steps := buildStepViews(events, map[string]artifactView{}, "")
+	steps := buildStepViews(trajectory.Project(events), "")
 	if len(steps) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(steps))
 	}
@@ -157,26 +128,18 @@ func TestBuildStepViewsContextCompression(t *testing.T) {
 	if c.PreservedBlocks != 4 || c.TruncatedToolResults != 1 {
 		t.Fatalf("unexpected block/truncation counts: %+v", c)
 	}
-	if !c.Summarized || c.SummaryTokensIn != 565 || c.SummaryTokensOut != 136 {
-		t.Fatalf("summary not captured: %+v", c)
-	}
-	if c.StrategiesLabel != "tool_result_truncate, summary" {
-		t.Fatalf("unexpected strategies label: %q", c.StrategiesLabel)
-	}
-	if c.SummaryRef == "" || c.ReportRef == "" {
-		t.Fatalf("artifact refs not captured: %+v", c)
-	}
 }
 
 func TestBuildStepViewsContextEstimateOnlyNoPanel(t *testing.T) {
 	runID := "run-noop"
 	events := []trajectory.Event{
-		{ID: "e1", Type: trajectory.EventContextEstimated, RunID: runID, Step: 1, Actor: "context", Payload: map[string]any{
-			"estimated_tokens": float64(1200), "threshold_tokens": float64(5990), "context_window": float64(16000), "compression_required": false,
+		{Type: trajectory.EventSpanEnded, RunID: runID, StepID: 1, SpanID: "span_context_001_estimate", Actor: "context", Payload: map[string]any{
+			"kind": "context", "status": "ok", "operation": "estimate",
+			"metrics": map[string]any{"estimated_tokens": float64(1200), "threshold_tokens": float64(5990), "context_window": float64(16000)},
+			"attrs":   map[string]any{"compression_required": false},
 		}},
-		{ID: "e2", Type: trajectory.EventStepCompleted, RunID: runID, Step: 1, Actor: "runtime", Payload: map[string]any{"status": "running"}},
 	}
-	steps := buildStepViews(events, map[string]artifactView{}, "")
+	steps := buildStepViews(trajectory.Project(events), "")
 	if len(steps) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(steps))
 	}

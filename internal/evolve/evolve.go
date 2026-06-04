@@ -1209,8 +1209,9 @@ func (c *controller) runTrial(ctx context.Context, cand *candidate, split string
 		return TrialResult{}, err
 	}
 	stats := statsFromEvents(events)
-	if meta, err := runStore.ReadMetadata(runResult.RunID); err == nil {
-		stats.DurationSec = durationSec(meta)
+	record := trajectory.Project(events)
+	if record.EndedAt != nil {
+		stats.DurationSec = record.EndedAt.Sub(record.StartedAt).Seconds()
 	}
 	evalResult, err := c.effectiveEvaluation(ctx, agent, runStore, runResult, input, task, stats)
 	if err != nil {
@@ -1287,13 +1288,59 @@ func (c *controller) effectiveEvaluation(ctx context.Context, agent *compiler.Co
 		})
 	}
 	result := combineEvaluation(runResult.RunID, evaluators)
-	data, _ := json.MarshalIndent(result, "", "  ")
-	if err := store.WriteEvaluation(runResult.RunID, data); err != nil {
-		return evaluate.Result{}, err
-	}
-	if meta, err := store.ReadMetadata(runResult.RunID); err == nil {
-		meta.Evaluation = runs.EvaluationFile
-		_ = store.WriteMetadata(runResult.RunID, meta)
+	runDir, err := store.LoadRun(runResult.RunID)
+	if err == nil {
+		path := filepath.Join(runDir.Path, runs.TrajectoryFile)
+		record := trajectory.RunRecord{}
+		if events, readErr := trajectory.ReadFile(path); readErr == nil {
+			record = trajectory.Project(events)
+		}
+		_ = trajectory.AppendEvent(path, trajectory.Event{
+			Type:   trajectory.EventSpanStarted,
+			StepID: stats.Steps,
+			SpanID: "span_eval_effective",
+			Actor:  "evaluate",
+			Payload: map[string]any{
+				"kind": string(trajectory.SpanEvaluator),
+				"name": "effective evaluation",
+			},
+		})
+		_ = trajectory.AppendEvent(path, trajectory.Event{
+			Type:   trajectory.EventSpanEnded,
+			StepID: stats.Steps,
+			SpanID: "span_eval_effective",
+			Actor:  "evaluate",
+			Payload: map[string]any{
+				"kind":   string(trajectory.SpanEvaluator),
+				"status": string(trajectory.SpanStatusOK),
+				"output": map[string]any{
+					"passed":     result.Passed,
+					"score":      result.Score,
+					"evaluators": result.Evaluators,
+				},
+			},
+		})
+		_ = trajectory.AppendEvent(path, trajectory.Event{
+			Type:  trajectory.EventRunSummary,
+			Actor: "runtime",
+			Payload: map[string]any{
+				"status":      string(runResult.Status),
+				"started_at":  formatTime(record.StartedAt),
+				"ended_at":    formatOptionalTime(record.EndedAt),
+				"duration_ms": record.DurationMS,
+				"final":       map[string]any{"content_ref": record.FinalRef},
+				"stats": map[string]any{
+					"steps":             stats.Steps,
+					"model_calls":       stats.ModelCalls,
+					"tool_calls":        stats.ToolCalls,
+					"permission_denied": stats.PermissionDenied,
+					"model_errors":      stats.ModelErrors,
+					"tool_errors":       stats.ToolErrors,
+					"total_tokens":      stats.TotalTokens,
+				},
+				"evaluation": map[string]any{"passed": result.Passed, "score": result.Score},
+			},
+		})
 	}
 	return result, nil
 }
@@ -1794,27 +1841,31 @@ func extractMetricSources(expr string) []string {
 
 func statsFromEvents(events []trajectory.Event) RunStats {
 	var stats RunStats
-	for _, event := range events {
-		if event.Step > stats.Steps {
-			stats.Steps = event.Step
-		}
-		switch event.Type {
-		case trajectory.EventModelCompleted:
-			stats.ModelCalls++
-			stats.PromptTokens += intPayload(event.Payload, "tokens_in")
-			stats.CompletionTokens += intPayload(event.Payload, "tokens_out")
-			stats.TotalTokens += intPayload(event.Payload, "tokens_total")
-		case trajectory.EventModelFailed:
-			stats.ModelErrors++
-		case trajectory.EventToolCompleted:
-			stats.ToolCalls++
-		case trajectory.EventToolFailed:
-			stats.ToolErrors++
-		case trajectory.EventPermissionDenied:
-			stats.PermissionDenied++
-		}
-	}
+	record := trajectory.Project(events)
+	stats.Steps = record.Stats.Steps
+	stats.ModelCalls = record.Stats.ModelCalls
+	stats.PromptTokens = record.Stats.PromptTokens
+	stats.CompletionTokens = record.Stats.CompletionTokens
+	stats.TotalTokens = record.Stats.TotalTokens
+	stats.ModelErrors = record.Stats.ModelErrors
+	stats.ToolCalls = record.Stats.ToolCalls
+	stats.ToolErrors = record.Stats.ToolErrors
+	stats.PermissionDenied = record.Stats.PermissionDenied
 	return stats
+}
+
+func formatOptionalTime(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.Format(time.RFC3339Nano)
+}
+
+func formatTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Format(time.RFC3339Nano)
 }
 
 func durationSec(meta runs.Metadata) float64 {

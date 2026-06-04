@@ -349,13 +349,13 @@ func TestRuntimeAutoApproveDoesNotBypassPolicyDeny(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
-	if !hasRuntimeEventType(events, trajectory.EventPermissionDenied) {
+	if !hasPermissionDecision(events, "denied") {
 		t.Fatalf("expected permission.denied event, got %+v", events)
 	}
-	if hasRuntimeEventType(events, trajectory.EventPermissionApproved) {
+	if hasPermissionDecision(events, "approved") {
 		t.Fatalf("did not expect permission.approved for denied tool call: %+v", events)
 	}
-	if hasRuntimeEventType(events, trajectory.EventToolCompleted) {
+	if hasToolSpanStatus(events, string(trajectory.SpanStatusOK)) {
 		t.Fatalf("did not expect tool.completed for denied tool call: %+v", events)
 	}
 }
@@ -453,14 +453,45 @@ func TestRuntimeReplaysAllNativeToolCalls(t *testing.T) {
 	if got := second[len(second)-3]; got.Role != "assistant" || len(got.ToolCalls) != 2 {
 		t.Fatalf("assistant multi tool call was not replayed: %+v", got)
 	}
-	for _, name := range []string{
-		"step001_tool_output_write_call_1.json",
-		"step001_tool_output_write_call_2.json",
+	events, err := trajectory.ReadFile(filepath.Join(tmp, "runs", result.RunID, runs.TrajectoryFile))
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	record := trajectory.Project(events)
+	for _, id := range []string{
+		"art_step001_tool_output_write_call_1",
+		"art_step001_tool_output_write_call_2",
 	} {
-		if _, err := os.Stat(filepath.Join(tmp, "runs", result.RunID, "artifacts", name)); err != nil {
-			t.Fatalf("expected distinct tool output artifact %s: %v", name, err)
+		if _, ok := record.Artifacts[id]; !ok {
+			t.Fatalf("expected distinct tool output artifact %s", id)
 		}
 	}
+}
+
+func hasPermissionDecision(events []trajectory.Event, decision string) bool {
+	for _, event := range events {
+		if event.Type == trajectory.EventPermissionDecided {
+			if value, ok := event.Payload["decision"].(string); ok && value == decision {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasToolSpanStatus(events []trajectory.Event, status string) bool {
+	for _, event := range events {
+		if event.Type != trajectory.EventSpanEnded {
+			continue
+		}
+		if kind, _ := event.Payload["kind"].(string); kind != string(trajectory.SpanTool) {
+			continue
+		}
+		if value, _ := event.Payload["status"].(string); value == status {
+			return true
+		}
+	}
+	return false
 }
 
 func hasToolDefinition(defs []model.ToolDefinition, name string) bool {

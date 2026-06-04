@@ -100,6 +100,7 @@ type runReport struct {
 	Blocks           []stepBlock
 	Events           []eventView
 	MetadataJSON     string
+	IntegrityIssues  []string
 }
 
 type artifactView struct {
@@ -149,32 +150,35 @@ type toolStat struct {
 // name), and token usage, then layers in model identity/parameters from the
 // config snapshot (falling back to the provider/model recorded on model events).
 func buildRunMetrics(events []trajectory.Event, snapshot string) runMetrics {
+	record := trajectory.Project(events)
 	m := runMetrics{}
 	toolCounts := map[string]int{}
 	var evProvider, evModel string
-	for _, event := range events {
-		switch event.Type {
-		case trajectory.EventStepStarted:
-			m.Steps++
-		case trajectory.EventToolRequested:
-			name := stringPayload(event.Payload, "tool")
+	m.Steps = record.Stats.Steps
+	m.ToolCalls = record.Stats.ToolCalls
+	m.TokensIn = record.Stats.PromptTokens
+	m.TokensOut = record.Stats.CompletionTokens
+	for _, span := range record.Spans {
+		if span.Kind == string(trajectory.SpanTool) {
+			name := strings.TrimPrefix(span.Actor, "tool:")
 			if name == "" {
 				name = "(unknown)"
 			}
 			toolCounts[name]++
-			m.ToolCalls++
-		case trajectory.EventModelCompleted:
-			m.TokensIn += intPayload(event.Payload, "tokens_in")
-			m.TokensOut += intPayload(event.Payload, "tokens_out")
+		}
+		if span.Kind == string(trajectory.SpanLLM) {
 			if evProvider == "" {
-				evProvider = stringPayload(event.Payload, "provider")
+				evProvider = stringPayload(span.Attrs, "provider")
 			}
 			if evModel == "" {
-				evModel = stringPayload(event.Payload, "model")
+				evModel = stringPayload(span.Attrs, "model")
 			}
-		case trajectory.EventSkillLoaded:
-			if name := stringPayload(event.Payload, "name"); name != "" {
-				m.Skills = append(m.Skills, name)
+		}
+		if span.Kind == string(trajectory.SpanSkill) && span.Operation == "load" {
+			if out := span.Output; len(out) > 0 {
+				if name := stringPayload(out, "name"); name != "" {
+					m.Skills = append(m.Skills, name)
+				}
 			}
 		}
 	}
@@ -430,37 +434,26 @@ type eventView struct {
 }
 
 func buildRunReport(store *runs.Store, runDir *runs.RunDir) (runReport, error) {
-	meta, err := store.ReadMetadata(runDir.RunID)
+	events, err := trajectory.ReadFile(filepath.Join(runDir.Path, runs.TrajectoryFile))
 	if err != nil {
 		return runReport{}, err
 	}
-	events, err := trajectory.ReadFile(filepath.Join(runDir.Path, meta.Trajectory))
-	if err != nil {
-		return runReport{}, err
+	record := trajectory.Project(events)
+	meta := runs.Metadata{
+		RunID:     record.RunID,
+		Agent:     record.Agent,
+		Status:    record.Status,
+		Integrity: record.Integrity,
+		StartedAt: record.StartedAt,
+		EndedAt:   record.EndedAt,
+		Input:     record.Input,
 	}
-	final, err := readOptionalText(filepath.Join(runDir.Path, meta.Final))
-	if err != nil {
-		return runReport{}, err
-	}
-	configSnapshot, err := readOptionalText(filepath.Join(runDir.Path, meta.ConfigSnapshot))
-	if err != nil {
-		return runReport{}, err
-	}
-	evaluationPath := ""
-	if meta.Evaluation != "" {
-		evaluationPath = filepath.Join(runDir.Path, meta.Evaluation)
-	}
-	evaluation, evaluationExists, err := readEvaluation(evaluationPath)
-	if err != nil {
-		return runReport{}, err
-	}
-	artifacts, err := listArtifacts(filepath.Join(runDir.Path, runs.ArtifactsDir))
-	if err != nil {
-		return runReport{}, err
-	}
-	artifactByPath := mapArtifacts(artifacts)
+	final := record.ArtifactContent(record.FinalRef)
+	configSnapshot := record.ArtifactContent(record.ConfigRef)
+	evaluation, evaluationExists := evaluationFromRecord(record)
+	artifacts := listTrajectoryArtifacts(record)
 	workspaceRoot := findWorkspaceRoot(runDir.Path, meta.Agent, workspacePathFromConfig(configSnapshot))
-	steps := buildStepViews(events, artifactByPath, workspaceRoot)
+	steps := buildStepViews(record, workspaceRoot)
 	blocks := groupSteps(steps)
 	metadataJSON, err := marshalIndented(meta)
 	if err != nil {
@@ -489,98 +482,62 @@ func buildRunReport(store *runs.Store, runDir *runs.RunDir) (runReport, error) {
 		Blocks:           blocks,
 		Events:           mapEventViews(events),
 		MetadataJSON:     metadataJSON,
+		IntegrityIssues:  record.IntegrityIssues,
 	}, nil
 }
 
-func readOptionalText(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return "", nil
+func evaluationFromRecord(record trajectory.RunRecord) (*evaluate.Result, bool) {
+	for _, span := range record.Spans {
+		if span.Kind != string(trajectory.SpanEvaluator) || span.Status != string(trajectory.SpanStatusOK) {
+			continue
+		}
+		if span.OutputRef != "" {
+			if result := parseEvaluationContent(record.ArtifactContent(span.OutputRef)); result != nil {
+				return result, true
+			}
+		}
 	}
-	if err != nil {
-		return "", err
+	if record.EvaluationRef != "" {
+		if result := parseEvaluationContent(record.ArtifactContent(record.EvaluationRef)); result != nil {
+			return result, true
+		}
 	}
-	return string(data), nil
+	return nil, false
 }
 
-func readEvaluation(path string) (*evaluate.Result, bool, error) {
-	if path == "" {
-		return nil, false, nil
-	}
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
+func parseEvaluationContent(content string) *evaluate.Result {
+	if content == "" {
+		return nil
 	}
 	var result evaluate.Result
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, false, err
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return nil
 	}
-	return &result, true, nil
+	return &result
 }
 
-func listArtifacts(root string) ([]artifactView, error) {
-	var artifacts []artifactView
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if os.IsNotExist(err) {
-			return nil
+func listTrajectoryArtifacts(record trajectory.RunRecord) []artifactView {
+	artifacts := make([]artifactView, 0, len(record.Artifacts))
+	for _, artifact := range record.Artifacts {
+		content := artifact.Content()
+		view := artifactView{
+			Path:        artifact.ID,
+			Size:        int64(len(content)),
+			Content:     content,
+			ContentType: strings.TrimPrefix(strings.ToLower(filepath.Ext(artifact.MediaType)), "."),
 		}
-		if err != nil {
-			return err
+		if artifact.MediaType == "application/json" {
+			view.ContentType = "json"
 		}
-		if entry.IsDir() {
-			return nil
+		if artifact.MediaType == "text/markdown" {
+			view.ContentType = "md"
 		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(filepath.Dir(root), path)
-		if err != nil {
-			return err
-		}
-		artifact := artifactView{
-			Path: filepath.ToSlash(rel),
-			Size: info.Size(),
-		}
-		artifact.Content, artifact.ContentType, artifact.ContentNote = readArtifactPreview(path, info.Size())
-		artifacts = append(artifacts, artifact)
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		artifacts = append(artifacts, view)
 	}
 	sort.Slice(artifacts, func(i, j int) bool {
 		return artifacts[i].Path < artifacts[j].Path
 	})
-	return artifacts, nil
-}
-
-func readArtifactPreview(path string, size int64) (string, string, string) {
-	const maxEmbed = 200 * 1024
-	if size > maxEmbed {
-		return "", "", "Too large to embed in report."
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", "", err.Error()
-	}
-	if !isLikelyText(data) {
-		return "", "", "Binary content is not embedded."
-	}
-	content := string(data)
-	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
-	if ext == "json" {
-		var raw any
-		if err := json.Unmarshal(data, &raw); err == nil {
-			if pretty, err := marshalIndented(raw); err == nil {
-				content = pretty
-			}
-		}
-	}
-	return content, ext, ""
+	return artifacts
 }
 
 // workspacePathFromConfig extracts workspace.path from a config snapshot. The
@@ -665,12 +622,17 @@ func isLikelyText(data []byte) bool {
 	return true
 }
 
-func mapArtifacts(artifacts []artifactView) map[string]artifactView {
-	out := make(map[string]artifactView, len(artifacts))
-	for _, artifact := range artifacts {
-		out[artifact.Path] = artifact
+func contentTypeForArtifact(artifact trajectory.Artifact) string {
+	switch artifact.MediaType {
+	case "application/json":
+		return "json"
+	case "text/markdown":
+		return "md"
+	case "text/plain":
+		return "txt"
+	default:
+		return strings.TrimPrefix(strings.ToLower(filepath.Ext(artifact.MediaType)), ".")
 	}
-	return out
 }
 
 func mapEventViews(events []trajectory.Event) []eventView {
@@ -681,10 +643,10 @@ func mapEventViews(events []trajectory.Event) []eventView {
 			payload, _ = marshalIndented(event.Payload)
 		}
 		out = append(out, eventView{
-			ID:          event.ID,
+			ID:          event.EventID,
 			Type:        string(event.Type),
 			Actor:       event.Actor,
-			Step:        event.Step,
+			Step:        event.StepID,
 			Timestamp:   event.TS.Format("2006-01-02 15:04:05.000"),
 			PayloadJSON: payload,
 		})
@@ -692,28 +654,123 @@ func mapEventViews(events []trajectory.Event) []eventView {
 	return out
 }
 
-func buildStepViews(events []trajectory.Event, artifacts map[string]artifactView, workspaceRoot string) []stepView {
-	stepsByNumber := map[int]*stepView{}
-	order := []int{}
-	for _, event := range events {
-		if event.Step <= 0 {
-			continue
+func buildStepViews(record trajectory.RunRecord, workspaceRoot string) []stepView {
+	steps := make([]stepView, 0, len(record.Steps))
+	for _, projected := range record.Steps {
+		step := stepView{
+			Number: projected.ID,
+			Status: projected.Status,
+			Kind:   projected.Kind,
+			Events: mapEventViews(projected.Events),
 		}
-		step, ok := stepsByNumber[event.Step]
-		if !ok {
-			step = &stepView{Number: event.Step, Status: "running"}
-			stepsByNumber[event.Step] = step
-			order = append(order, event.Step)
+		if step.Status == "" {
+			step.Status = "running"
 		}
-		step.Events = append(step.Events, mapEventViews([]trajectory.Event{event})...)
-		applyEventToStep(step, event, artifacts, workspaceRoot)
-	}
-	sort.Ints(order)
-	steps := make([]stepView, 0, len(order))
-	for _, number := range order {
-		step := stepsByNumber[number]
-		finalizeStep(step)
-		steps = append(steps, *step)
+		if step.Kind == "" {
+			step.Kind = "other"
+		}
+		for _, action := range projected.Actions {
+			if thought := stringPayload(action, "thought"); thought != "" {
+				step.Thought = thought
+			}
+			if stringPayload(action, "kind") == "final" {
+				step.Kind = "final"
+				step.Status = "completed"
+			}
+		}
+		if len(projected.ModelSpans) > 0 {
+			modelSpan := projected.ModelSpans[len(projected.ModelSpans)-1]
+			step.InputRef = modelSpan.InputRef
+			step.OutputRef = modelSpan.OutputRef
+			step.ReasoningRef = modelSpan.ReasoningRef
+			step.ReasoningPreview = modelSpan.ReasoningPreview
+			if modelSpan.ReasoningRef != "" {
+				artifact := record.Artifacts[modelSpan.ReasoningRef]
+				step.ReasoningContent = artifact.Content()
+				step.ReasoningContentType = contentTypeForArtifact(artifact)
+			}
+			if modelSpan.Status == string(trajectory.SpanStatusError) {
+				step.Status = "failed"
+				step.Error = modelSpan.Error
+			}
+		}
+		toolCallIndex := map[string]int{}
+		for _, action := range projected.Actions {
+			if stringPayload(action, "kind") != "tool_call" {
+				continue
+			}
+			callID := stringPayload(action, "tool_call_id")
+			tc := toolCallView{
+				Status: "running",
+				Tool:   stringPayload(action, "function_name"),
+			}
+			if input, ok := action["arguments"].(map[string]any); ok {
+				if cmd := stringPayload(input, "command"); cmd != "" {
+					tc.Command = cmd
+				}
+				if path := stringPayload(input, "path"); path != "" && tc.Tool == "write" {
+					tc.FilePath = path
+				}
+				if pretty, err := marshalIndented(input); err == nil {
+					tc.Input = pretty
+				}
+			}
+			step.ToolCalls = append(step.ToolCalls, tc)
+			toolCallIndex[callID] = len(step.ToolCalls) - 1
+		}
+		for _, span := range projected.ToolSpans {
+			index, ok := toolCallIndex[span.ToolCallID]
+			if !ok {
+				step.ToolCalls = append(step.ToolCalls, toolCallView{Tool: strings.TrimPrefix(span.Actor, "tool:")})
+				index = len(step.ToolCalls) - 1
+				if span.ToolCallID != "" {
+					toolCallIndex[span.ToolCallID] = index
+				}
+			}
+			tc := &step.ToolCalls[index]
+			if span.Status == string(trajectory.SpanStatusError) {
+				tc.Status = "failed"
+				tc.Error = span.Error
+			} else {
+				tc.Status = "completed"
+			}
+			tc.OutputRef = span.OutputRef
+			if span.OutputRef != "" {
+				artifact := record.Artifacts[span.OutputRef]
+				applyToolOutput(tc, artifactView{Path: artifact.ID, Content: artifact.Content(), ContentType: contentTypeForArtifact(artifact)})
+			}
+			switch tc.Tool {
+			case "shell":
+				if tc.Status == "failed" {
+					tc.Kind = "shell_failed"
+				} else {
+					tc.Kind = "shell_ok"
+				}
+			case "write":
+				tc.Kind = "write"
+				if tc.FilePath != "" {
+					tc.FileContent, tc.FileContentType, tc.FileContentNote, _ = readWorkspaceFile(workspaceRoot, tc.FilePath)
+				}
+			default:
+				tc.Kind = "other"
+			}
+		}
+		if len(step.ToolCalls) > 0 && step.Kind == "tool_call" {
+			step.Kind = "tool"
+		}
+		for _, span := range projected.ContextSpans {
+			applyContextSpan(&step, span)
+		}
+		for _, artifact := range projected.Artifacts {
+			step.DebugArtifacts = append(step.DebugArtifacts, artifactRefView{
+				Path:        artifact.ID,
+				Type:        artifact.Role,
+				Content:     artifact.Content(),
+				ContentType: contentTypeForArtifact(artifact),
+			})
+		}
+		finalizeStep(&step)
+		steps = append(steps, step)
 	}
 	return steps
 }
@@ -728,161 +785,53 @@ func currentToolCall(step *stepView) *toolCallView {
 	return &step.ToolCalls[len(step.ToolCalls)-1]
 }
 
-func applyEventToStep(step *stepView, event trajectory.Event, artifacts map[string]artifactView, workspaceRoot string) {
-	switch event.Type {
-	case trajectory.EventActionParsed:
-		if thought := stringPayload(event.Payload, "thought"); thought != "" {
-			step.Thought = thought
-		}
-		if stringPayload(event.Payload, "type") == "final" {
-			step.Kind = "final"
-			step.Status = "completed"
-		}
-	case trajectory.EventActionParseFailed:
-		step.Kind = "parse_failed"
-		step.Status = "failed"
-		step.Error = stringPayload(event.Payload, "error")
-	case trajectory.EventModelStarted:
-		step.InputRef = stringPayload(event.Payload, "input_ref")
-	case trajectory.EventModelCompleted:
-		step.OutputRef = stringPayload(event.Payload, "output_ref")
-		if ref := stringPayload(event.Payload, "reasoning_ref"); ref != "" {
-			step.ReasoningRef = ref
-			step.ReasoningPreview = stringPayload(event.Payload, "reasoning_preview")
-			artifact := artifacts[ref]
-			step.ReasoningContent = artifact.Content
-			step.ReasoningContentType = artifact.ContentType
-			step.ReasoningContentNote = artifact.ContentNote
-		}
-	case trajectory.EventToolRequested:
-		tc := toolCallView{Status: "running"}
-		if tool := stringPayload(event.Payload, "tool"); tool != "" {
-			tc.Tool = tool
-		}
-		if input, ok := event.Payload["input"].(map[string]any); ok {
-			if cmd := stringPayload(input, "command"); cmd != "" {
-				tc.Command = cmd
-			}
-			if path := stringPayload(input, "path"); path != "" && tc.Tool == "write" {
-				tc.FilePath = path
-			}
-			if len(input) > 0 {
-				if pretty, err := marshalIndented(input); err == nil {
-					tc.Input = pretty
-				}
-			}
-		}
-		step.ToolCalls = append(step.ToolCalls, tc)
-	case trajectory.EventToolCompleted:
-		tc := currentToolCall(step)
-		tc.Status = "completed"
-		if tool := stringPayload(event.Payload, "tool"); tool != "" {
-			tc.Tool = tool
-		}
-		if ref := stringPayload(event.Payload, "output_ref"); ref != "" {
-			tc.OutputRef = ref
-			applyToolOutput(tc, artifacts[ref])
-		}
-		switch tc.Tool {
-		case "shell":
-			tc.Kind = "shell_ok"
-		case "write":
-			tc.Kind = "write"
-			if tc.FilePath != "" {
-				tc.FileContent, tc.FileContentType, tc.FileContentNote, _ = readWorkspaceFile(workspaceRoot, tc.FilePath)
-			}
-		}
-	case trajectory.EventToolFailed:
-		tc := currentToolCall(step)
-		tc.Status = "failed"
-		tc.Error = stringPayload(event.Payload, "error")
-		if tool := stringPayload(event.Payload, "tool"); tool != "" {
-			tc.Tool = tool
-		}
-		if tc.Tool == "shell" {
-			tc.Kind = "shell_failed"
-		} else {
-			tc.Kind = "other"
-		}
-	case trajectory.EventStepCompleted:
-		status := stringPayload(event.Payload, "status")
-		if status != "" && step.Status != "failed" && step.Status != "completed" {
-			step.Status = status
-		}
-	case trajectory.EventArtifactCreated:
-		path := stringPayload(event.Payload, "path")
-		if path == "" {
-			return
-		}
-		artifact := artifacts[path]
-		ref := artifactRefView{
-			Path:        path,
-			Type:        stringPayload(event.Payload, "type"),
-			Content:     artifact.Content,
-			ContentType: artifact.ContentType,
-			ContentNote: artifact.ContentNote,
-		}
-		// All artifact references go into debug; the main view uses dedicated fields
-		// (ShellStdout, FileContent, etc.) to surface the meaningful bits.
-		step.DebugArtifacts = append(step.DebugArtifacts, ref)
-	case trajectory.EventContextEstimated:
-		c := ensureCompression(step)
-		c.EstimatedTokens = intPayload(event.Payload, "estimated_tokens")
-		c.ThresholdTokens = intPayload(event.Payload, "threshold_tokens")
-		c.ContextWindow = intPayload(event.Payload, "context_window")
-		c.EffectiveInputLimit = intPayload(event.Payload, "effective_input_limit")
-		if boolPayload(event.Payload, "compression_required") {
-			c.Triggered = true
-		}
-	case trajectory.EventContextCompressionStarted:
-		c := ensureCompression(step)
+func applyContextSpan(step *stepView, span trajectory.SpanRecord) {
+	c := ensureCompression(step)
+	if boolPayload(span.Attrs, "compression_required") || span.Operation == "compaction" || span.Name == "context compression" {
 		c.Triggered = true
-		if c.BeforeTokens == 0 {
-			c.BeforeTokens = intPayload(event.Payload, "before_tokens")
-		}
-		if c.ThresholdTokens == 0 {
-			c.ThresholdTokens = intPayload(event.Payload, "threshold_tokens")
-		}
-	case trajectory.EventContextCompressionCompleted:
-		c := ensureCompression(step)
-		c.Triggered = true
-		c.BeforeTokens = intPayload(event.Payload, "before_tokens")
-		c.AfterTokens = intPayload(event.Payload, "after_tokens")
-		c.PreservedBlocks = intPayload(event.Payload, "preserved_blocks")
-		c.TruncatedToolResults = intPayload(event.Payload, "truncated_tool_results")
-		c.Strategies = stringSlicePayload(event.Payload, "strategies")
-		if ref := stringPayload(event.Payload, "summary_ref"); ref != "" {
-			c.SummaryRef = ref
-		}
-		if ref := stringPayload(event.Payload, "report_ref"); ref != "" {
-			c.ReportRef = ref
-		}
-	case trajectory.EventContextSummaryStarted:
-		c := ensureCompression(step)
-		c.Triggered = true
-		c.Summarized = true
-	case trajectory.EventContextSummaryCompleted:
-		c := ensureCompression(step)
-		c.Summarized = true
-		c.SummaryTokensIn = intPayload(event.Payload, "tokens_in")
-		c.SummaryTokensOut = intPayload(event.Payload, "tokens_out")
-	case trajectory.EventContextSummaryFailed:
-		c := ensureCompression(step)
-		c.SummaryFailed = true
-		if msg := stringPayload(event.Payload, "error"); msg != "" {
-			c.Error = msg
-		}
-	case trajectory.EventContextCompressionFailed:
-		c := ensureCompression(step)
-		c.Triggered = true
+	}
+	if n := intPayload(span.Metrics, "estimated_tokens"); n > 0 {
+		c.EstimatedTokens = n
+	}
+	if n := intPayload(span.Metrics, "threshold_tokens"); n > 0 {
+		c.ThresholdTokens = n
+	}
+	if n := intPayload(span.Metrics, "context_window"); n > 0 {
+		c.ContextWindow = n
+	}
+	if n := intPayload(span.Metrics, "effective_input_limit"); n > 0 {
+		c.EffectiveInputLimit = n
+	}
+	if before, ok := span.Attrs["before"].(map[string]any); ok {
+		c.BeforeTokens = intPayload(before, "tokens")
+	}
+	if after, ok := span.Attrs["after"].(map[string]any); ok {
+		c.AfterTokens = intPayload(after, "tokens")
+	}
+	if c.BeforeTokens == 0 {
+		c.BeforeTokens = intPayload(span.Metrics, "before_tokens")
+	}
+	if c.AfterTokens == 0 {
+		c.AfterTokens = intPayload(span.Metrics, "after_tokens")
+	}
+	if n := intPayload(span.Metrics, "preserved_blocks"); n > 0 {
+		c.PreservedBlocks = n
+	}
+	if n := intPayload(span.Metrics, "truncated_tool_results"); n > 0 {
+		c.TruncatedToolResults = n
+	}
+	if span.SummaryRef != "" {
+		c.SummaryRef = span.SummaryRef
+	}
+	if span.ReportRef != "" {
+		c.ReportRef = span.ReportRef
+	}
+	if len(span.Strategies) > 0 {
+		c.Strategies = stringSliceAny(span.Strategies)
+	}
+	if span.Status == string(trajectory.SpanStatusError) {
 		c.Failed = true
-		c.Error = stringPayload(event.Payload, "error")
-		if c.BeforeTokens == 0 {
-			c.BeforeTokens = intPayload(event.Payload, "before_tokens")
-		}
-		if c.AfterTokens == 0 {
-			c.AfterTokens = intPayload(event.Payload, "after_tokens")
-		}
+		c.Error = span.Error
 	}
 }
 
@@ -1158,6 +1107,10 @@ func stringSlicePayload(payload map[string]any, key string) []string {
 	if !ok {
 		return nil
 	}
+	return stringSliceAny(raw)
+}
+
+func stringSliceAny(raw []any) []string {
 	out := make([]string, 0, len(raw))
 	for _, item := range raw {
 		if text, ok := item.(string); ok {
@@ -1408,6 +1361,21 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
       line-height: 1.55;
       overflow-wrap: anywhere;
       white-space: pre-wrap;
+    }
+    .issue-list {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+    .issue-list li { margin: 3px 0; }
+    .issue-list code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      color: var(--ink);
+      background: var(--soft);
+      border-radius: 4px;
+      padding: 2px 5px;
+      overflow-wrap: anywhere;
     }
     .final-md { font-size: 14px; line-height: 1.65; color: var(--ink); }
     .final-md > *:first-child { margin-top: 0; }
@@ -1830,6 +1798,10 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
             <dt>skills</dt>
             <dd>{{range $i, $s := .Metrics.Skills}}{{if $i}}<span class="sep">·</span>{{end}}<span class="skill">{{$s}}</span>{{end}}</dd>
           </div>{{end}}
+          {{if .Metadata.Integrity}}<div class="kv-row">
+            <dt>trajectory</dt>
+            <dd>{{.Metadata.Integrity}}{{if .IntegrityIssues}} <span class="subtle">({{len .IntegrityIssues}} issue{{if ne (len .IntegrityIssues) 1}}s{{end}})</span>{{end}}</dd>
+          </div>{{end}}
         </dl>
       </div>
 
@@ -1871,9 +1843,19 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
           <div class="task">{{.Metadata.Input}}</div>
         </section>
 
+        {{if .IntegrityIssues}}
+        <section>
+          <h2>Trajectory Integrity</h2>
+          <div class="subtle">This report was projected from a {{.Metadata.Integrity}} trajectory.</div>
+          <ul class="issue-list">
+            {{range .IntegrityIssues}}<li><code>{{.}}</code></li>{{end}}
+          </ul>
+        </section>
+        {{end}}
+
         <section>
           <h2>Final Output</h2>
-          {{if .FinalHTML}}<div class="final-md">{{.FinalHTML}}</div>{{else}}<div class="subtle">No final.md content found.</div>{{end}}
+          {{if .FinalHTML}}<div class="final-md">{{.FinalHTML}}</div>{{else}}<div class="subtle">No final artifact found.</div>{{end}}
         </section>
 
         <section>
@@ -1901,7 +1883,7 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
               </details>
             {{end}}
           {{else}}
-            <div class="subtle">No evaluation.json content found.</div>
+            <div class="subtle">Not evaluated for this run.</div>
           {{end}}
         </section>
       </div>

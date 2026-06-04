@@ -109,23 +109,16 @@ func TestPrepareModelRequestRecordsContextCompression(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
-	requireRuntimeEventTypes(t, events,
-		trajectory.EventContextEstimated,
-		trajectory.EventContextCompressionStarted,
-		trajectory.EventContextCompressionCompleted,
-	)
+	if !hasSpanOperation(events, string(trajectory.SpanContext), "estimate", string(trajectory.SpanStatusOK)) {
+		t.Fatalf("missing context estimate span: %+v", events)
+	}
+	if !hasSpanOperation(events, string(trajectory.SpanContext), "compaction", string(trajectory.SpanStatusOK)) {
+		t.Fatalf("missing context compaction span: %+v", events)
+	}
 	if client.calls > 0 {
-		requireRuntimeEventTypes(t, events,
-			trajectory.EventContextSummaryStarted,
-			trajectory.EventContextSummaryCompleted,
-		)
-		requireEventOrder(t, events,
-			trajectory.EventContextEstimated,
-			trajectory.EventContextCompressionStarted,
-			trajectory.EventContextSummaryStarted,
-			trajectory.EventContextSummaryCompleted,
-			trajectory.EventContextCompressionCompleted,
-		)
+		if !hasLLMOperation(events, "context_summary", string(trajectory.SpanStatusOK)) {
+			t.Fatalf("missing context summary llm span: %+v", events)
+		}
 	}
 }
 
@@ -188,10 +181,12 @@ func TestPrepareModelRequestDegradesWhenSummaryFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
-	requireRuntimeEventTypes(t, events,
-		trajectory.EventContextSummaryFailed,
-		trajectory.EventContextCompressionCompleted,
-	)
+	if !hasLLMOperation(events, "context_summary", string(trajectory.SpanStatusError)) {
+		t.Fatalf("missing failed context summary span: %+v", events)
+	}
+	if !hasSpanOperation(events, string(trajectory.SpanContext), "compaction", string(trajectory.SpanStatusOK)) {
+		t.Fatalf("missing degraded context compaction span: %+v", events)
+	}
 	if !eventHasStrategy(events, "drop_evicted") {
 		t.Fatalf("expected drop_evicted strategy after summary failure: %+v", events)
 	}
@@ -296,11 +291,12 @@ func TestPrepareModelRequestDegradesWhenSummaryInputExceedsBudget(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
-	requireRuntimeEventTypes(t, events,
-		trajectory.EventContextSummaryStarted,
-		trajectory.EventContextSummaryFailed,
-		trajectory.EventContextCompressionCompleted,
-	)
+	if !hasLLMOperation(events, "context_summary", string(trajectory.SpanStatusError)) {
+		t.Fatalf("missing failed context summary span: %+v", events)
+	}
+	if !hasSpanOperation(events, string(trajectory.SpanContext), "compaction", string(trajectory.SpanStatusOK)) {
+		t.Fatalf("missing degraded context compaction span: %+v", events)
+	}
 	if !eventHasStrategy(events, "drop_evicted") {
 		t.Fatalf("expected drop_evicted strategy after summary preflight failure: %+v", events)
 	}
@@ -361,14 +357,14 @@ func TestRuntimeContextOverflowFailsWithoutModelCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
-	if !hasRuntimeEventType(events, trajectory.EventContextCompressionFailed) {
+	if !hasSpanOperation(events, string(trajectory.SpanContext), "compaction", string(trajectory.SpanStatusError)) {
 		t.Fatalf("expected context compression failure event, got %+v", events)
 	}
-	if hasRuntimeEventType(events, trajectory.EventContextCompressionCompleted) {
+	if hasSpanOperation(events, string(trajectory.SpanContext), "compaction", string(trajectory.SpanStatusOK)) {
 		t.Fatalf("did not expect completed compression event on overflow: %+v", events)
 	}
-	if hasRuntimeEventType(events, trajectory.EventModelStarted) {
-		t.Fatalf("did not expect model.started after context overflow: %+v", events)
+	if hasPrimaryLLMStarted(events) {
+		t.Fatalf("did not expect primary model span after context overflow: %+v", events)
 	}
 }
 
@@ -394,6 +390,57 @@ func hasRuntimeEventType(events []trajectory.Event, typ trajectory.EventType) bo
 	return false
 }
 
+func stringPayload(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	if value, ok := payload[key].(string); ok {
+		return value
+	}
+	return ""
+}
+
+func hasSpanOperation(events []trajectory.Event, kind string, operation string, status string) bool {
+	for _, event := range events {
+		if event.Type != trajectory.EventSpanEnded {
+			continue
+		}
+		if stringPayload(event.Payload, "kind") == kind &&
+			stringPayload(event.Payload, "operation") == operation &&
+			stringPayload(event.Payload, "status") == status {
+			return true
+		}
+	}
+	return false
+}
+
+func hasLLMOperation(events []trajectory.Event, operation string, status string) bool {
+	for _, event := range events {
+		if event.Type != trajectory.EventSpanEnded {
+			continue
+		}
+		attrs, _ := event.Payload["attrs"].(map[string]any)
+		if stringPayload(event.Payload, "kind") == string(trajectory.SpanLLM) &&
+			(stringPayload(attrs, "operation") == operation || strings.Contains(event.SpanID, operation)) &&
+			stringPayload(event.Payload, "status") == status {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPrimaryLLMStarted(events []trajectory.Event) bool {
+	for _, event := range events {
+		if event.Type != trajectory.EventSpanStarted {
+			continue
+		}
+		if stringPayload(event.Payload, "kind") == string(trajectory.SpanLLM) && stringPayload(event.Payload, "name") == "primary" {
+			return true
+		}
+	}
+	return false
+}
+
 func requireEventOrder(t *testing.T, events []trajectory.Event, order ...trajectory.EventType) {
 	t.Helper()
 	next := 0
@@ -409,7 +456,8 @@ func requireEventOrder(t *testing.T, events []trajectory.Event, order ...traject
 
 func eventHasStrategy(events []trajectory.Event, strategy string) bool {
 	for _, event := range events {
-		values, ok := event.Payload["strategies"].([]any)
+		attrs, _ := event.Payload["attrs"].(map[string]any)
+		values, ok := attrs["strategies"].([]any)
 		if !ok {
 			continue
 		}

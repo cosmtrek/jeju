@@ -1,25 +1,21 @@
 package cli
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/cosmtrek/jeju/internal/runs"
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
 func TestSummarizeInspect(t *testing.T) {
 	summary := summarizeInspect([]trajectory.Event{
-		{Type: trajectory.EventStepStarted},
-		{Type: trajectory.EventModelStarted},
-		{Type: trajectory.EventModelCompleted},
-		{Type: trajectory.EventToolStarted},
-		{Type: trajectory.EventToolCompleted},
-		{Type: trajectory.EventPermissionChecked},
-		{Type: trajectory.EventPermissionApproved},
-		{Type: trajectory.EventSkillDisclosed},
-		{Type: trajectory.EventSkillLoaded},
+		{Type: trajectory.EventSpanStarted, Payload: map[string]any{"kind": "step"}},
+		{Type: trajectory.EventSpanStarted, Payload: map[string]any{"kind": "llm"}},
+		{Type: trajectory.EventSpanEnded, Payload: map[string]any{"kind": "llm", "status": "ok"}},
+		{Type: trajectory.EventSpanStarted, Payload: map[string]any{"kind": "tool"}},
+		{Type: trajectory.EventSpanEnded, Payload: map[string]any{"kind": "tool", "status": "ok"}},
+		{Type: trajectory.EventPermissionDecided, Payload: map[string]any{"decision": "approved"}},
+		{Type: trajectory.EventSpanEnded, Payload: map[string]any{"kind": "skill", "status": "ok", "output": map[string]any{"count": 1}}},
+		{Type: trajectory.EventSpanEnded, Payload: map[string]any{"kind": "skill", "status": "ok", "output": map[string]any{"name": "x"}}},
 		{Type: trajectory.EventArtifactCreated},
 	})
 	if summary.Steps != 1 ||
@@ -33,16 +29,5 @@ func TestSummarizeInspect(t *testing.T) {
 		summary.SkillLoaded != 1 ||
 		summary.Artifacts != 1 {
 		t.Fatalf("unexpected inspect summary: %#v", summary)
-	}
-}
-
-func TestReadEvaluationSummary(t *testing.T) {
-	path := filepath.Join(t.TempDir(), runs.EvaluationFile)
-	if err := os.WriteFile(path, []byte(`{"passed":true,"score":0.75,"evaluators":[{"name":"basic"}]}`), 0o644); err != nil {
-		t.Fatalf("write evaluation failed: %v", err)
-	}
-	summary := readEvaluationSummary(path)
-	if !summary.Exists || !summary.Passed || summary.Score != 0.75 || summary.Evaluators != 1 {
-		t.Fatalf("unexpected evaluation summary: %#v", summary)
 	}
 }

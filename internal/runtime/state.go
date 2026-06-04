@@ -32,6 +32,7 @@ type RunState struct {
 	Observations []string
 	Errors       []RunError
 	Final        string
+	FinalRef     string
 
 	ModelCalls            int
 	ToolCalls             int
