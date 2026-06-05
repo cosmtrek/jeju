@@ -63,6 +63,29 @@ go install github.com/cosmtrek/jeju/cmd/jeju@latest
 
 Some example evaluators use Python 3.
 
+## Agent Friendly
+
+Jeju is designed to be easy for coding agents to understand and operate. The
+agent contract lives in a manifest, authoring guidance is available as a skill,
+`jeju validate` catches configuration errors, and every run leaves trajectory
+evidence that Codex, Claude Code, or another agent can inspect before revising.
+
+For most users, the fastest path is to ask a coding agent to create the first
+bundle, run the smoke test, and debug from the report. Manual editing is still
+available when you want direct control over every manifest field.
+
+| Codex / Claude Code / agent path (recommended) | Manual path |
+| --- | --- |
+| Install the authoring skill: `npx skills add cosmtrek/jeju --skill jeju-agent-builder`. | Choose one bounded workflow such as reviewing diffs, classifying benchmark failures, updating docs, or repairing a local fixture. |
+| Give the coding agent this task: `Use jeju-agent-builder to create and smoke-test a minimal Jeju agent for <workflow>.` | Scaffold with `jeju init <name> --dir ~/jeju-agents/<name>`. |
+| Review the generated bundle and trajectory evidence before reusing it. Ask the coding agent to make narrow edits when the smoke run exposes gaps. | Edit `agents/<name>.agent.yaml` and `prompts/<name>.md`: provider, workspace boundary, tools, permissions, limits, output format, and optional evaluators. |
+| Promote the bundle only after the smoke path is repeatable. Keep the manifest as the source of truth. | Validate and run: `jeju validate agents/<name>.agent.yaml`, `jeju run agents/<name>.agent.yaml "<sample task>"`, `jeju inspect <run_id>`, `jeju view <run_id>`. |
+| Add `jeju evolve` only after you have a small task set and a clear metric. | Iterate from run evidence. Add `jeju evolve` only after you have a small task set and a clear metric. |
+
+See [Manual For Agents](docs/manual-for-agents.md) for the self-contained
+authoring guide and [Agent Manifest](docs/agent-manifest.md) for the full field
+reference.
+
 ## Inspect A Run
 
 Every run is inspectable. `trajectory.jsonl` is the source of truth; the HTML
