@@ -1,55 +1,37 @@
 # Jeju
 
-> Define behavior in config. Run with boundaries. Inspect every effect. Improve with evidence.
+> Local-first agent harness: define behavior in config, run with boundaries,
+> inspect every effect, and improve with evaluation evidence.
 
 ![Jeju project architecture](docs/jeju-architecture.png)
 
-Jeju is an experimental local-first agent harness for developers who want to define agent behavior in config, run it with strict boundaries, inspect every effect, and improve it with evaluation evidence.
+## What Is Jeju?
 
-A manifest describes the agent's model, instructions, runtime loop, workspace, tools, skills, permissions, context budget, and evaluation rules. Jeju compiles that manifest, runs it against a local workspace, records every meaningful effect in an append-only trajectory, and can improve the agent with evaluation evidence.
+Jeju is an experimental local-first agent harness for developers who want agent
+behavior to be explicit, bounded, inspectable, and evaluable.
 
-The same harness supports several local agent workflows: quick agent experiments, source-backed evaluations, portable specialist agent bundles, and repeated high-frequency tasks that developers or higher-level AI agents want to turn into reusable Jeju agents.
+A Jeju agent is defined by a manifest: model provider, instructions, runtime
+loop, workspace, tools, skills, permissions, context budget, and evaluators.
+Jeju validates and compiles that manifest, runs the agent against a local
+workspace, records every meaningful effect in `trajectory.jsonl`, and can use
+evaluation evidence to improve the agent with `jeju evolve`.
 
-## Features
-
-- **Config-defined behavior**: define models, instructions, tools, skills, permissions, context budget, and evaluation in one manifest.
-- **Strict execution boundaries**: work happens inside explicit workspace, tool, skill, permission, sandbox, timeout, and context-window limits.
-- **Effect-level inspection**: every run records lifecycle, model, context, tool, permission, artifact, and evaluation events.
-- **Trajectory visualization**: project a run into a readable HTML report with agent steps, tool calls, artifacts, final output, and evaluation results.
-- **File-backed evidence**: each run writes one append-only `trajectory.jsonl`; config snapshots, final answers, evaluation results, and generated artifacts are recorded as trajectory artifacts.
-- **Evaluation-guided improvement**: inspect completed runs, evaluate outcomes, and use `jeju evolve` to search config-space patches against train and selection tasks.
-- **Portable agent bundles**: package focused agent workflows so developers or higher-level AI agents can reuse them in local workspaces.
-
-## Trajectory Visualization
-
-Jeju turns each run's append-only trajectory into an inspectable report. The
-viewer shows the agent identity, loaded skills, task, final output, process
-steps, tool calls, artifacts, token and duration summaries, and evaluation
-results.
-
-![Jeju trajectory visualization](docs/trajectory-visualization.png)
-
-Use `jeju inspect` for a terminal summary and `jeju view` to open the HTML
-report:
-
-```bash
-jeju inspect <run_id>
-jeju view <run_id>
-```
-
-See [Trajectory Visualization](docs/trajectory-visualization.md) for the
-inspection view and run-artifact relationship.
+Jeju is not a broad multi-agent platform. It is strongest when a local workflow
+can be packaged as a focused agent with clear tools, permissions, run evidence,
+and optional evaluation.
 
 ## Quick Start
 
-The generated agent bundle includes a manifest, prompt, workspace, skills, run store, and a `mock` model, so the full lifecycle runs without API credentials or approval prompts. Install the CLI, then choose any local directory for the generated agent project.
+The generated agent bundle includes a manifest, prompt, workspace, skills, run
+store, and a deterministic `mock` model, so the full lifecycle runs without API
+credentials or approval prompts.
 
 ```bash
 # Install the latest released CLI on macOS or Linux.
 curl -fsSL https://raw.githubusercontent.com/cosmtrek/jeju/master/scripts/install.sh | sh
 jeju version
 
-# Scaffold a new agent project wherever you want to keep it.
+# Scaffold a new agent project.
 mkdir -p ~/jeju-agents
 jeju init research --dir ~/jeju-agents/research-agent
 
@@ -64,84 +46,71 @@ jeju inspect <run_id>
 jeju view <run_id>
 ```
 
-The run writes an append-only `trajectory.jsonl` under `runs/<run_id>/`;
-`report.html` is a derived inspection view generated from that log. `jeju view`
-opens the existing report when it is fresh, and regenerates it first when the
-report is missing or older than the trajectory. The first inspect view should
-show the full loop: skill loading, model calls, permission checking, a workspace
-write, artifacts, and evaluation.
+The run writes:
 
-The default `mock` provider is deterministic, so this first run demonstrates Jeju's execution lifecycle rather than live web research.
+```text
+runs/<run_id>/
+  trajectory.jsonl     # canonical append-only run record
+  report.html          # derived inspection view
+```
+
+The default `mock` provider demonstrates Jeju's lifecycle rather than live web
+research. To use a real provider, see [DeepSeek setup notes](docs/deepseek.md)
+or configure another OpenAI-compatible endpoint in the agent manifest.
 
 The install script targets macOS and Linux. Windows release archives are
 published as zip assets; download the matching `jeju_windows_<arch>.zip` from
-GitHub Releases and put `jeju.exe` on `PATH`, or use the source install below.
-
-When running demos or fixture scenarios from the Jeju source checkout, keep
-generated artifacts under the ignored `.jeju-dev/` directory:
-
-```bash
-jeju run --runs-dir .jeju-dev/runs/research agents/research.agent.yaml "Save a short note to notes.md"
-jeju runs --runs-dir .jeju-dev/runs/research
-jeju inspect --runs-dir .jeju-dev/runs/research <run_id>
-jeju view --runs-dir .jeju-dev/runs/research <run_id>
-```
-
-Inside a generated agent project, the default `./runs` store remains the normal
-user-facing run history.
-
-### Install From Source
-
-Developers can also install Jeju from the Go module. This is a fallback path
-when a platform-specific installer is unavailable:
+GitHub Releases and put `jeju.exe` on `PATH`, or install from source:
 
 ```bash
 go install github.com/cosmtrek/jeju/cmd/jeju@latest
 ```
 
-### Run With DeepSeek
+## Inspect A Run
 
-To run the same generated agent with a real model, edit `agents/research.agent.yaml` and replace the generated `models.providers.primary` block:
+Every run is inspectable. `trajectory.jsonl` is the source of truth; the HTML
+report is a projection generated by `jeju run` or `jeju view`.
 
-```yaml
-models:
-  providers:
-    primary:
-      type: openaiCompatible
-      preset: deepseek
-      model: deepseek-v4-flash
-      envKey: DEEPSEEK_API_KEY
-      thinking:
-        type: disabled
-```
+![Jeju trajectory visualization](docs/trajectory-visualization.png)
 
-Then set credentials and run the agent again:
+Use `jeju inspect` for a terminal summary and `jeju view` to open the report:
 
 ```bash
-export DEEPSEEK_API_KEY=sk-...
-
-# Optional: required only if the agent should call the scaffolded search_api tool.
-export EXA_API_KEY=...
-
-jeju validate agents/research.agent.yaml
-jeju run agents/research.agent.yaml "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"
+jeju inspect <run_id>
+jeju view <run_id>
 ```
 
-`preset: deepseek` fills the DeepSeek base URL and context window defaults. See [DeepSeek setup notes](docs/deepseek.md) for provider details.
+The report shows agent identity, model, loaded skills, task, final output,
+process steps, tool calls, artifacts, token and duration summaries, and
+evaluation results. `jeju view` opens the existing report when it is fresh, and
+regenerates it first when the report is missing or older than `trajectory.jsonl`.
+
+See [Trajectory Visualization](docs/trajectory-visualization.md) and
+[Trajectory Format](docs/trajectory-format.md) for details.
+
+## Key Capabilities
+
+- **Config-defined behavior**: define models, instructions, tools, skills,
+  permissions, context budget, and evaluation in one manifest.
+- **Strict execution boundaries**: constrain work inside explicit workspace,
+  tool, skill, permission, sandbox, timeout, and context-window limits.
+- **Effect-level inspection**: record lifecycle, model, context, tool,
+  permission, artifact, evaluation, and run summary events.
+- **File-backed evidence**: keep one canonical append-only `trajectory.jsonl`
+  plus a derived `report.html` view for review.
+- **Evaluation-guided improvement**: run task sets, score outcomes, and use
+  `jeju evolve` to search bounded config-space patches.
+- **Portable agent bundles**: package focused workflows so developers or
+  higher-level AI agents can reuse them in local workspaces.
 
 ## Use Cases
 
-Jeju is a harness, not a broad multi-agent platform. The current implementation
-is strongest when the work can be expressed as a focused local agent with clear
-tools, permissions, run evidence, and optional evaluation.
-
-- **Agent experiments**: prototype a local agent by changing manifest fields,
+- **Agent experiments**: prototype local agents by changing manifest fields,
   prompts, skills, tools, model providers, and runtime limits.
-- **Evaluation harnesses**: run a fixed agent against task cases, inspect
-  trajectory evidence, and compare outcomes with rule, command, or LLM
-  evaluators.
+- **Evaluation harnesses**: run a fixed agent against task cases and compare
+  outcomes with rule, command, or LLM evaluators.
 - **Reusable specialist agents**: package review, triage, research, docs, or
-  benchmark workflows into portable agent bundles.
+  benchmark workflows into portable bundles.
 - **High-frequency workflow capture**: turn repeated local tasks into bounded
   agents that can be run by a developer or invoked by a higher-level AI agent.
 
@@ -150,12 +119,23 @@ when the value is only reusable instructions or prompt guidance. Use Jeju when
 the workflow needs model reasoning plus explicit tools, permissions, run
 evidence, or evaluation.
 
-### Agent Authoring Skill
+## Agent Bundles And Authoring Skill
 
-Higher-level AI agents can use the authoring skill to create Jeju agent bundles.
-The skill helps them decide whether Jeju is the right artifact, choose a narrow
-task boundary, generate a minimal manifest and prompt, set permissions and
-runtime limits, add smoke evaluation, and validate the result.
+A minimal agent bundle is just enough structure to validate and run:
+
+```text
+agents/<name>.agent.yaml
+prompts/<name>.md
+workspace/<name>/.gitkeep
+skills/<optional-runtime-skill>/SKILL.md
+eval/<optional-evaluator>.py
+README.md
+```
+
+Higher-level AI agents can use the `jeju-agent-builder` skill to create these
+bundles. The skill helps them decide whether Jeju is the right artifact, choose
+a narrow task boundary, generate a minimal manifest and prompt, set permissions
+and runtime limits, add smoke evaluation, and validate the result.
 
 Install the skill with `npx skills`:
 
@@ -163,34 +143,28 @@ Install the skill with `npx skills`:
 npx skills add cosmtrek/jeju --skill jeju-agent-builder
 ```
 
-Or ask Codex to install it for you:
+Or ask Codex to install it:
 
 ```text
 Use skill-installer to install the jeju-agent-builder skill from cosmtrek/jeju.
 ```
 
-The skill is [skills/jeju-agent-builder/SKILL.md](skills/jeju-agent-builder/SKILL.md).
-The full authoring manual is [docs/manual-for-agents.md](docs/manual-for-agents.md).
+See [skills/jeju-agent-builder/SKILL.md](skills/jeju-agent-builder/SKILL.md)
+and [docs/manual-for-agents.md](docs/manual-for-agents.md).
 
-## Design Philosophy
+## How It Works
 
-Jeju treats an agent as a small, explicit harness unit instead of an opaque application. The manifest is the source of truth for behavior, the compiler fixes the executable boundary, and the runtime records each meaningful effect:
+Jeju treats an agent as a small, explicit harness unit instead of an opaque
+application:
 
 ```text
 Manifest -> Validate -> Compile -> Run -> Gate -> Trace -> Evaluate -> Inspect
 ```
 
-The runtime does not read YAML directly. Configuration is loaded, validated, and compiled into a `CompiledAgent` before execution. This keeps runtime behavior grounded in the manifest, loaded instructions, tools, skills, permissions, and evaluator configuration rather than hardcoded branches.
-
-The current runtime stores runs on disk, constrains file and shell tools to a configured workspace, and leaves behind enough metadata and trajectory data to inspect what happened.
-
-Evaluation-guided improvement is built on top of the same contract. An evolution experiment does not mutate the source agent in place; it runs candidate bundles, scores them with task-level evaluation, applies only allowed exact patches, and materializes the best accepted config separately.
-
-## Agent Manifest
-
-An Agent Manifest is the source of truth for a Jeju agent. It defines the agent's identity, model, instructions, runtime loop, workspace, tools, skills, permission profile, and optional evaluation rules.
-
-See [docs/agent-manifest.md](docs/agent-manifest.md) for the full field reference, defaults, supported values, and validation rules.
+The runtime does not read YAML directly. Configuration is loaded, validated,
+and compiled into a `CompiledAgent` before execution. Runtime behavior comes
+from the manifest, loaded instructions, tools, skills, permissions, context
+budget, and evaluator configuration.
 
 At a high level, a manifest looks like this:
 
@@ -225,55 +199,31 @@ workspace:
 tools:
   - read
   - write
-  - edit
   - search
-  - shell
-
-  - name: search_api
-    uses: http
-    capabilities: [networkRead]
-    http:
-      method: POST
-      url: https://api.exa.ai/search
-      headers:
-        content-type: application/json
-        x-api-key: ${EXA_API_KEY}
-      body:
-        json:
-          query: "{{query}}"
-          numResults: 10
-          type: auto
-          contents:
-            highlights: true
-
-skills:
-  dirs:
-    - ../skills
-  active:
-    - web-research
 
 permissions:
   access: workspace
   approval: onRequest
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules: [finalAnswerExists, runCompleted]
 ```
 
-The important sections are:
-
-- `models`: registers model providers. The default scaffold uses `mock`; `openaiCompatible` can point at real Chat Completions-compatible endpoints and must have a known `contextWindow` for request budgeting.
-- `instructions`: loads the system prompt from a file so behavior can be reviewed and versioned.
-- `runtime`: selects the model, loop type, and execution limits.
-- `workspace`: defines where file and shell work is allowed.
-- `tools`: declares built-in and custom tools plus capability metadata for permission decisions.
-- `skills`: points at skill roots and manually activates the skills that should load instructions.
-- `permissions`: gates tool execution before sensitive operations happen.
-- Run output records model calls, tool calls, permission decisions, skill events, artifacts, evaluation, and lifecycle events under the configured run store, defaulting to `./runs`.
-- `evaluate`: optionally runs rule-based checks after completion.
+See [Agent Manifest](docs/agent-manifest.md) for the full field reference,
+defaults, supported values, and validation rules.
 
 ## Evaluation-Guided Improvement
 
-Jeju can improve a config-defined agent with `jeju evolve`. An evolution experiment is a separate `kind: EvolutionExperiment` manifest that points at a target agent, datasets, an objective metric, edit boundaries, an evolver agent, search limits, and an output directory.
+`jeju evolve` improves a config-defined agent without mutating the source agent
+in place. An evolution experiment points at a target agent, datasets, an
+objective metric, edit boundaries, an evolver agent, search limits, and an
+output directory.
 
-The current implementation is an offline optimization loop:
+The loop is intentionally offline and auditable:
 
 ```text
 baseline agent
@@ -288,141 +238,45 @@ baseline agent
   -> best candidate bundle and report
 ```
 
-`jeju evolve` never edits the source agent in place. It copies the target agent and referenced files into an isolated experiment directory, applies patches only to candidate copies, and writes the accepted best candidate under `best/`.
-
-A minimal experiment looks like this:
-
-```yaml
-apiVersion: jeju/v1alpha1
-kind: EvolutionExperiment
-
-metadata:
-  name: evolve-triage
-
-target:
-  agent: ../agents/triage.agent.yaml
-  editable:
-    - harness:prompt
-
-data:
-  train: ../datasets/train.jsonl
-  selection: ../datasets/selection.jsonl
-  render:
-    template: ../prompts/task_input.md.tmpl
-
-objective:
-  metric: evaluation.score
-  minDelta: 0.1
-  guards:
-    - "evaluation.passed_rate >= baseline.evaluation.passed_rate"
-    - "run.modelErrors <= baseline.run.modelErrors"
-  guidance:
-    - "Improve general behavior rather than memorizing examples."
-
-evolver:
-  agent: ../agents/evolver.agent.yaml
-  proposals: 2
-
-search:
-  iterations: 3
-  parallelism: 2
-
-output:
-  dir: ../.jeju-dev/evolve-triage
-```
-
-Dataset files are JSONL. Each row is a task:
-
-```json
-{
-  "id": "triage-001",
-  "input": {
-    "ticket": "OAuth callback validation fails after a redirect-domain config release.",
-    "customer_tier": "enterprise"
-  },
-  "expected": {
-    "mustInclude": ["P1", "auth"]
-  },
-  "eval": {
-    "rubric": "Return strict JSON and choose the right route."
-  },
-  "metadata": {
-    "category": "auth"
-  },
-  "weight": 1
-}
-```
-
-The `input` is rendered into the runtime task string with the optional Go template in `data.render.template`. `expected`, `eval`, and `metadata` are passed to effective evaluation. If a task provides expected or eval data, that task-level signal takes precedence over the target agent's default evaluator assumptions.
-
-The evolver is also a normal Jeju agent. It receives a deterministic feedback digest and must return proposal JSON:
-
-```json
-{
-  "hypothesis": "The prompt does not enforce the required output format.",
-  "changes": [
-    {
-      "target": "instructions.system",
-      "find": "You are a support assistant.\n",
-      "replace": "You are a support assistant. Return only strict JSON.\n"
-    }
-  ]
-}
-```
-
-Patch safety is intentionally narrow. The patch target must be listed in expanded `target.editable`, must not match `target.forbidden`, and `replace` patches require `find` to match exactly once inside the candidate bundle. Harness aliases such as `harness:prompt`, `skill:<name>`, and `tool:<name>` expand to concrete editable paths. `file:<relative-path>` and `dir:<relative-path>` authorize explicitly scoped harness files, and `op: "write"` can write full content only to editable file targets. After patching, Jeju validates that no forbidden or uneditable manifest leaf field changed, then compiles the candidate before running it.
-
 Common commands:
 
 ```bash
-# Validate the baseline bundle and compile without model calls.
 jeju evolve --dry-run experiments/evolve.yaml
-
-# Measure baseline train/selection metrics without calling the evolver.
 jeju evolve --baseline-only experiments/evolve.yaml
-
-# Run the full evolution loop.
 jeju evolve experiments/evolve.yaml
-
-# Run final holdout test metrics after selecting the best candidate.
 jeju evolve --test experiments/evolve.yaml
-
-# Limit real-provider cost while testing.
-jeju evolve --max-iterations 2 --out .jeju-dev/evolve/triage experiments/evolve.yaml
 ```
 
-Evolution output is written under `output.dir/<experiment_id>/`:
-
-- `experiment.snapshot.json`: resolved experiment config.
-- `events.jsonl`: controller lifecycle events.
-- `baseline/results.json`: baseline train and selection results.
-- `iterations/<n>/feedback_digest.json`: digest passed to the evolver.
-- `iterations/<n>/proposals.json`: parsed structured proposals.
-- `iterations/<n>/candidate-*/patch.json`: applied candidate patch.
-- `leaderboard.json`: all candidates, metrics, and rejection reasons.
-- `best/`: materialized best candidate bundle.
-- `report.md`: human-readable result summary.
-
-If `data.test` is configured, add `--test` to run the test split only after
-candidate selection, on baseline and the final best. Test metrics are written to
-the report but do not affect candidate acceptance.
-
-See [docs/agent-evolution-manifest.md](docs/agent-evolution-manifest.md) for the full schema and [docs/self-evolution.md](docs/self-evolution.md) for the design details.
+See [Evolution Manifest](docs/agent-evolution-manifest.md) and
+[Self Evolution](docs/self-evolution.md) for the full schema and design notes.
 
 ## Examples
 
 Runnable recommended scenarios live under [examples](examples/README.md). These
 are example agent bundles, not test fixtures.
 
-Current examples cover a [code review agent](examples/code-review-agent/README.md),
-a [privacy delegation agent](examples/privacy-delegation-agent/README.md), and a
-[SkillsBench Lite agent](examples/skillsbench-lite-agent/README.md). They show
-how Jeju defines behavior in config, runs with explicit boundaries, records
-effects, and uses evaluation evidence to improve an agent.
+Current examples cover:
 
-## Tests
+- [Code review agent](examples/code-review-agent/README.md)
+- [Privacy delegation agent](examples/privacy-delegation-agent/README.md)
+- [SkillsBench Lite agent](examples/skillsbench-lite-agent/README.md)
 
-Run the normal code checks first:
+They show how Jeju defines behavior in config, runs with explicit boundaries,
+records effects, and uses evaluation evidence to improve an agent.
+
+## Documentation
+
+- [Agent Manifest](docs/agent-manifest.md)
+- [Trajectory Visualization](docs/trajectory-visualization.md)
+- [Trajectory Format](docs/trajectory-format.md)
+- [Evolution Manifest](docs/agent-evolution-manifest.md)
+- [Self Evolution](docs/self-evolution.md)
+- [Manual For Agents](docs/manual-for-agents.md)
+- [DeepSeek Setup](docs/deepseek.md)
+
+## Development
+
+Run the normal code checks:
 
 ```bash
 go test ./...
@@ -438,32 +292,28 @@ make test-agent
 Provider-backed and heavier smoke runs are opt-in and may call real model APIs:
 
 ```bash
-# DeepSeek fixture run.
 export DEEPSEEK_API_KEY=sk-...
 make test-agent PROVIDER=deepseek
 
-# MiMo fixture run.
 export MIMO_API_KEY=sk-...
 make test-agent PROVIDER=mimo
 
-# Long-horizon context compression run.
 make test-long-horizon-agent PROVIDER=mimo
-
-# Evolution mechanics.
 make test-evolve-e2e PROVIDER=mock
-make test-evolve-e2e PROVIDER=mimo
-
-# Evolution effect smoke and real-provider holdout check.
 make test-evolve-effect-e2e PROVIDER=mock
-make test-evolve-effect-e2e PROVIDER=mimo
 ```
 
-Fixture scripts copy sources into temporary or `.jeju-dev/<scenario>/` workdirs before running, so fixture sources stay clean. Set `JEJU_MIMO_BASE_URL` if you need to override the MiMo endpoint.
-
 For source-checkout development, avoid writing generated runs to repo-root
-`runs/` or example-local `runs/` directories. Prefer `--runs-dir
-.jeju-dev/runs/<scenario>` for demo runs and `.jeju-dev/evolve/<scenario>` for
-evolution output.
+`runs/` or example-local `runs/` directories. Prefer:
+
+```bash
+jeju run --runs-dir .jeju-dev/runs/<scenario> <agent.yaml> "<task>"
+jeju inspect --runs-dir .jeju-dev/runs/<scenario> <run_id>
+jeju view --runs-dir .jeju-dev/runs/<scenario> <run_id>
+```
+
+Inside a generated user agent project, the default `./runs` store remains the
+normal local run history.
 
 ## License
 
