@@ -23,6 +23,11 @@ higher-level agent.
 
 ![Jeju trajectory visualization](trajectory-visualization.png)
 
+The screenshot above is from the
+[bug rescue agent](../examples/bug-rescue-agent/README.md), which repairs a
+failing local fixture with DeepSeek V4 Flash and records the full read, test,
+edit, retest, and write sequence.
+
 The report highlights:
 
 - Run identity, model, loaded skills, and trajectory integrity.

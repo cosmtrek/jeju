@@ -36,7 +36,7 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 	}
 
 	runOutput := captureStdout(t, func() {
-		if err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"}); err != nil {
+		if err := Execute(ctx, []string{"run", "agents/research.agent.yaml", "Create a short note explaining this agent run lifecycle and save it to notes.md"}); err != nil {
 			t.Fatalf("run failed: %v", err)
 		}
 	})

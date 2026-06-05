@@ -11,8 +11,10 @@ evaluation evidence.
 
 ## Available Examples
 
-- [Code review agent](code-review-agent/README.md): reviews a Git diff and
-  returns structured findings checked by a local evaluator.
+- [Bug rescue agent](bug-rescue-agent/README.md): repairs a failing Python
+  ledger fixture with DeepSeek V4 Flash, reruns tests, and writes a repair note.
+- [Code review agent](code-review-agent/README.md): reviews a Git diff with
+  read-only Git tools and returns structured findings.
 - [Commit plan agent](commit-plan-agent/README.md): clusters large Git changes
   into reviewable commit themes before staging or committing.
 - [Privacy delegation agent](privacy-delegation-agent/README.md): improves a

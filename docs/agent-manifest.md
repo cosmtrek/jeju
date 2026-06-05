@@ -26,7 +26,7 @@ models:
     primary:
       type: openaiCompatible
       preset: deepseek
-      model: deepseek-chat
+      model: deepseek-v4-flash
       baseUrl: https://api.deepseek.com
       envKey: DEEPSEEK_API_KEY
       temperature: 0.2
@@ -156,7 +156,7 @@ models:
     primary:
       type: openaiCompatible
       preset: deepseek
-      model: deepseek-chat
+      model: deepseek-v4-flash
       baseUrl: https://api.deepseek.com
       envKey: DEEPSEEK_API_KEY
       thinking:

@@ -22,49 +22,46 @@ and optional evaluation.
 
 ## Quick Start
 
-The generated agent bundle includes a manifest, prompt, workspace, skills, run
-store, and a deterministic `mock` model, so the full lifecycle runs without API
-credentials or approval prompts.
+Run the showcase bug rescue agent to see Jeju repair a small local project,
+rerun tests, write a repair note, and record the full trajectory. It uses
+DeepSeek V4 Flash and does not require external search services.
 
 ```bash
 # Install the latest released CLI on macOS or Linux.
 curl -fsSL https://raw.githubusercontent.com/cosmtrek/jeju/master/scripts/install.sh | sh
 jeju version
 
-# Scaffold a new agent project.
-mkdir -p ~/jeju-agents
-jeju init research --dir ~/jeju-agents/research-agent
+# Run the DeepSeek V4 Flash showcase.
+export DEEPSEEK_API_KEY=sk-...
+git clone https://github.com/cosmtrek/jeju.git
+cd jeju
+./scripts/run-bug-rescue-agent.sh
 
-# Run the generated agent bundle.
-cd ~/jeju-agents/research-agent
-jeju validate agents/research.agent.yaml
-jeju run agents/research.agent.yaml "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"
-
-# Inspect the recorded run.
-jeju runs
-jeju inspect <run_id>
-jeju view <run_id>
+# Inspect the recorded run printed by the script.
+jeju inspect --runs-dir .jeju-dev/runs/bug-rescue <run_id>
+jeju view --runs-dir .jeju-dev/runs/bug-rescue <run_id>
 ```
 
 The run writes:
 
 ```text
-runs/<run_id>/
+.jeju-dev/runs/bug-rescue/<run_id>/
   trajectory.jsonl     # canonical append-only run record
   report.html          # derived inspection view
 ```
 
-The default `mock` provider demonstrates Jeju's lifecycle rather than live web
-research. To use a real provider, see [DeepSeek setup notes](docs/deepseek.md)
-or configure another OpenAI-compatible endpoint in the agent manifest.
+The script copies a broken ledger fixture into `.jeju-dev/workspaces/bug-rescue`
+before each run, so the committed example stays unchanged. For a no-credential
+mock lifecycle check, use `jeju init <name>` or `make test-agent`.
 
-The install script targets macOS and Linux. Windows release archives are
-published as zip assets; download the matching `jeju_windows_<arch>.zip` from
-GitHub Releases and put `jeju.exe` on `PATH`, or install from source:
+Jeju currently supports macOS and Linux. Windows is not guaranteed yet. Source
+installs require Go 1.25 or newer:
 
 ```bash
 go install github.com/cosmtrek/jeju/cmd/jeju@latest
 ```
+
+Some example evaluators use Python 3.
 
 ## Inspect A Run
 
@@ -257,7 +254,9 @@ are example agent bundles, not test fixtures.
 
 Current examples cover:
 
+- [Bug rescue agent](examples/bug-rescue-agent/README.md)
 - [Code review agent](examples/code-review-agent/README.md)
+- [Commit plan agent](examples/commit-plan-agent/README.md)
 - [Privacy delegation agent](examples/privacy-delegation-agent/README.md)
 - [SkillsBench Lite agent](examples/skillsbench-lite-agent/README.md)
 

@@ -27,7 +27,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
   jeju info
   jeju validate agents/research.agent.yaml
   jeju validate --explain agents/research.agent.yaml
-  jeju run agents/research.agent.yaml "Create a deep research brief on AI agent evaluation methods, compare three approaches, and save the report to notes.md"
+  jeju run agents/research.agent.yaml "Create a short note explaining this agent run lifecycle and save it to notes.md"
   jeju run --runs-dir .jeju-dev/runs/code-review --workspace /path/to/project agents/code-review.agent.yaml "Review the current repository changes."
   jeju evolve --baseline-only experiments/research-evolve.yaml
   jeju view 20260526-120000-research`,

@@ -20,7 +20,7 @@ models:
 
 The DeepSeek preset enables JSON response mode by default for non-native fallback output. It also defaults `thinking.type` to `disabled`. If you set `thinking.type: enabled`, Jeju records the returned `reasoning_content`, shows a short console preview, and replays it on subsequent tool-call turns as required by DeepSeek thinking mode.
 
-Run the shared local fixture with DeepSeek:
+Create a DeepSeek API key, then run the shared local fixture:
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...

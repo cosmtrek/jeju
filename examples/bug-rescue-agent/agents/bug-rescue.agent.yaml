@@ -1,0 +1,59 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: bug-rescue
+  description: "Repair a small failing local project with tests and a repair note"
+  labels:
+    scenario: showcase
+    example: bug-rescue
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-flash
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.1
+      thinking:
+        type: disabled
+      maxOutputTokens: 4096
+      contextWindow: 128000
+      timeoutSec: 90
+
+instructions:
+  system: ../prompts/bug-rescue.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  limits:
+    maxSteps: 24
+    maxDurationSec: 300
+    maxToolCalls: 20
+    maxConsecutiveErrors: 3
+
+workspace:
+  path: ../workspace
+
+tools:
+  - read
+  - search
+  - edit
+  - write
+
+  - name: run_tests
+    uses: command
+    description: "Run the local Python unittest harness and return structured pass/fail output."
+    capabilities: [workspaceRead, command]
+    command:
+      run: python3
+      args: ["test_harness.py"]
+      timeoutSec: 30
+
+permissions:
+  access: workspace
+  approval: never

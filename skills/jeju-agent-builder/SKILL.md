@@ -180,9 +180,8 @@ curl -fsSL https://raw.githubusercontent.com/cosmtrek/jeju/master/scripts/instal
 jeju version
 ```
 
-On Windows, do not run the shell installer. Prefer the matching
-`jeju_windows_<arch>.zip` release asset if available, or use the README source
-install path when Go is already installed:
+Jeju currently supports macOS and Linux. Windows is not guaranteed yet. Use the
+README source install path only when Go is already installed:
 
 ```bash
 go install github.com/cosmtrek/jeju/cmd/jeju@latest
