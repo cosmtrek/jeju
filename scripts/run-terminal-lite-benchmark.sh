@@ -139,7 +139,7 @@ for task in "${tasks[@]}"; do
   ) || task_failed=1
 
   latest_run="$(find "$run_dir/runs" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
-  for artifact in metadata.json config.snapshot.yaml trajectory.jsonl final.md evaluation.json; do
+  for artifact in trajectory.jsonl report.html; do
     test -f "$latest_run/$artifact" || task_failed=1
   done
 
@@ -149,17 +149,24 @@ import sys
 from pathlib import Path
 
 run_dir = Path(sys.argv[1])
-metadata = json.loads((run_dir / "metadata.json").read_text())
-if metadata.get("status") != "completed":
-    raise SystemExit(f"run did not complete: {metadata.get('status')}")
+events = [json.loads(line) for line in (run_dir / "trajectory.jsonl").read_text().splitlines() if line.strip()]
+summary = next((event.get("payload", {}) for event in events if event.get("type") == "run.summary"), {})
+if summary.get("status") != "completed":
+    raise SystemExit(f"run did not complete: {summary.get('status')}")
 
-evaluation = json.loads((run_dir / "evaluation.json").read_text())
+evaluation = {}
+for event in events:
+    if event.get("type") != "artifact.created":
+        continue
+    payload = event.get("payload", {})
+    if payload.get("role") == "evaluation":
+        evaluation = json.loads(payload.get("text", "{}"))
+        break
 if not evaluation.get("passed"):
     raise SystemExit(f"evaluation did not pass: {evaluation}")
 
-events = [json.loads(line) for line in (run_dir / "trajectory.jsonl").read_text().splitlines() if line.strip()]
 types = {event.get("type") for event in events}
-required = {"run.started", "model.started", "model.completed", "action.parsed", "run.completed"}
+required = {"trajectory.header", "span.started", "span.ended", "action.created", "run.summary"}
 missing = sorted(required - types)
 if missing:
     raise SystemExit(f"missing trajectory events: {missing}")

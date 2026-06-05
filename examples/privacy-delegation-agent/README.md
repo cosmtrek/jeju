@@ -60,7 +60,7 @@ The same run shows the artifact trail Jeju leaves behind:
   iterations/001/candidate-001-01/...
 ```
 
-Inspecting a candidate trial shows the concrete run artifacts:
+Inspecting a candidate trial shows the concrete run record:
 
 ```bash
 go run ./cmd/jeju inspect \

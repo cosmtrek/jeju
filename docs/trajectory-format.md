@@ -24,8 +24,9 @@ For the user-facing HTML projection, see
 - This format is not a training dataset format, though it should export cleanly
   to one.
 - This format does not require Jeju to expose a public API outside `internal/`.
-- Derived files such as `report.html`, `final.md`, or `evaluation.json` are not
-  canonical once this format is active.
+- `report.html` is the only standard derived file in the run directory. Jeju
+  does not write separate `final.md`, `evaluation.json`, metadata, or config
+  snapshot files for normal runs.
 
 ## Run Directory
 

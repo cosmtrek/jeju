@@ -35,13 +35,13 @@ The canonical evidence remains the run directory:
 
 ```text
 runs/<run_id>/
-  trajectory.jsonl
-  metadata.json
-  config.snapshot.yaml
-  final.md
-  evaluation.json      # when evaluation is enabled
-  report.html          # derived by jeju view
+  trajectory.jsonl     # canonical append-only run record
+  report.html          # derived inspection view
 ```
+
+Metadata, config snapshots, model inputs and outputs, tool outputs, final
+answers, evaluation results, and generated file snapshots are stored as typed
+events or inline/chunked artifacts inside `trajectory.jsonl`.
 
 For source-checkout demos, keep generated runs under `.jeju-dev/`:
 

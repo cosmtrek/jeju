@@ -86,7 +86,22 @@ fi
   echo "Report: $workdir/runs/$run_id/report.html"
   echo "Workspace note: $workdir/$note_path"
 
-  if ! grep -q '"status": "completed"' "runs/$run_id/metadata.json"; then
+  if ! python3 - "runs/$run_id/trajectory.jsonl" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+status = None
+for line in Path(sys.argv[1]).read_text().splitlines():
+    if not line.strip():
+        continue
+    event = json.loads(line)
+    if event.get("type") == "run.summary":
+        status = event.get("payload", {}).get("status")
+if status != "completed":
+    raise SystemExit(1)
+PY
+  then
     echo "run did not complete successfully: $run_id" >&2
     exit 1
   fi

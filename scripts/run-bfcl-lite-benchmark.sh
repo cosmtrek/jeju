@@ -131,20 +131,35 @@ from pathlib import Path
 run_dir = Path(sys.argv[1])
 expected = json.loads(Path(sys.argv[2]).read_text())
 
-for name in ["metadata.json", "config.snapshot.yaml", "trajectory.jsonl", "final.md", "evaluation.json"]:
+for name in ["trajectory.jsonl", "report.html"]:
     if not (run_dir / name).exists():
         raise SystemExit(f"missing run artifact: {name}")
 
-metadata = json.loads((run_dir / "metadata.json").read_text())
-if metadata.get("status") != "completed":
-    raise SystemExit(f"run did not complete: {metadata.get('status')}")
+events = [json.loads(line) for line in (run_dir / "trajectory.jsonl").read_text().splitlines() if line.strip()]
 
-evaluation = json.loads((run_dir / "evaluation.json").read_text())
+summary = next((event.get("payload", {}) for event in events if event.get("type") == "run.summary"), {})
+if summary.get("status") != "completed":
+    raise SystemExit(f"run did not complete: {summary.get('status')}")
+
+def artifact_text(role):
+    for event in events:
+        if event.get("type") != "artifact.created":
+            continue
+        payload = event.get("payload", {})
+        if payload.get("role") == role:
+            return payload.get("text", "")
+    return ""
+
+evaluation_text = artifact_text("evaluation")
+evaluation = json.loads(evaluation_text) if evaluation_text else {}
 if not evaluation.get("passed"):
     raise SystemExit(f"evaluation did not pass: {evaluation}")
 
-events = [json.loads(line) for line in (run_dir / "trajectory.jsonl").read_text().splitlines() if line.strip()]
-requested = [event.get("payload", {}).get("tool") for event in events if event.get("type") == "tool.requested"]
+requested = [
+    event.get("payload", {}).get("function_name")
+    for event in events
+    if event.get("type") == "action.created" and event.get("payload", {}).get("kind") == "tool_call"
+]
 expected_tools = [item["tool"] for item in expected.get("expected_tool_calls", [])]
 if requested != expected_tools:
     raise SystemExit(f"expected tool calls {expected_tools}, got {requested}")
@@ -153,7 +168,7 @@ for forbidden in expected.get("forbidden_tools", []):
     if forbidden in requested:
         raise SystemExit(f"forbidden tool was called: {forbidden}")
 
-final = (run_dir / "final.md").read_text()
+final = artifact_text("final")
 missing = [text for text in expected.get("expected_final_contains", []) if text.lower() not in final.lower()]
 if missing:
     raise SystemExit(f"final answer missing expected text: {missing}; final={final!r}")

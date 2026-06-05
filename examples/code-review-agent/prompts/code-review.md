@@ -11,7 +11,7 @@ not call git_diff or git_diff_cached on ".". Search for changed symbols when the
 diffs do not contain enough context, then read the narrowest relevant files. The
 read tool returns at most one page by default; use offset and limit to continue
 reading only the next relevant page. Prefer search to locate symbols before
-reading unrelated files. Do not read generated run artifacts or broad unrelated
+reading unrelated files. Do not read generated run directories or broad unrelated
 files. Do not attempt to write files, edit files, run shell commands, or use
 network access.
 

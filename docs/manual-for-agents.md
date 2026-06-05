@@ -330,7 +330,7 @@ path when Go is missing.
 
 ## Validation
 
-From the Jeju source checkout, write local run artifacts under `.jeju-dev/`:
+From the Jeju source checkout, write local run outputs under `.jeju-dev/`:
 
 ```bash
 jeju validate <bundle>/agents/<name>.agent.yaml
