@@ -15,9 +15,29 @@ The same harness supports several local agent workflows: quick agent experiments
 - **Config-defined behavior**: define models, instructions, tools, skills, permissions, context budget, and evaluation in one manifest.
 - **Strict execution boundaries**: work happens inside explicit workspace, tool, skill, permission, sandbox, timeout, and context-window limits.
 - **Effect-level inspection**: every run records lifecycle, model, context, tool, permission, artifact, and evaluation events.
+- **Trajectory visualization**: project a run into a readable HTML report with agent steps, tool calls, artifacts, final output, and evaluation results.
 - **File-backed evidence**: each run writes one append-only `trajectory.jsonl`; config snapshots, final answers, evaluation results, and generated artifacts are recorded as trajectory artifacts.
 - **Evaluation-guided improvement**: inspect completed runs, evaluate outcomes, and use `jeju evolve` to search config-space patches against train and selection tasks.
 - **Portable agent bundles**: package focused agent workflows so developers or higher-level AI agents can reuse them in local workspaces.
+
+## Trajectory Visualization
+
+Jeju turns each run's append-only trajectory into an inspectable report. The
+viewer shows the agent identity, loaded skills, task, final output, process
+steps, tool calls, artifacts, token and duration summaries, and evaluation
+results.
+
+![Jeju trajectory visualization](docs/trajectory-visualization.png)
+
+Use `jeju inspect` for a terminal summary and `jeju view` for the HTML report:
+
+```bash
+jeju inspect <run_id>
+jeju view <run_id>
+```
+
+See [Trajectory Visualization](docs/trajectory-visualization.md) for the
+inspection view and run-artifact relationship.
 
 ## Quick Start
 
@@ -40,6 +60,7 @@ jeju run agents/research.agent.yaml "Create a deep research brief on AI agent ev
 # Inspect the recorded run.
 jeju runs
 jeju inspect <run_id>
+jeju view <run_id>
 ```
 
 The run writes an append-only `trajectory.jsonl` under `runs/<run_id>/`; `report.html` is a derived inspection view generated from that log. The first inspect view should show the full loop: skill loading, model calls, permission checking, a workspace write, artifacts, and evaluation.
@@ -57,6 +78,7 @@ generated artifacts under the ignored `.jeju-dev/` directory:
 jeju run --runs-dir .jeju-dev/runs/research agents/research.agent.yaml "Save a short note to notes.md"
 jeju runs --runs-dir .jeju-dev/runs/research
 jeju inspect --runs-dir .jeju-dev/runs/research <run_id>
+jeju view --runs-dir .jeju-dev/runs/research <run_id>
 ```
 
 Inside a generated agent project, the default `./runs` store remains the normal

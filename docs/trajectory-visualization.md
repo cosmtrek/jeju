@@ -1,0 +1,50 @@
+# Trajectory Visualization
+
+Jeju records every meaningful runtime effect in `trajectory.jsonl` and projects
+that log into human-readable inspection surfaces.
+
+Use `jeju inspect` when you need a compact terminal summary:
+
+```bash
+jeju inspect <run_id>
+```
+
+Use `jeju view` when you want the HTML report:
+
+```bash
+jeju view <run_id>
+```
+
+The report is derived from the trajectory, not a separate source of truth. It is
+intended for review, debugging, demos, and sharing run evidence with another
+developer or a higher-level agent.
+
+![Jeju trajectory visualization](trajectory-visualization.png)
+
+The report highlights:
+
+- Run identity, model, loaded skills, and trajectory integrity.
+- The original task and final output.
+- Step-by-step process events, including model actions and tool calls.
+- Tool distribution, artifacts, token counts, and duration.
+- Evaluation status, score, and evaluator details when evaluation is enabled.
+
+The canonical evidence remains the run directory:
+
+```text
+runs/<run_id>/
+  trajectory.jsonl
+  metadata.json
+  config.snapshot.yaml
+  final.md
+  evaluation.json      # when evaluation is enabled
+  report.html          # derived by jeju view
+```
+
+For source-checkout demos, keep generated runs under `.jeju-dev/`:
+
+```bash
+jeju run --runs-dir .jeju-dev/runs/<scenario> <agent.yaml> "<task>"
+jeju inspect --runs-dir .jeju-dev/runs/<scenario> <run_id>
+jeju view --runs-dir .jeju-dev/runs/<scenario> <run_id>
+```

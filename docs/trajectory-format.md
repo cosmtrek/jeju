@@ -4,6 +4,9 @@ This document defines the target Jeju trajectory format. The trajectory is the
 canonical append-only record for a run. Reports, final answers, evaluation
 files, and interchange exports are derived from it.
 
+For the user-facing HTML projection, see
+[Trajectory Visualization](trajectory-visualization.md).
+
 ## Goals
 
 - Keep one self-contained, append-only event log per run.
