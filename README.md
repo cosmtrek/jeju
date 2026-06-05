@@ -63,24 +63,25 @@ go install github.com/cosmtrek/jeju/cmd/jeju@latest
 
 Some example evaluators use Python 3.
 
-## Agent Friendly
+## Get Started
 
-Jeju is designed to be easy for coding agents to understand and operate. The
-agent contract lives in a manifest, authoring guidance is available as a skill,
-`jeju validate` catches configuration errors, and every run leaves trajectory
-evidence that Codex, Claude Code, or another agent can inspect before revising.
+We provide a `jeju-agent-builder` skill for Codex, Claude Code, and other agent
+environments. Install the skill in your agent environment when you want that
+agent to create, modify, run, and inspect Jeju agents for you.
 
-For most users, the fastest path is to ask a coding agent to create the first
-bundle, run the smoke test, and debug from the report. Manual editing is still
-available when you want direct control over every manifest field.
+```bash
+npx skills add cosmtrek/jeju --skill jeju-agent-builder
+```
 
-| Codex / Claude Code / agent path (recommended) | Manual path |
-| --- | --- |
-| Install the authoring skill: `npx skills add cosmtrek/jeju --skill jeju-agent-builder`. | Choose one bounded workflow such as reviewing diffs, classifying benchmark failures, updating docs, or repairing a local fixture. |
-| Give the coding agent this task: `Use jeju-agent-builder to create and smoke-test a minimal Jeju agent for <workflow>.` | Scaffold with `jeju init <name> --dir ~/jeju-agents/<name>`. |
-| Review the generated bundle and trajectory evidence before reusing it. Ask the coding agent to make narrow edits when the smoke run exposes gaps. | Edit `agents/<name>.agent.yaml` and `prompts/<name>.md`: provider, workspace boundary, tools, permissions, limits, output format, and optional evaluators. |
-| Promote the bundle only after the smoke path is repeatable. Keep the manifest as the source of truth. | Validate and run: `jeju validate agents/<name>.agent.yaml`, `jeju run agents/<name>.agent.yaml "<sample task>"`, `jeju inspect <run_id>`, `jeju view <run_id>`. |
-| Add `jeju evolve` only after you have a small task set and a clear metric. | Iterate from run evidence. Add `jeju evolve` only after you have a small task set and a clear metric. |
+Then ask your agent:
+
+```text
+Use jeju-agent-builder to create and smoke-test a minimal Jeju agent for <workflow>.
+```
+
+You can also build manually with `jeju init <name> --dir ~/jeju-agents/<name>`,
+then edit the manifest and prompt, run `jeju validate`, run a smoke task, and
+inspect the trajectory with `jeju inspect` or `jeju view`.
 
 See [Manual For Agents](docs/manual-for-agents.md) for the self-contained
 authoring guide and [Agent Manifest](docs/agent-manifest.md) for the full field
@@ -139,9 +140,11 @@ when the value is only reusable instructions or prompt guidance. Use Jeju when
 the workflow needs model reasoning plus explicit tools, permissions, run
 evidence, or evaluation.
 
-## Agent Bundles And Authoring Skill
+## Agent Bundle Shape
 
-A minimal agent bundle is just enough structure to validate and run:
+A Jeju agent bundle is a portable directory that keeps runtime behavior,
+instructions, optional skills, and optional evaluation close together. A minimal
+bundle is just enough structure to validate and run:
 
 ```text
 agents/<name>.agent.yaml
@@ -152,25 +155,9 @@ eval/<optional-evaluator>.py
 README.md
 ```
 
-Higher-level AI agents can use the `jeju-agent-builder` skill to create these
-bundles. The skill helps them decide whether Jeju is the right artifact, choose
-a narrow task boundary, generate a minimal manifest and prompt, set permissions
-and runtime limits, add smoke evaluation, and validate the result.
-
-Install the skill with `npx skills`:
-
-```bash
-npx skills add cosmtrek/jeju --skill jeju-agent-builder
-```
-
-Or ask Codex to install it:
-
-```text
-Use skill-installer to install the jeju-agent-builder skill from cosmtrek/jeju.
-```
-
-See [skills/jeju-agent-builder/SKILL.md](skills/jeju-agent-builder/SKILL.md)
-and [docs/manual-for-agents.md](docs/manual-for-agents.md).
+Keep the manifest as the source of truth. Put durable behavior in manifest
+fields, prompt files, runtime skills, tools, permissions, limits, and evaluator
+config rather than hardcoding runtime branches.
 
 ## How It Works
 
@@ -186,44 +173,45 @@ and compiled into a `CompiledAgent` before execution. Runtime behavior comes
 from the manifest, loaded instructions, tools, skills, permissions, context
 budget, and evaluator configuration.
 
-At a high level, a manifest looks like this:
+At a high level, a read-only specialist manifest looks like this:
 
 ```yaml
 apiVersion: jeju/v1alpha1
 kind: Agent
 
 metadata:
-  name: research
-  description: "Local research assistant"
+  name: repo-inspector
+  description: "Inspect a local repository and produce a structured summary"
 
 models:
   providers:
     primary:
-      type: mock
-      model: mock-react
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-flash
+      envKey: DEEPSEEK_API_KEY
 
 instructions:
-  system: ../prompts/research.md
+  system: ../prompts/repo-inspector.md
 
 runtime:
   model: primary
   loop:
     type: react
   limits:
-    maxSteps: 8
+    maxSteps: 12
     maxDurationSec: 300
 
 workspace:
-  path: ../workspace/research
+  path: ../workspace/repo-inspector
 
 tools:
   - read
-  - write
   - search
 
 permissions:
-  access: workspace
-  approval: onRequest
+  access: readOnly
+  approval: never
 
 evaluate:
   enabled: true
