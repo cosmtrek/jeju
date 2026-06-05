@@ -9,15 +9,17 @@ Use `jeju inspect` when you need a compact terminal summary:
 jeju inspect <run_id>
 ```
 
-Use `jeju view` when you want the HTML report:
+Use `jeju view` when you want to open the HTML report:
 
 ```bash
 jeju view <run_id>
 ```
 
-The report is derived from the trajectory, not a separate source of truth. It is
-intended for review, debugging, demos, and sharing run evidence with another
-developer or a higher-level agent.
+The report is derived from the trajectory, not a separate source of truth.
+`jeju view` opens the existing report when it is fresh, and regenerates it first
+when the report is missing or older than `trajectory.jsonl`. It is intended for
+review, debugging, demos, and sharing run evidence with another developer or a
+higher-level agent.
 
 ![Jeju trajectory visualization](trajectory-visualization.png)
 

@@ -14,6 +14,8 @@ import (
 )
 
 func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
+	disableReportOpen(t)
+
 	tmp := t.TempDir()
 	restoreCWD := chdir(t, tmp)
 	defer restoreCWD()
@@ -194,6 +196,8 @@ func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
 }
 
 func TestRunCommandsUseCustomRunsDir(t *testing.T) {
+	disableReportOpen(t)
+
 	tmp := t.TempDir()
 	restoreCWD := chdir(t, tmp)
 	defer restoreCWD()
@@ -386,7 +390,7 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		"jeju inspect <run_id>",
 		"Print a run summary and artifact paths",
 		"jeju view <run_id> [--out <html>]",
-		"Render an HTML run report",
+		"Open an HTML run report",
 		"jeju runs",
 		"List local runs",
 	} {

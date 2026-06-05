@@ -175,7 +175,7 @@ func newViewCommand() *cobra.Command {
 	var runsDir string
 	cmd := &cobra.Command{
 		Use:          "view <run_id> [--out <html>]",
-		Short:        "Render an HTML run report",
+		Short:        "Open an HTML run report",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"html/template"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +25,8 @@ import (
 )
 
 var markdownRenderer = goldmark.New(goldmark.WithExtensions(extension.GFM))
+
+var openReportFile = defaultOpenReportFile
 
 func renderMarkdown(src string) template.HTML {
 	if src == "" {
@@ -45,10 +49,17 @@ func runView(runID, out, runsDir string) error {
 	if out == "" {
 		out = defaultRunReportPath(runDir)
 	}
-	if err := writeRunReport(store, runDir, out); err != nil {
+	generated, err := ensureRunReport(store, runDir, out)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s\n", out)
+	if generated {
+		fmt.Printf("wrote %s\n", out)
+	}
+	if err := openReportFile(out); err != nil {
+		return err
+	}
+	fmt.Printf("opened %s\n", out)
 	return nil
 }
 
@@ -72,6 +83,35 @@ func defaultRunReportPath(runDir *runs.RunDir) string {
 	return filepath.Join(runDir.Path, runs.ReportFile)
 }
 
+func ensureRunReport(store *runs.Store, runDir *runs.RunDir, out string) (bool, error) {
+	stale, err := reportNeedsRender(runDir, out)
+	if err != nil {
+		return false, err
+	}
+	if !stale {
+		return false, nil
+	}
+	if err := writeRunReport(store, runDir, out); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func reportNeedsRender(runDir *runs.RunDir, out string) (bool, error) {
+	trajectoryInfo, err := os.Stat(filepath.Join(runDir.Path, runs.TrajectoryFile))
+	if err != nil {
+		return false, err
+	}
+	reportInfo, err := os.Stat(out)
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return reportInfo.ModTime().Before(trajectoryInfo.ModTime()), nil
+}
+
 func writeRunReport(store *runs.Store, runDir *runs.RunDir, out string) error {
 	report, err := buildRunReport(store, runDir)
 	if err != nil {
@@ -81,6 +121,26 @@ func writeRunReport(store *runs.Store, runDir *runs.RunDir, out string) error {
 		return err
 	}
 	return writeRunReportHTML(out, report)
+}
+
+func defaultOpenReportFile(path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", abs)
+	case "windows":
+		cmd = exec.Command("cmd", "/C", "start", "", abs)
+	default:
+		cmd = exec.Command("xdg-open", abs)
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("open report %q: %w", abs, err)
+	}
+	return nil
 }
 
 type runReport struct {

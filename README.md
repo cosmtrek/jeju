@@ -29,7 +29,8 @@ results.
 
 ![Jeju trajectory visualization](docs/trajectory-visualization.png)
 
-Use `jeju inspect` for a terminal summary and `jeju view` for the HTML report:
+Use `jeju inspect` for a terminal summary and `jeju view` to open the HTML
+report:
 
 ```bash
 jeju inspect <run_id>
@@ -63,7 +64,12 @@ jeju inspect <run_id>
 jeju view <run_id>
 ```
 
-The run writes an append-only `trajectory.jsonl` under `runs/<run_id>/`; `report.html` is a derived inspection view generated from that log. The first inspect view should show the full loop: skill loading, model calls, permission checking, a workspace write, artifacts, and evaluation.
+The run writes an append-only `trajectory.jsonl` under `runs/<run_id>/`;
+`report.html` is a derived inspection view generated from that log. `jeju view`
+opens the existing report when it is fresh, and regenerates it first when the
+report is missing or older than the trajectory. The first inspect view should
+show the full loop: skill loading, model calls, permission checking, a workspace
+write, artifacts, and evaluation.
 
 The default `mock` provider is deterministic, so this first run demonstrates Jeju's execution lifecycle rather than live web research.
 

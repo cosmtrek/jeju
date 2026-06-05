@@ -64,6 +64,84 @@ func TestBuildRunReportAndWriteHTML(t *testing.T) {
 	}
 }
 
+func TestEnsureRunReportUsesFreshReport(t *testing.T) {
+	tmp := t.TempDir()
+	store := runs.NewStore(filepath.Join(tmp, "runs"))
+	runDir, err := store.CreateRun("agent", "write notes")
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	trajectoryPath := filepath.Join(runDir.Path, runs.TrajectoryFile)
+	if err := writeMinimalReportTrajectory(trajectoryPath, runDir.RunID); err != nil {
+		t.Fatalf("writeMinimalReportTrajectory failed: %v", err)
+	}
+	out := defaultRunReportPath(runDir)
+	if err := os.WriteFile(out, []byte("fresh report"), 0o644); err != nil {
+		t.Fatalf("write report failed: %v", err)
+	}
+	base := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(trajectoryPath, base, base); err != nil {
+		t.Fatalf("touch trajectory failed: %v", err)
+	}
+	if err := os.Chtimes(out, base.Add(time.Minute), base.Add(time.Minute)); err != nil {
+		t.Fatalf("touch report failed: %v", err)
+	}
+
+	generated, err := ensureRunReport(store, runDir, out)
+	if err != nil {
+		t.Fatalf("ensureRunReport failed: %v", err)
+	}
+	if generated {
+		t.Fatal("expected fresh report to be reused")
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read report failed: %v", err)
+	}
+	if string(data) != "fresh report" {
+		t.Fatalf("fresh report was rewritten:\n%s", data)
+	}
+}
+
+func TestEnsureRunReportRefreshesStaleReport(t *testing.T) {
+	tmp := t.TempDir()
+	store := runs.NewStore(filepath.Join(tmp, "runs"))
+	runDir, err := store.CreateRun("agent", "write notes")
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	trajectoryPath := filepath.Join(runDir.Path, runs.TrajectoryFile)
+	if err := writeMinimalReportTrajectory(trajectoryPath, runDir.RunID); err != nil {
+		t.Fatalf("writeMinimalReportTrajectory failed: %v", err)
+	}
+	out := defaultRunReportPath(runDir)
+	if err := os.WriteFile(out, []byte("stale report"), 0o644); err != nil {
+		t.Fatalf("write report failed: %v", err)
+	}
+	base := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(out, base, base); err != nil {
+		t.Fatalf("touch report failed: %v", err)
+	}
+	if err := os.Chtimes(trajectoryPath, base.Add(time.Minute), base.Add(time.Minute)); err != nil {
+		t.Fatalf("touch trajectory failed: %v", err)
+	}
+
+	generated, err := ensureRunReport(store, runDir, out)
+	if err != nil {
+		t.Fatalf("ensureRunReport failed: %v", err)
+	}
+	if !generated {
+		t.Fatal("expected stale report to be regenerated")
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read report failed: %v", err)
+	}
+	if !strings.Contains(string(data), "Jeju Run") {
+		t.Fatalf("report was not regenerated:\n%s", data)
+	}
+}
+
 func TestBuildStepViewsMultipleToolCalls(t *testing.T) {
 	runID := "run-multi"
 	events := []trajectory.Event{
@@ -164,4 +242,22 @@ func writeTrajectory(path string, events []trajectory.Event) error {
 		}
 	}
 	return nil
+}
+
+func writeMinimalReportTrajectory(path, runID string) error {
+	endedAt := time.Now()
+	return writeTrajectory(path, []trajectory.Event{
+		{Type: trajectory.EventTrajectoryHeader, RunID: runID, TS: endedAt.Add(-time.Second), Actor: "runtime", Payload: map[string]any{"agent": map[string]any{"name": "agent"}, "input": "write notes"}},
+		{Type: trajectory.EventArtifactCreated, RunID: runID, TS: endedAt, Actor: "runtime", Payload: map[string]any{"artifact_id": "art_final", "role": "final", "media_type": "text/markdown", "text": "done"}},
+		{Type: trajectory.EventRunSummary, RunID: runID, TS: endedAt, Actor: "runtime", Payload: map[string]any{"status": "completed", "final": map[string]any{"content_ref": "art_final"}, "ended_at": endedAt.Format(time.RFC3339Nano)}},
+	})
+}
+
+func disableReportOpen(t *testing.T) {
+	t.Helper()
+	old := openReportFile
+	openReportFile = func(string) error { return nil }
+	t.Cleanup(func() {
+		openReportFile = old
+	})
 }
