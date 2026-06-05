@@ -2,9 +2,25 @@ name: CI
 
 on:
   pull_request:
+    paths:
+      - ".github/workflows/ci.yml"
+      - ".goreleaser.yaml"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "tests/**"
   push:
     branches:
       - master
+    paths:
+      - ".github/workflows/ci.yml"
+      - ".goreleaser.yaml"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "tests/**"
 
 jobs:
   test:
