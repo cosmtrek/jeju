@@ -56,6 +56,25 @@ README.md
 Add a runtime skill, schema, or custom tool script only when it removes real
 complexity.
 
+When generating a runtime skill, follow the Agent Skills `SKILL.md` frontmatter
+format. The Agent Skills spec does not define a top-level `version` field; put
+the semantic version in `metadata.version` so bundles can be distributed and
+upgraded intentionally:
+
+```markdown
+---
+name: repo-review
+description: Review a local repository diff and return actionable findings. Use when repo change review is needed.
+metadata:
+  short-description: Review local repository diffs
+  version: "0.1.0"
+allowed-tools: read search git_diff
+---
+```
+
+Start new skills at `0.1.0`. Increment the version when behavior, required
+tools, output format, compatibility, or validation expectations change.
+
 ## Manifest Reference
 
 Start from a minimal `apiVersion: jeju/v1alpha1`, `kind: Agent` manifest. Keep
@@ -230,7 +249,9 @@ skills:
 ```
 
 Each active skill is a directory under a listed `dirs` root and must contain
-`SKILL.md`. Only active skill instructions are loaded.
+`SKILL.md`. Prefer Agent Skills frontmatter with `name`, `description`, optional
+`metadata`, and optional `allowed-tools`. Put skill versions in
+`metadata.version`. Only active skill instructions are loaded.
 
 ## Evaluators
 

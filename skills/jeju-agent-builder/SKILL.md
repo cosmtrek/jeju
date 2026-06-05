@@ -3,6 +3,7 @@ name: jeju-agent-builder
 description: Use when converting a repeated workflow, local developer task, or specialist agent idea into a minimal Jeju agent bundle with manifest, prompt, tools, permissions, evaluation, and smoke validation. This is for any higher-level AI agent that needs to author Jeju agents.
 metadata:
   short-description: Create focused Jeju agents from repeated workflows
+  version: "0.1.0"
 ---
 
 # Jeju Agent Builder
@@ -68,6 +69,25 @@ README.md
 
 Add a runtime skill, schema, or custom tool script only when it removes real
 complexity.
+
+When generating a runtime skill, follow the Agent Skills `SKILL.md` frontmatter
+format. The Agent Skills spec does not define a top-level `version` field; put
+the semantic version in `metadata.version` so bundles can be distributed and
+upgraded intentionally:
+
+```markdown
+---
+name: repo-review
+description: Review a local repository diff and return actionable findings. Use when repo change review is needed.
+metadata:
+  short-description: Review local repository diffs
+  version: "0.1.0"
+allowed-tools: read search git_diff
+---
+```
+
+Start new skills at `0.1.0`. Increment the version when behavior, required
+tools, output format, compatibility, or validation expectations change.
 
 ## Minimal Manifest Template
 

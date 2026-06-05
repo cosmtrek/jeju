@@ -274,7 +274,13 @@ skills:
     - web-research
 ```
 
-Each skill is a directory under a listed `dirs` root and must contain `SKILL.md`. Jeju follows the Agent Skills `SKILL.md` format: required `name` and `description`, optional `license`, `compatibility`, `metadata`, and `allowed-tools`. The skill `name` must match the parent directory. Jeju reads frontmatter for disclosure and injects the full `SKILL.md` only for active skills.
+Each skill is a directory under a listed `dirs` root and must contain `SKILL.md`.
+Jeju follows the Agent Skills `SKILL.md` format: required `name` and
+`description`, optional `license`, `compatibility`, `metadata`, and
+`allowed-tools`. Store skill versions in `metadata.version`; the Agent Skills
+spec does not define a top-level `version` field. The skill `name` must match
+the parent directory. Jeju reads frontmatter for disclosure and injects the full
+`SKILL.md` only for active skills.
 
 Example:
 
@@ -284,6 +290,7 @@ name: web-research
 description: Research web sources and summarize findings. Use when current external information is needed.
 metadata:
   jeju.capabilities: source_collection,summarization
+  version: "0.1.0"
 allowed-tools: search_api
 ---
 
