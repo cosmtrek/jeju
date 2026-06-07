@@ -121,6 +121,7 @@ runtime:
   loop:
     type: react
   compressionThreshold: 0.8
+  recentTokenBudget: 20000
   limits:
     maxSteps: 16
     maxDurationSec: 240

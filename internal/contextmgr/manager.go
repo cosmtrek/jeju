@@ -11,18 +11,18 @@ import (
 )
 
 const (
-	DefaultRecentBlocks        = 4
+	DefaultRecentTokenBudget   = 20000
 	DefaultToolResultMaxTokens = 512
 	EstimatorName              = "chars_div_3_with_chat_overhead"
 )
 
 type Options struct {
-	ContextWindow    int
-	MaxOutputTokens  int
-	Threshold        float64
-	CorrectionFactor float64
-	RecentBlocks     int
-	ToolResultTokens int
+	ContextWindow     int
+	MaxOutputTokens   int
+	Threshold         float64
+	CorrectionFactor  float64
+	RecentTokenBudget int
+	ToolResultTokens  int
 }
 
 type SummaryRequest struct {
@@ -47,6 +47,7 @@ type Report struct {
 	EffectiveInputLimit int      `json:"effective_input_limit"`
 	Threshold           float64  `json:"threshold"`
 	ThresholdTokens     int      `json:"threshold_tokens"`
+	RecentTokenBudget   int      `json:"recent_token_budget"`
 	BeforeTokens        int      `json:"before_tokens"`
 	BeforeRawTokens     int      `json:"before_raw_tokens"`
 	AfterTokens         int      `json:"after_tokens"`
@@ -61,9 +62,9 @@ type Report struct {
 }
 
 type plan struct {
-	Prefix       []model.Message
-	Summary      string
-	RecentBlocks []block
+	Prefix  []model.Message
+	Summary string
+	Recent  []block
 }
 
 type OverflowError struct {
@@ -96,6 +97,7 @@ func Prepare(req model.Request, stateMessages []model.Message, summary string, o
 		EffectiveInputLimit: effectiveLimit,
 		Threshold:           opts.Threshold,
 		ThresholdTokens:     thresholdTokens(opts),
+		RecentTokenBudget:   effectiveRecentTokenBudget(opts),
 		MessageCountBefore:  len(stateMessages),
 	}
 
@@ -120,11 +122,7 @@ func Prepare(req model.Request, stateMessages []model.Message, summary string, o
 	prefix := append([]model.Message(nil), req.Messages[:prefixLen]...)
 	working := cloneMessages(stateMessages)
 	blocks := splitBlocks(working)
-	recentStart := len(blocks) - opts.RecentBlocks
-	if recentStart < 0 {
-		recentStart = 0
-	}
-	recentStart = validRecentStart(blocks, recentStart)
+	recentStart := recentStartByTokenBudget(blocks, report.RecentTokenBudget, opts.CorrectionFactor)
 	report.PreservedBlocks = len(blocks) - recentStart
 
 	truncated := truncateOlderToolResults(blocks[:recentStart], opts.ToolResultTokens)
@@ -136,7 +134,7 @@ func Prepare(req model.Request, stateMessages []model.Message, summary string, o
 	req.Messages = buildMessages(prefix, summary, working)
 	afterToolTruncate := applyCorrection(EstimateRequestTokensRaw(req), opts.CorrectionFactor)
 
-	if afterToolTruncate > report.ThresholdTokens && recentStart > 0 && len(blocks) > opts.RecentBlocks {
+	if afterToolTruncate > report.ThresholdTokens && recentStart > 0 {
 		oldBlocks := blocks[:recentStart]
 		recentBlocks := blocks[recentStart:]
 		return Result{
@@ -149,9 +147,9 @@ func Prepare(req model.Request, stateMessages []model.Message, summary string, o
 			},
 			Report: report,
 			plan: &plan{
-				Prefix:       prefix,
-				Summary:      summary,
-				RecentBlocks: recentBlocks,
+				Prefix:  prefix,
+				Summary: summary,
+				Recent:  recentBlocks,
 			},
 		}, nil
 	}
@@ -172,7 +170,7 @@ func CompleteSummary(result Result, summary string, opts Options) Result {
 	if summary == "" {
 		summary = result.plan.Summary
 	}
-	working := flattenBlocks(result.plan.RecentBlocks)
+	working := flattenBlocks(result.plan.Recent)
 	req := result.Request
 	req.Messages = buildMessages(result.plan.Prefix, summary, working)
 	result.Request = req
@@ -190,7 +188,7 @@ func DegradeSummary(result Result, opts Options) Result {
 	if result.plan == nil {
 		return result
 	}
-	working := flattenBlocks(result.plan.RecentBlocks)
+	working := flattenBlocks(result.plan.Recent)
 	req := result.Request
 	req.Messages = buildMessages(result.plan.Prefix, result.plan.Summary, working)
 	result.Request = req
@@ -306,8 +304,8 @@ func normalizeOptions(opts Options) Options {
 	if opts.MaxOutputTokens < 0 {
 		opts.MaxOutputTokens = 0
 	}
-	if opts.RecentBlocks <= 0 {
-		opts.RecentBlocks = DefaultRecentBlocks
+	if opts.RecentTokenBudget <= 0 {
+		opts.RecentTokenBudget = DefaultRecentTokenBudget
 	}
 	if opts.ToolResultTokens <= 0 {
 		opts.ToolResultTokens = DefaultToolResultMaxTokens
@@ -321,6 +319,15 @@ func thresholdTokens(opts Options) int {
 		return 0
 	}
 	return int(math.Floor(float64(limit) * opts.Threshold))
+}
+
+func effectiveRecentTokenBudget(opts Options) int {
+	budget := opts.RecentTokenBudget
+	threshold := thresholdTokens(opts)
+	if threshold > 0 && budget > threshold {
+		return threshold
+	}
+	return budget
 }
 
 func effectiveInputLimit(opts Options) int {
@@ -416,30 +423,35 @@ func splitBlocks(messages []model.Message) []block {
 	return blocks
 }
 
-func validRecentStart(blocks []block, start int) int {
-	if start < 0 {
-		start = 0
-	}
-	if start >= len(blocks) {
-		return len(blocks)
-	}
-	// Prefer a user boundary, but native tool-calling loops may have recent
-	// windows made only of assistant/tool blocks. Keep that full window; the
-	// summary message supplies the user boundary when older blocks are evicted.
-	for i := start; i < len(blocks); i++ {
-		if len(blocks[i].Messages) > 0 && blocks[i].Messages[0].Role == "user" {
-			return i
-		}
-	}
-	return start
-}
-
 func flattenBlocks(blocks []block) []model.Message {
 	var messages []model.Message
 	for _, block := range blocks {
 		messages = append(messages, block.Messages...)
 	}
 	return messages
+}
+
+func recentStartByTokenBudget(blocks []block, budget int, correctionFactor float64) int {
+	if len(blocks) == 0 {
+		return 0
+	}
+	used := 0
+	for i := len(blocks) - 1; i >= 0; i-- {
+		blockTokens := applyCorrection(EstimateBlockTokens(blocks[i]), correctionFactor)
+		if used > 0 && used+blockTokens > budget {
+			return i + 1
+		}
+		used += blockTokens
+	}
+	return 0
+}
+
+func EstimateBlockTokens(block block) int {
+	tokens := 0
+	for _, message := range block.Messages {
+		tokens += EstimateMessageTokens(message)
+	}
+	return tokens
 }
 
 func truncateOlderToolResults(blocks []block, maxTokens int) int {

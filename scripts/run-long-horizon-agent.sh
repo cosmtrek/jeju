@@ -40,7 +40,7 @@ workdir="${JEJU_LONG_HORIZON_WORKDIR:-"$repo_root/.jeju-dev/long-horizon-$provid
 manifest="agents/long-horizon.yaml"
 task="${1:-Run the long-horizon compression audit exactly as instructed by the active skill.}"
 context_window="${JEJU_LONG_HORIZON_CONTEXT_WINDOW:-16000}"
-threshold="${JEJU_LONG_HORIZON_THRESHOLD:-0.4}"
+threshold="${JEJU_LONG_HORIZON_THRESHOLD:-0.25}"
 paragraphs="${JEJU_LONG_HORIZON_PARAGRAPHS:-12}"
 
 rm -rf "$workdir"
@@ -91,14 +91,63 @@ echo "==> Chapter payload paragraphs: $paragraphs"
   echo "Trajectory: $workdir/$trajectory"
   echo "Report: $workdir/$report"
 
-  if ! grep -q '"type":"context.compression.completed"' "$trajectory"; then
-    echo "expected context.compression.completed in trajectory" >&2
-    exit 1
-  fi
-  if ! grep -q '"type":"context.summary.completed"' "$trajectory"; then
-    echo "expected context.summary.completed in trajectory" >&2
-    exit 1
-  fi
+  python3 - "$trajectory" <<'PY'
+import json
+import sys
+
+trajectory = sys.argv[1]
+compactions = []
+summary_spans = []
+compressed_reports = []
+summary_reports = []
+
+with open(trajectory, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        event = json.loads(line)
+        payload = event.get("payload") or {}
+        if (
+            event.get("type") == "span.ended"
+            and payload.get("kind") == "context"
+            and payload.get("operation") == "compaction"
+            and payload.get("status") == "ok"
+        ):
+            compactions.append(event)
+        if (
+            event.get("type") == "span.ended"
+            and payload.get("kind") == "llm"
+            and (payload.get("attrs") or {}).get("operation") == "context_summary"
+            and payload.get("status") == "ok"
+        ):
+            summary_spans.append(event)
+        if event.get("type") == "artifact.created" and payload.get("role") == "context_report":
+            report = payload.get("value") or {}
+            if report.get("compressed"):
+                compressed_reports.append(report)
+                if "summary" in (report.get("strategies") or []):
+                    summary_reports.append(report)
+
+if not compactions:
+    raise SystemExit("expected context compaction span in trajectory")
+if not compressed_reports:
+    raise SystemExit("expected compressed context report in trajectory")
+if not summary_spans:
+    raise SystemExit("expected context summary LLM span in trajectory")
+if not summary_reports:
+    raise SystemExit("expected compressed context report with summary strategy")
+if not any((report.get("recent_token_budget") or 0) > 0 for report in compressed_reports):
+    raise SystemExit("expected recent_token_budget in compressed context report")
+
+print(
+    "Context compression checks: "
+    f"compactions={len(compactions)} "
+    f"summaries={len(summary_spans)} "
+    f"compressed_reports={len(compressed_reports)}"
+)
+PY
+
   if [[ ! -s "$report" ]]; then
     echo "expected report file: $report" >&2
     exit 1

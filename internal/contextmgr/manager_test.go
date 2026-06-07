@@ -23,10 +23,10 @@ func TestPrepareTruncatesOldToolResultsBeforeSummary(t *testing.T) {
 	stateMessages := req.Messages[1:]
 
 	result, err := Prepare(req, stateMessages, "", Options{
-		ContextWindow:    1400,
-		Threshold:        0.8,
-		RecentBlocks:     2,
-		ToolResultTokens: 80,
+		ContextWindow:     1400,
+		Threshold:         0.8,
+		RecentTokenBudget: recentTokenBudgetForLastBlocks(stateMessages, 2),
+		ToolResultTokens:  80,
 	})
 	if err != nil {
 		t.Fatalf("Prepare failed: %v", err)
@@ -81,20 +81,23 @@ func TestPrepareEmergencyTruncatesRecentToolResult(t *testing.T) {
 		Messages: append([]model.Message{{Role: "system", Content: "runtime"}}, stateMessages...),
 	}
 
-	result, err := Prepare(req, stateMessages, "", Options{
+	opts := Options{
 		ContextWindow:    900,
 		Threshold:        0.8,
-		RecentBlocks:     4,
 		ToolResultTokens: 60,
-	})
+	}
+	result, err := Prepare(req, stateMessages, "", opts)
 	if err != nil {
 		t.Fatalf("Prepare failed: %v report=%+v", err, result.Report)
+	}
+	if result.PendingSummary != nil {
+		result = CompleteSummary(result, "summary of initial request", opts)
 	}
 	if !containsStrategy(result.Report.Strategies, "recent_tool_result_truncate") {
 		t.Fatalf("expected recent tool truncation strategy, got %+v", result.Report.Strategies)
 	}
-	if !strings.Contains(result.StateMessages[2].Content, "Jeju truncated tool result") {
-		t.Fatalf("recent tool result was not truncated: %q", result.StateMessages[2].Content)
+	if len(result.StateMessages) < 2 || !strings.Contains(result.StateMessages[1].Content, "Jeju truncated tool result") {
+		t.Fatalf("recent tool result was not truncated: %+v", result.StateMessages)
 	}
 }
 
@@ -115,10 +118,10 @@ func TestPrepareSummarizesOlderBlocksAndPreservesNativeToolBlock(t *testing.T) {
 	}
 
 	result, err := Prepare(req, stateMessages, "previous facts", Options{
-		ContextWindow:    360,
-		Threshold:        0.8,
-		RecentBlocks:     2,
-		ToolResultTokens: 40,
+		ContextWindow:     360,
+		Threshold:         0.8,
+		RecentTokenBudget: recentTokenBudgetForLastBlocks(stateMessages, 2),
+		ToolResultTokens:  40,
 	})
 	if err != nil {
 		t.Fatalf("Prepare failed: %v", err)
@@ -127,10 +130,10 @@ func TestPrepareSummarizesOlderBlocksAndPreservesNativeToolBlock(t *testing.T) {
 		t.Fatalf("expected pending summary: %+v", result.Report)
 	}
 	result = CompleteSummary(result, result.PendingSummary.PreviousSummary+"\nupdated old discussion summary", Options{
-		ContextWindow:    360,
-		Threshold:        0.8,
-		RecentBlocks:     2,
-		ToolResultTokens: 40,
+		ContextWindow:     360,
+		Threshold:         0.8,
+		RecentTokenBudget: recentTokenBudgetForLastBlocks(stateMessages, 2),
+		ToolResultTokens:  40,
 	})
 	if !result.Report.SummaryChanged {
 		t.Fatalf("expected summary compression: %+v", result.Report)
@@ -173,10 +176,10 @@ func TestPreparePreservesRecentNativeToolBlocksWithoutUserBoundary(t *testing.T)
 	}
 
 	result, err := Prepare(req, stateMessages, "previous facts", Options{
-		ContextWindow:    700,
-		Threshold:        0.8,
-		RecentBlocks:     2,
-		ToolResultTokens: 40,
+		ContextWindow:     2200,
+		Threshold:         0.8,
+		RecentTokenBudget: recentTokenBudgetForLastBlocks(stateMessages, 2),
+		ToolResultTokens:  40,
 	})
 	if err != nil {
 		t.Fatalf("Prepare failed: %v report=%+v", err, result.Report)
@@ -185,10 +188,10 @@ func TestPreparePreservesRecentNativeToolBlocksWithoutUserBoundary(t *testing.T)
 		t.Fatalf("expected pending summary: %+v", result.Report)
 	}
 	result = CompleteSummary(result, "updated native summary", Options{
-		ContextWindow:    700,
-		Threshold:        0.8,
-		RecentBlocks:     2,
-		ToolResultTokens: 40,
+		ContextWindow:     2200,
+		Threshold:         0.8,
+		RecentTokenBudget: recentTokenBudgetForLastBlocks(stateMessages, 2),
+		ToolResultTokens:  40,
 	})
 	if len(result.StateMessages) != 4 {
 		t.Fatalf("expected two recent native tool blocks, got %+v", result.StateMessages)
@@ -225,20 +228,20 @@ func TestPrepareKeepsCompressedHistoryStartingWithUser(t *testing.T) {
 	}
 
 	result, err := Prepare(req, stateMessages, "", Options{
-		ContextWindow:    360,
-		Threshold:        0.8,
-		RecentBlocks:     3,
-		ToolResultTokens: 40,
+		ContextWindow:     360,
+		Threshold:         0.8,
+		RecentTokenBudget: recentTokenBudgetForLastBlocks(stateMessages, 3),
+		ToolResultTokens:  40,
 	})
 	if err != nil {
 		t.Fatalf("Prepare failed: %v report=%+v", err, result.Report)
 	}
 	if result.PendingSummary != nil {
 		result = CompleteSummary(result, "updated summary", Options{
-			ContextWindow:    360,
-			Threshold:        0.8,
-			RecentBlocks:     3,
-			ToolResultTokens: 40,
+			ContextWindow:     360,
+			Threshold:         0.8,
+			RecentTokenBudget: recentTokenBudgetForLastBlocks(stateMessages, 3),
+			ToolResultTokens:  40,
 		})
 	}
 	if len(result.StateMessages) == 0 || result.StateMessages[0].Role != "user" {
@@ -266,10 +269,10 @@ func TestPrepareSummarizerReceivesPreviousSummaryAndEvictedMessages(t *testing.T
 	}
 	var got SummaryRequest
 	result, err := Prepare(req, stateMessages, "previous summary", Options{
-		ContextWindow:    180,
-		Threshold:        0.8,
-		RecentBlocks:     2,
-		ToolResultTokens: 40,
+		ContextWindow:     180,
+		Threshold:         0.8,
+		RecentTokenBudget: recentTokenBudgetForLastBlocks(stateMessages, 2),
+		ToolResultTokens:  40,
 	})
 	if err != nil {
 		t.Fatalf("Prepare failed: %v report=%+v", err, result.Report)
@@ -279,10 +282,10 @@ func TestPrepareSummarizerReceivesPreviousSummaryAndEvictedMessages(t *testing.T
 	}
 	got = *result.PendingSummary
 	result = CompleteSummary(result, got.PreviousSummary+"\nmodel-updated summary", Options{
-		ContextWindow:    180,
-		Threshold:        0.8,
-		RecentBlocks:     2,
-		ToolResultTokens: 40,
+		ContextWindow:     180,
+		Threshold:         0.8,
+		RecentTokenBudget: recentTokenBudgetForLastBlocks(stateMessages, 2),
+		ToolResultTokens:  40,
 	})
 	if got.PreviousSummary != "previous summary" {
 		t.Fatalf("summarizer did not receive prior summary: %+v", got)
@@ -317,4 +320,20 @@ func containsStrategy(strategies []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func recentTokenBudgetForLastBlocks(messages []model.Message, count int) int {
+	blocks := splitBlocks(messages)
+	if count <= 0 {
+		return 1
+	}
+	start := len(blocks) - count
+	if start < 0 {
+		start = 0
+	}
+	tokens := 0
+	for _, block := range blocks[start:] {
+		tokens += EstimateBlockTokens(block)
+	}
+	return tokens
 }

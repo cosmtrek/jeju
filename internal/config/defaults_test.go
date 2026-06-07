@@ -47,6 +47,9 @@ func TestApplyDefaultsKeepsOnlyEnvKeyForNamedProviders(t *testing.T) {
 			if manifest.Runtime.CompressionThreshold != 0.8 {
 				t.Fatalf("expected default compression threshold, got %v", manifest.Runtime.CompressionThreshold)
 			}
+			if manifest.Runtime.RecentTokenBudget != 20000 {
+				t.Fatalf("expected default recent token budget, got %d", manifest.Runtime.RecentTokenBudget)
+			}
 			snapshot, err := yaml.Marshal(manifest)
 			if err != nil {
 				t.Fatalf("Marshal failed: %v", err)

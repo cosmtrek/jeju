@@ -57,6 +57,7 @@ type RuntimeConfig struct {
 	Model                string        `yaml:"model,omitempty"`
 	Loop                 LoopConfig    `yaml:"loop,omitempty"`
 	CompressionThreshold float64       `yaml:"compressionThreshold,omitempty"`
+	RecentTokenBudget    int           `yaml:"recentTokenBudget,omitempty"`
 	Limits               RuntimeLimits `yaml:"limits,omitempty"`
 }
 

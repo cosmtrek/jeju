@@ -71,6 +71,7 @@ func TestPrepareModelRequestRecordsContextCompression(t *testing.T) {
 			Metadata: config.Metadata{Name: "context"},
 			Runtime: config.RuntimeConfig{
 				CompressionThreshold: 0.8,
+				RecentTokenBudget:    200,
 			},
 		},
 		Tools:    tools.NewRegistry(),
@@ -144,6 +145,7 @@ func TestPrepareModelRequestDegradesWhenSummaryFails(t *testing.T) {
 			Metadata: config.Metadata{Name: "context"},
 			Runtime: config.RuntimeConfig{
 				CompressionThreshold: 0.8,
+				RecentTokenBudget:    200,
 			},
 		},
 		Tools:    tools.NewRegistry(),
@@ -251,6 +253,7 @@ func TestPrepareModelRequestDegradesWhenSummaryInputExceedsBudget(t *testing.T) 
 			Metadata: config.Metadata{Name: "context"},
 			Runtime: config.RuntimeConfig{
 				CompressionThreshold: 0.8,
+				RecentTokenBudget:    200,
 			},
 		},
 		Tools:    tools.NewRegistry(),

@@ -583,6 +583,7 @@ func minimalExplainManifest(t *testing.T, evaluateEnabled bool) *config.AgentMan
 			Model:                "primary",
 			Loop:                 config.LoopConfig{Type: "react"},
 			CompressionThreshold: 0.8,
+			RecentTokenBudget:    20000,
 			Limits: config.RuntimeLimits{
 				MaxSteps:             1,
 				MaxDurationSec:       30,

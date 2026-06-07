@@ -14,7 +14,7 @@ compression workflow. Use the script below with a real provider key to exercise
 context compression end to end.
 
 The default script settings use `contextWindow=16000`,
-`compressionThreshold=0.4`, and 12 paragraphs per chapter. This exercises the
+`compressionThreshold=0.25`, and 12 paragraphs per chapter. This exercises the
 normal summary regime: recent native tool blocks should fit while older blocks
 are summarized. Set
 `JEJU_LONG_HORIZON_CONTEXT_WINDOW=7000` and `JEJU_LONG_HORIZON_PARAGRAPHS=33`

@@ -48,6 +48,9 @@ func ApplyDefaults(m *AgentManifest) {
 	if m.Runtime.CompressionThreshold == 0 {
 		m.Runtime.CompressionThreshold = 0.8
 	}
+	if m.Runtime.RecentTokenBudget == 0 {
+		m.Runtime.RecentTokenBudget = 20000
+	}
 	if m.Runtime.Model == "" && len(m.Models.Providers) == 1 {
 		for name := range m.Models.Providers {
 			m.Runtime.Model = name

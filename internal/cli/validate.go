@@ -54,6 +54,7 @@ func printManifestExplanation(manifest *config.AgentManifest) {
 	fmt.Println("Runtime:")
 	fmt.Printf("  runtime.loop.type -> %s\n", manifest.Runtime.Loop.Type)
 	fmt.Printf("  runtime.compressionThreshold -> %.2f\n", manifest.Runtime.CompressionThreshold)
+	fmt.Printf("  runtime.recentTokenBudget -> %d\n", manifest.Runtime.RecentTokenBudget)
 	fmt.Printf("  runtime.limits -> maxSteps=%d, maxDurationSec=%d, maxToolCalls=%d, maxConsecutiveErrors=%d\n",
 		manifest.Runtime.Limits.MaxSteps,
 		manifest.Runtime.Limits.MaxDurationSec,

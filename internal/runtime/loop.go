@@ -247,10 +247,11 @@ func (r *Runtime) buildModelRequest(agent *compiler.CompiledAgent, state *RunSta
 func (r *Runtime) prepareModelRequest(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, client model.Client, cfg model.ProviderConfig) (model.Request, error) {
 	req := r.buildModelRequest(agent, state, cfg)
 	contextOpts := contextmgr.Options{
-		ContextWindow:    cfg.ContextWindow,
-		MaxOutputTokens:  cfg.MaxOutputTokens,
-		Threshold:        agent.Config.Runtime.CompressionThreshold,
-		CorrectionFactor: state.TokenCorrectionFactor,
+		ContextWindow:     cfg.ContextWindow,
+		MaxOutputTokens:   cfg.MaxOutputTokens,
+		Threshold:         agent.Config.Runtime.CompressionThreshold,
+		RecentTokenBudget: agent.Config.Runtime.RecentTokenBudget,
+		CorrectionFactor:  state.TokenCorrectionFactor,
 	}
 	result, err := contextmgr.Prepare(req, state.Messages, state.Summary, contextOpts)
 	compressionRequired := result.Report.ContextWindow > 0 && result.Report.BeforeTokens > result.Report.ThresholdTokens
@@ -284,6 +285,7 @@ func (r *Runtime) prepareModelRequest(ctx context.Context, agent *compiler.Compi
 			"estimated_tokens":      result.Report.BeforeTokens,
 			"raw_estimated_tokens":  result.Report.BeforeRawTokens,
 			"threshold_tokens":      result.Report.ThresholdTokens,
+			"recent_token_budget":   result.Report.RecentTokenBudget,
 			"context_window":        result.Report.ContextWindow,
 			"max_output_tokens":     result.Report.MaxOutputTokens,
 			"effective_input_limit": result.Report.EffectiveInputLimit,
@@ -352,6 +354,20 @@ func (r *Runtime) prepareModelRequest(ctx context.Context, agent *compiler.Compi
 			"before":      map[string]any{"tokens": result.Report.BeforeTokens, "content_ref": beforeRef},
 			"after":       map[string]any{"tokens": result.Report.AfterTokens, "content_ref": afterRef},
 			"summary_ref": summaryRef,
+			"metrics": map[string]any{
+				"before_tokens":          result.Report.BeforeTokens,
+				"after_tokens":           result.Report.AfterTokens,
+				"preserved_blocks":       result.Report.PreservedBlocks,
+				"truncated_tool_results": result.Report.TruncatedToolResult,
+			},
+			"attrs": map[string]any{"strategies": result.Report.Strategies, "report_ref": reportRef},
+		})
+	} else if compressionRequired {
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, contextSpanID(state.Step, "compression"), stepSpanID(state.Step), "context", trajectory.SpanContext, trajectory.SpanStatusOK, map[string]any{
+			"operation": "compaction",
+			"boundary":  "noop",
+			"before":    map[string]any{"tokens": result.Report.BeforeTokens, "content_ref": beforeRef},
+			"after":     map[string]any{"tokens": result.Report.AfterTokens, "content_ref": afterRef},
 			"metrics": map[string]any{
 				"before_tokens":          result.Report.BeforeTokens,
 				"after_tokens":           result.Report.AfterTokens,

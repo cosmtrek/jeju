@@ -136,6 +136,9 @@ func Validate(m *AgentManifest) error {
 	if m.Runtime.CompressionThreshold <= 0 || m.Runtime.CompressionThreshold > 1 {
 		return fmt.Errorf("runtime.compressionThreshold must be greater than 0 and at most 1")
 	}
+	if m.Runtime.RecentTokenBudget <= 0 {
+		return fmt.Errorf("runtime.recentTokenBudget must be greater than 0")
+	}
 	if m.Instructions.System == "" {
 		return fmt.Errorf("instructions.system is required")
 	}
