@@ -5,12 +5,14 @@
 - Jeju is a Go 1.25 experimental local-first agent harness.
 - Keep implementation under `internal/`. Do not add `pkg/` until a public API is intentionally stabilized.
 - Agent manifest docs live in `docs/agent-manifest.md`; evolution experiment docs live in `docs/agent-evolution-manifest.md`.
+- Agent team docs live in `docs/agent-team.md`.
 - DeepSeek setup notes live in `docs/deepseek.md`.
 - CLI entrypoint is `cmd/jeju/main.go`; command handlers live in `internal/cli/`.
 
 ## Scope Rules
 
-- Keep the core runtime scope tight: no Web UI, multi-agent runtime, Docker sandbox, remote sandbox, long-term memory, distributed workers, or full MCP client unless explicitly requested.
+- Keep the core runtime scope tight: no Web UI, broad multi-agent platform, Docker sandbox, remote sandbox, long-term memory, distributed workers, or full MCP client unless explicitly requested.
+- Agent Team is allowed as the bounded lead-worker outer controller described in `docs/agent-team.md`; do not expand it into peer-to-peer chat, shared mutable memory, distributed workers, or a general multi-agent platform unless explicitly requested.
 - Runtime must not read YAML directly. The path is `config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run`.
 - Agent behavior should come from manifest config, loaded instructions, tools, skills, policy, sandbox, trajectory, and evaluator config rather than hardcoded runtime branches.
 
@@ -28,9 +30,8 @@
 
 - `jeju init <name>` is allowed to scaffold into the current directory, but tests and local quick-start runs should use `jeju init <name> --dir <workdir>`.
 - Do not leave temporary scaffold output such as `agents/research.agent.yaml`, `prompts/research.md`, `skills/web-research`, `runs/<run_id>`, or `workspace/<agent>` in the repo root unless the task explicitly asks to add source fixtures.
-- `.jeju-dev/` is the preferred ignored local quick-start directory.
-- In the Jeju source checkout, local development runs, demo runs, benchmark outputs, and evolution outputs must be written under repo-root `.jeju-dev/`, for example `--runs-dir .jeju-dev/runs/<scenario>` or `--out .jeju-dev/evolve/<scenario>`.
-- Keep user project defaults separate from source-checkout hygiene: `./runs` is acceptable inside a generated agent project, but source-repo scripts and examples should not create root `runs/` or example-local `.jeju-dev/` directories.
+- In the Jeju source checkout, local development, demo, benchmark, evolution, and team outputs must be written under repo-root `.jeju-dev/`, for example `--runs-dir .jeju-dev/runs/<scenario>`, `--out .jeju-dev/evolve/<scenario>`, or `--out .jeju-dev/team/<scenario>`.
+- Keep user project defaults separate from source-checkout hygiene: `./runs` is acceptable inside a generated agent project, but source-repo scripts and examples should not create root `runs/`, root `workspace/`, example-local `runs/`, or example-local `.jeju-dev/` directories.
 
 ## Path Hygiene
 
