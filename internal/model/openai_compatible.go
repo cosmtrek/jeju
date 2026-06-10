@@ -129,9 +129,10 @@ func (c *OpenAICompatibleClient) Generate(ctx context.Context, req Request) (Res
 		ToolCalls:        message.ToolCalls,
 		Raw:              raw,
 		Usage: Usage{
-			InputTokens:  parsed.Usage.PromptTokens,
-			OutputTokens: parsed.Usage.CompletionTokens,
-			TotalTokens:  parsed.Usage.TotalTokens,
+			InputTokens:    parsed.Usage.PromptTokens,
+			OutputTokens:   parsed.Usage.CompletionTokens,
+			TotalTokens:    parsed.Usage.TotalTokens,
+			CacheHitTokens: parsed.Usage.cacheHitTokens(),
 		},
 		LatencyMS: time.Since(start).Milliseconds(),
 		Model:     parsed.Model,
@@ -246,4 +247,17 @@ type chatUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// DeepSeek reports prefix cache usage with a top-level field.
+	PromptCacheHitTokens int `json:"prompt_cache_hit_tokens"`
+	// OpenAI-style providers report it under prompt_tokens_details.
+	PromptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+}
+
+func (u chatUsage) cacheHitTokens() int {
+	if u.PromptCacheHitTokens > 0 {
+		return u.PromptCacheHitTokens
+	}
+	return u.PromptTokensDetails.CachedTokens
 }

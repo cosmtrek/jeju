@@ -33,15 +33,16 @@ type RunRecord struct {
 }
 
 type RunStats struct {
-	Steps            int
-	ModelCalls       int
-	ToolCalls        int
-	ModelErrors      int
-	ToolErrors       int
-	PermissionDenied int
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
+	Steps                int
+	ModelCalls           int
+	ToolCalls            int
+	ModelErrors          int
+	ToolErrors           int
+	PermissionDenied     int
+	PromptTokens         int
+	PromptCacheHitTokens int
+	CompletionTokens     int
+	TotalTokens          int
 }
 
 const (
@@ -416,6 +417,7 @@ func applySpanStats(stats *RunStats, span SpanRecord) {
 		} else {
 			stats.ModelCalls++
 			stats.PromptTokens += intPayload(span.Metrics, "prompt_tokens")
+			stats.PromptCacheHitTokens += intPayload(span.Metrics, "prompt_cache_hit_tokens")
 			stats.CompletionTokens += intPayload(span.Metrics, "completion_tokens")
 			stats.TotalTokens += intPayload(span.Metrics, "total_tokens")
 		}

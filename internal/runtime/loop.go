@@ -161,10 +161,11 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 			"model":    resp.Model,
 		},
 		"metrics": map[string]any{
-			"latency_ms":        resp.LatencyMS,
-			"prompt_tokens":     resp.Usage.InputTokens,
-			"completion_tokens": resp.Usage.OutputTokens,
-			"total_tokens":      resp.Usage.TotalTokens,
+			"latency_ms":              resp.LatencyMS,
+			"prompt_tokens":           resp.Usage.InputTokens,
+			"completion_tokens":       resp.Usage.OutputTokens,
+			"total_tokens":            resp.Usage.TotalTokens,
+			"prompt_cache_hit_tokens": resp.Usage.CacheHitTokens,
 		},
 	}
 	if reasoningRef != "" {
@@ -452,10 +453,11 @@ func (r *Runtime) summarizeContext(ctx context.Context, agent *compiler.Compiled
 		"output": map[string]any{"content_ref": outputRef},
 		"attrs":  map[string]any{"provider": resp.Provider, "model": resp.Model, "operation": "context_summary"},
 		"metrics": map[string]any{
-			"latency_ms":        resp.LatencyMS,
-			"prompt_tokens":     resp.Usage.InputTokens,
-			"completion_tokens": resp.Usage.OutputTokens,
-			"total_tokens":      resp.Usage.TotalTokens,
+			"latency_ms":              resp.LatencyMS,
+			"prompt_tokens":           resp.Usage.InputTokens,
+			"completion_tokens":       resp.Usage.OutputTokens,
+			"total_tokens":            resp.Usage.TotalTokens,
+			"prompt_cache_hit_tokens": resp.Usage.CacheHitTokens,
 		},
 	})
 	return summary, nil

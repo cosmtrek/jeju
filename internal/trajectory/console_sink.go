@@ -90,7 +90,11 @@ func formatSpanEnded(event Event) string {
 	}
 	if kind == string(SpanLLM) {
 		metrics, _ := payload(event, "metrics").(map[string]any)
-		line := fmt.Sprintf("  model  %s  %s  tokens %v->%v\n         output %v", formatModelName(event), formatLatency(metrics["latency_ms"]), metrics["prompt_tokens"], metrics["completion_tokens"], nestedPayload(event, "output", "content_ref"))
+		tokens := fmt.Sprintf("tokens %v->%v", metrics["prompt_tokens"], metrics["completion_tokens"])
+		if hit := intPayload(metrics, "prompt_cache_hit_tokens"); hit > 0 {
+			tokens += fmt.Sprintf(" (cache hit %d)", hit)
+		}
+		line := fmt.Sprintf("  model  %s  %s  %s\n         output %v", formatModelName(event), formatLatency(metrics["latency_ms"]), tokens, nestedPayload(event, "output", "content_ref"))
 		if ref := nestedPayload(event, "reasoning", "content_ref"); ref != "" {
 			line += fmt.Sprintf("\n         thinking %v", ref)
 		}

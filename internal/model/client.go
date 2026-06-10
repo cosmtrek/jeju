@@ -83,6 +83,11 @@ type Usage struct {
 	InputTokens  int
 	OutputTokens int
 	TotalTokens  int
+	// CacheHitTokens is the portion of InputTokens served from the provider's
+	// prompt prefix cache (DeepSeek prompt_cache_hit_tokens, OpenAI
+	// prompt_tokens_details.cached_tokens). Zero when the provider does not
+	// report it.
+	CacheHitTokens int
 }
 
 type Registry struct {

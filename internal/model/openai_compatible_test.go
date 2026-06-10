@@ -289,3 +289,56 @@ func TestOpenAICompatibleClientReplaysReasoningContent(t *testing.T) {
 		t.Fatalf("reasoning_content was not replayed: %#v", message)
 	}
 }
+
+func TestOpenAICompatibleClientParsesCacheHitTokens(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage string
+		want  int
+	}{
+		{
+			name:  "deepseek prompt_cache_hit_tokens",
+			usage: `{"prompt_tokens":100,"completion_tokens":2,"total_tokens":102,"prompt_cache_hit_tokens":64,"prompt_cache_miss_tokens":36}`,
+			want:  64,
+		},
+		{
+			name:  "openai prompt_tokens_details.cached_tokens",
+			usage: `{"prompt_tokens":100,"completion_tokens":2,"total_tokens":102,"prompt_tokens_details":{"cached_tokens":80}}`,
+			want:  80,
+		},
+		{
+			name:  "no cache fields",
+			usage: `{"prompt_tokens":100,"completion_tokens":2,"total_tokens":102}`,
+			want:  0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"model":"test-model","choices":[{"message":{"role":"assistant","content":"{}"}}],"usage":` + tc.usage + `}`))
+			}))
+			defer server.Close()
+
+			t.Setenv("JEJU_TEST_API_KEY", "test")
+			client := NewOpenAICompatibleClient(ProviderConfig{
+				Provider: "deepseek",
+				Model:    "test-model",
+				BaseURL:  server.URL,
+				EnvKey:   "JEJU_TEST_API_KEY",
+			})
+
+			resp, err := client.Generate(context.Background(), Request{
+				Messages: []Message{{Role: "user", Content: "hello"}},
+			})
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+			if resp.Usage.CacheHitTokens != tc.want {
+				t.Fatalf("CacheHitTokens got %d, want %d", resp.Usage.CacheHitTokens, tc.want)
+			}
+			if resp.Usage.InputTokens != 100 {
+				t.Fatalf("InputTokens got %d, want 100", resp.Usage.InputTokens)
+			}
+		})
+	}
+}

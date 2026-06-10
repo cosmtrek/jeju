@@ -105,16 +105,17 @@ type ChildRunSummary struct {
 }
 
 type Stats struct {
-	ChildRuns        int   `json:"child_runs"`
-	ModelCalls       int   `json:"model_calls"`
-	ToolCalls        int   `json:"tool_calls"`
-	ModelErrors      int   `json:"model_errors"`
-	ToolErrors       int   `json:"tool_errors"`
-	PermissionDenied int   `json:"permission_denied"`
-	PromptTokens     int   `json:"prompt_tokens"`
-	CompletionTokens int   `json:"completion_tokens"`
-	TotalTokens      int   `json:"total_tokens"`
-	DurationMS       int64 `json:"duration_ms"`
+	ChildRuns            int   `json:"child_runs"`
+	ModelCalls           int   `json:"model_calls"`
+	ToolCalls            int   `json:"tool_calls"`
+	ModelErrors          int   `json:"model_errors"`
+	ToolErrors           int   `json:"tool_errors"`
+	PermissionDenied     int   `json:"permission_denied"`
+	PromptTokens         int   `json:"prompt_tokens"`
+	PromptCacheHitTokens int   `json:"prompt_cache_hit_tokens"`
+	CompletionTokens     int   `json:"completion_tokens"`
+	TotalTokens          int   `json:"total_tokens"`
+	DurationMS           int64 `json:"duration_ms"`
 }
 
 type TeamDecision struct {
@@ -1110,15 +1111,16 @@ func isEmptyJSONValue(value any) bool {
 
 func statsFromRecord(record trajectory.RunRecord) Stats {
 	return Stats{
-		ModelCalls:       record.Stats.ModelCalls,
-		ToolCalls:        record.Stats.ToolCalls,
-		ModelErrors:      record.Stats.ModelErrors,
-		ToolErrors:       record.Stats.ToolErrors,
-		PermissionDenied: record.Stats.PermissionDenied,
-		PromptTokens:     record.Stats.PromptTokens,
-		CompletionTokens: record.Stats.CompletionTokens,
-		TotalTokens:      record.Stats.TotalTokens,
-		DurationMS:       record.DurationMS,
+		ModelCalls:           record.Stats.ModelCalls,
+		ToolCalls:            record.Stats.ToolCalls,
+		ModelErrors:          record.Stats.ModelErrors,
+		ToolErrors:           record.Stats.ToolErrors,
+		PermissionDenied:     record.Stats.PermissionDenied,
+		PromptTokens:         record.Stats.PromptTokens,
+		PromptCacheHitTokens: record.Stats.PromptCacheHitTokens,
+		CompletionTokens:     record.Stats.CompletionTokens,
+		TotalTokens:          record.Stats.TotalTokens,
+		DurationMS:           record.DurationMS,
 	}
 }
 
@@ -1129,6 +1131,7 @@ func (s *Stats) add(other Stats) {
 	s.ToolErrors += other.ToolErrors
 	s.PermissionDenied += other.PermissionDenied
 	s.PromptTokens += other.PromptTokens
+	s.PromptCacheHitTokens += other.PromptCacheHitTokens
 	s.CompletionTokens += other.CompletionTokens
 	s.TotalTokens += other.TotalTokens
 	s.DurationMS += other.DurationMS
