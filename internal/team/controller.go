@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -246,11 +245,13 @@ type controller struct {
 
 	id        string
 	runDir    string
-	events    *eventWriter
+	recorder  *trajectory.Recorder
 	startedAt time.Time
 	summary   Summary
 
-	taskMu sync.Mutex
+	taskMu   sync.Mutex
+	actionMu sync.Mutex
+	actionID int
 }
 
 func Run(ctx context.Context, specPath string, goal string, opts Options) (*Result, error) {
@@ -268,23 +269,10 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 	if c.opts.OutputDir != "" {
 		outputBase = c.opts.OutputDir
 	}
-	runID, runDir, err := createTeamRunDir(outputBase, c.startedAt, c.manifest.Metadata.Name)
-	if err != nil {
+	if err := c.initTrajectory(outputBase); err != nil {
 		return nil, err
 	}
-	c.id = runID
-	c.runDir = runDir
-	if err := os.WriteFile(filepath.Join(c.runDir, "team.snapshot.yaml"), c.snapshot, 0o644); err != nil {
-		return nil, err
-	}
-	events, err := newEventWriter(filepath.Join(c.runDir, "team.events.jsonl"))
-	if err != nil {
-		return nil, err
-	}
-	defer events.Close()
-	c.events = events
 	c.initSummary()
-	c.events.Write("team.started", map[string]any{"team_run_id": c.id, "team": c.manifest.Metadata.Name, "goal": c.goal})
 
 	if err := c.validateAgents(); err != nil {
 		c.summary.Status = StatusFailed
@@ -295,14 +283,16 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 	emptyRounds := 0
 	for round := 1; round <= c.manifest.Runtime.MaxRounds; round++ {
 		c.summary.RoundCount = round
-		c.events.Write("round.started", map[string]any{"round": round})
+		c.startRound(round)
+		added := 0
+		dispatched := 0
 		decision, err := c.runLeadDecision(ctx, round)
 		if err != nil {
 			c.summary.Status = StatusFailed
 			c.summary.Final = err.Error()
+			c.endRound(round, trajectory.SpanStatusError, added, dispatched, err.Error())
 			return c.finalize()
 		}
-		c.events.Write("lead.decision", map[string]any{"round": round, "decision": decision})
 		if decision.Decision == "blocked" {
 			c.summary.Status = StatusPartialCompleted
 			c.summary.Final = strings.TrimSpace(decision.RoundSummary)
@@ -312,20 +302,25 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 			if c.summary.Final == "" {
 				c.summary.Final = "Team blocked by lead without a final explanation."
 			}
+			c.emitTeamAction(round, "lead.blocked", map[string]any{"round": round, "reason": c.summary.Final})
+			c.endRound(round, trajectory.SpanStatusOK, added, dispatched, "")
 			break
 		}
 		if decision.Decision == "synthesize" {
 			if c.manifest.Verification.RequireVerifier && !c.hasVerifiedWorker(VerifierWorkerName) {
-				c.events.Write("lead.synthesis_rejected", map[string]any{"round": round, "reason": "verification.requireVerifier is true and no verifier task is verified"})
+				c.emitTeamAction(round, "synthesis.rejected", map[string]any{"round": round, "reason": "verification.requireVerifier is true and no verifier task is verified"})
 			} else if reason := c.pendingTaskReason(); reason != "" {
-				c.events.Write("lead.synthesis_rejected", map[string]any{"round": round, "reason": reason})
+				c.emitTeamAction(round, "synthesis.rejected", map[string]any{"round": round, "reason": reason})
 			} else {
+				c.emitTeamAction(round, "synthesis.accepted", map[string]any{"round": round})
+				c.endRound(round, trajectory.SpanStatusOK, added, dispatched, "")
 				break
 			}
 		}
-		added := c.addTasks(decision.Tasks, round)
+		added = c.addTasks(decision.Tasks, round)
 		blocked := c.blockTasksWithFailedDependencies()
 		ready := c.readyTasks()
+		dispatched = len(ready)
 		if len(ready) == 0 && added == 0 && blocked == 0 {
 			emptyRounds++
 		} else {
@@ -335,11 +330,12 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 			if err := c.dispatchTasks(ctx, ready); err != nil {
 				c.summary.Status = StatusFailed
 				c.summary.Final = err.Error()
+				c.endRound(round, trajectory.SpanStatusError, added, dispatched, err.Error())
 				return c.finalize()
 			}
 		}
 		c.blockTasksWithFailedDependencies()
-		c.events.Write("round.completed", map[string]any{"round": round, "added_tasks": added, "dispatched_tasks": len(ready)})
+		c.endRound(round, trajectory.SpanStatusOK, added, dispatched, "")
 		if emptyRounds > c.manifest.Runtime.MaxConsecutiveEmptyRounds {
 			break
 		}
@@ -350,7 +346,7 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 		if reason := c.synthesisBlockedReason(); reason != "" {
 			c.summary.Status = StatusPartialCompleted
 			c.summary.Final = reason
-			c.events.Write("team.synthesis_skipped", map[string]any{"reason": reason})
+			c.emitTeamAction(0, "synthesis.skipped", map[string]any{"reason": reason})
 		} else {
 			final, err := c.runLeadSynthesis(ctx)
 			if err != nil {
@@ -369,25 +365,6 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 		}
 	}
 	return c.finalize()
-}
-
-func createTeamRunDir(baseDir string, startedAt time.Time, teamName string) (string, string, error) {
-	if err := os.MkdirAll(baseDir, 0o755); err != nil {
-		return "", "", err
-	}
-	baseID := startedAt.Format("20060102-150405") + "-" + sanitizeName(teamName)
-	for suffix := 0; ; suffix++ {
-		runID := baseID
-		if suffix > 0 {
-			runID = fmt.Sprintf("%s-%02d", baseID, suffix)
-		}
-		runDir := filepath.Join(baseDir, runID)
-		if err := os.Mkdir(runDir, 0o755); err == nil {
-			return runID, runDir, nil
-		} else if !os.IsExist(err) {
-			return "", "", err
-		}
-	}
 }
 
 func (c *controller) initSummary() {
@@ -433,15 +410,29 @@ func (c *controller) compileAgent(agentPath string, label string) (*compiler.Com
 func (c *controller) runLeadDecision(ctx context.Context, round int) (TeamDecision, error) {
 	label := fmt.Sprintf("lead-round-%03d", round)
 	input := c.leadDecisionInput(round)
+	spanID := c.startChildSpan(round, label, "lead", "", 0)
 	child, err := c.runChild(ctx, c.manifest.Lead.Agent, label, "lead", "", input)
 	if err != nil {
+		c.endChildSpanError(round, spanID, label, "lead", "", 0, err)
 		return TeamDecision{}, err
 	}
 	c.recordChildRun(child)
+	c.endChildSpan(round, spanID, child)
 	decision, err := parseTeamDecision(child.Final)
 	if err != nil {
 		return TeamDecision{}, fmt.Errorf("parse lead decision from %s: %w", child.RunID, err)
 	}
+	decisionRef := c.emitArtifact(fmt.Sprintf("art_team_decision_round_%03d", round), teamDecisionRole, "application/json", "json", "", map[string]any{
+		"round":        round,
+		"child_run_id": child.RunID,
+		"decision":     decision,
+	})
+	c.emitTeamAction(round, "lead.decision", map[string]any{
+		"round":        round,
+		"decision":     decision.Decision,
+		"decision_ref": decisionRef,
+		"task_count":   len(decision.Tasks),
+	})
 	if err := c.validateDecision(decision); err != nil {
 		return TeamDecision{}, err
 	}
@@ -449,11 +440,15 @@ func (c *controller) runLeadDecision(ctx context.Context, round int) (TeamDecisi
 }
 
 func (c *controller) runLeadSynthesis(ctx context.Context) (string, error) {
+	spanID := c.startChildSpan(0, "lead-synthesis", "lead", "", 0)
 	child, err := c.runChild(ctx, c.leadSynthesisAgent(), "lead-synthesis", "lead", "", c.synthesisInput())
 	if err != nil {
+		c.endChildSpanError(0, spanID, "lead-synthesis", "lead", "", 0, err)
 		return "", err
 	}
 	c.recordChildRun(child)
+	c.endChildSpan(0, spanID, child)
+	c.emitTeamAction(0, "synthesis.completed", map[string]any{"child_run_id": child.RunID})
 	return strings.TrimSpace(child.Final), nil
 }
 
@@ -511,13 +506,14 @@ func (c *controller) synthesisBlockedReason() string {
 }
 
 func (c *controller) recordChildRun(child childRunResult) {
+	runPath := c.relativeRunPath(child.RunDir)
 	c.summary.ChildRuns = append(c.summary.ChildRuns, ChildRunSummary{
 		Label:  child.Label,
 		Agent:  child.Agent,
 		Role:   child.Role,
 		TaskID: child.TaskID,
 		RunID:  child.RunID,
-		RunDir: child.RunDir,
+		RunDir: runPath,
 		Status: child.Status,
 		Stats:  child.Stats,
 	})
@@ -542,7 +538,7 @@ func (c *controller) addTasks(specs []TaskSpec, round int) int {
 	for index, spec := range specs {
 		if validTeamNameRe.MatchString(spec.ID) {
 			if _, exists := c.summary.Tasks[spec.ID]; exists {
-				c.events.Write("task.duplicate_skipped", map[string]any{"round": round, "task_id": spec.ID})
+				c.emitTeamAction(round, "task.skipped", map[string]any{"round": round, "task_id": spec.ID, "reason": "duplicate task id"})
 				continue
 			}
 		}
@@ -551,7 +547,7 @@ func (c *controller) addTasks(specs []TaskSpec, round int) int {
 			continue
 		}
 		if c.taskLimitCount()+1 > c.manifest.Runtime.MaxTasks {
-			c.events.Write("task.skipped", map[string]any{"round": round, "task_id": spec.ID, "reason": fmt.Sprintf("runtime.maxTasks exceeded: %d", c.manifest.Runtime.MaxTasks)})
+			c.emitTeamAction(round, "task.skipped", map[string]any{"round": round, "task_id": spec.ID, "reason": fmt.Sprintf("runtime.maxTasks exceeded: %d", c.manifest.Runtime.MaxTasks)})
 			continue
 		}
 		task := TaskState{
@@ -565,7 +561,15 @@ func (c *controller) addTasks(specs []TaskSpec, round int) int {
 			RoundCreated:   round,
 		}
 		c.summary.Tasks[task.ID] = task
-		c.events.Write("task.created", map[string]any{"round": round, "task": task})
+		c.emitTeamAction(round, "task.created", map[string]any{
+			"round":           round,
+			"task_id":         task.ID,
+			"worker":          task.Worker,
+			"objective":       task.Objective,
+			"context_refs":    task.ContextRefs,
+			"depends_on":      task.DependsOn,
+			"output_contract": task.OutputContract,
+		})
 		added++
 	}
 	return added
@@ -589,7 +593,17 @@ func (c *controller) recordRejectedTaskSpec(spec TaskSpec, round int, index int,
 		},
 	}
 	c.summary.Tasks[task.ID] = task
-	c.events.Write("task.rejected", map[string]any{"round": round, "task": task, "reason": cause.Error(), "source": "lead_task_spec"})
+	c.emitTeamAction(round, "task.rejected", map[string]any{
+		"round":           round,
+		"task_id":         task.ID,
+		"worker":          task.Worker,
+		"objective":       task.Objective,
+		"context_refs":    task.ContextRefs,
+		"depends_on":      task.DependsOn,
+		"output_contract": task.OutputContract,
+		"reason":          cause.Error(),
+		"source":          "lead_task_spec",
+	})
 }
 
 func (c *controller) rejectedTaskID(spec TaskSpec, round int, index int) string {
@@ -688,7 +702,7 @@ func (c *controller) blockTasksWithFailedDependencies() int {
 			task.Error = reason
 			task.Verification = VerificationResult{Passed: false, Reasons: []string{reason}}
 			c.summary.Tasks[id] = task
-			c.events.Write("task.blocked", map[string]any{"task_id": id, "dependency": dep, "dependency_status": status, "reason": reason})
+			c.emitTeamAction(task.RoundCreated, "task.blocked", map[string]any{"task_id": id, "dependency": dep, "dependency_status": status, "reason": reason})
 			blocked++
 			changed = true
 		}
@@ -756,10 +770,13 @@ func (c *controller) dispatchTasks(ctx context.Context, tasks []*TaskState) erro
 func (c *controller) runTask(ctx context.Context, task TaskState) TaskState {
 	task.Attempts++
 	task.Status = TaskRunning
-	c.events.Write("task.started", map[string]any{"task_id": task.ID, "worker": task.Worker, "attempt": task.Attempts})
+	c.emitTeamAction(task.RoundCreated, "task.started", map[string]any{"task_id": task.ID, "worker": task.Worker, "attempt": task.Attempts})
 	worker := c.manifest.Workers[task.Worker]
+	label := "task-" + task.ID
+	spanID := c.startChildSpan(task.RoundCreated, label, "worker", task.ID, task.Attempts)
 	child, err := c.runChild(ctx, worker.Agent, "task-"+task.ID, "worker", task.ID, c.workerInput(task))
 	if err != nil {
+		c.endChildSpanError(task.RoundCreated, spanID, label, "worker", task.ID, task.Attempts, err)
 		task.RunID = ""
 		task.RunDir = ""
 		task.Final = ""
@@ -770,33 +787,34 @@ func (c *controller) runTask(ctx context.Context, task TaskState) TaskState {
 			task.Status = TaskBlocked
 			task.Error = cancelErr.Error()
 			task.Verification = VerificationResult{Passed: false, Reasons: []string{task.Error}}
-			c.events.Write("task.blocked", map[string]any{"task_id": task.ID, "reason": task.Error})
+			c.emitTeamAction(task.RoundCreated, "task.blocked", map[string]any{"task_id": task.ID, "reason": task.Error})
 			return task
 		}
-		c.events.Write("task.rejected", map[string]any{"task_id": task.ID, "reason": err.Error()})
+		c.emitTeamAction(task.RoundCreated, "task.rejected", map[string]any{"task_id": task.ID, "reason": err.Error()})
 		return task
 	}
 	c.taskMu.Lock()
 	c.recordChildRun(child)
 	c.taskMu.Unlock()
+	c.endChildSpan(task.RoundCreated, spanID, child)
 	task.RunID = child.RunID
-	task.RunDir = child.RunDir
+	task.RunDir = c.relativeRunPath(child.RunDir)
 	task.Final = strings.TrimSpace(child.Final)
 	task.Status = TaskCompleted
-	c.events.Write("task.completed", map[string]any{"task_id": task.ID, "run_id": task.RunID, "status": child.Status})
+	c.emitTeamAction(task.RoundCreated, "task.completed", map[string]any{"task_id": task.ID, "run_id": task.RunID, "run_dir": task.RunDir, "status": child.Status})
 	task.Verification = c.verifyTask(task, child)
 	if task.Verification.Passed {
 		task.Status = TaskVerified
-		c.events.Write("task.verified", map[string]any{"task_id": task.ID})
+		c.emitTeamAction(task.RoundCreated, "task.verified", map[string]any{"task_id": task.ID})
 		return task
 	}
 	if task.Attempts <= c.manifest.Runtime.MaxRetriesPerTask {
 		task.Status = TaskRetryScheduled
-		c.events.Write("task.rejected", map[string]any{"task_id": task.ID, "retry": true, "reasons": task.Verification.Reasons})
+		c.emitTeamAction(task.RoundCreated, "task.retry_scheduled", map[string]any{"task_id": task.ID, "retry": true, "reasons": task.Verification.Reasons})
 		return task
 	}
 	task.Status = TaskRejected
-	c.events.Write("task.rejected", map[string]any{"task_id": task.ID, "retry": false, "reasons": task.Verification.Reasons})
+	c.emitTeamAction(task.RoundCreated, "task.rejected", map[string]any{"task_id": task.ID, "retry": false, "reasons": task.Verification.Reasons})
 	return task
 }
 
@@ -844,19 +862,22 @@ func (c *controller) finalize() (*Result, error) {
 	if c.summary.Status == "" {
 		c.summary.Status = StatusCompleted
 	}
-	summaryPath := filepath.Join(c.runDir, "team.summary.json")
-	data, err := json.MarshalIndent(c.summary, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(summaryPath, data, 0o644); err != nil {
-		return nil, err
-	}
 	reportPath := filepath.Join(c.runDir, "report.html")
+	c.summary.FinalReportPath = "report.html"
+	finalRef := c.emitArtifact("art_final", "final", "text/markdown", "utf-8", c.summary.Final, nil)
+	summaryRef := c.emitArtifact("art_team_summary", teamSummaryRole, "application/json", "json", "", c.summary)
+	runStatus := trajectory.SpanStatusOK
+	if c.summary.Status == StatusFailed {
+		runStatus = trajectory.SpanStatusError
+	}
+	c.recorder.EmitSpanEnded(context.Background(), c.id, 0, teamRunSpanID, "", teamActor, trajectory.SpanRun, runStatus, nil)
+	c.emitRunSummary(finalRef, summaryRef, now)
+	if err := c.closeTrajectory(); err != nil {
+		return nil, err
+	}
 	if err := writeReport(reportPath, c.summary); err != nil {
 		return nil, err
 	}
-	c.events.Write("team.completed", map[string]any{"status": c.summary.Status, "summary": "team.summary.json", "report": "report.html"})
 	return &Result{
 		TeamRunID: c.id,
 		OutputDir: c.runDir,

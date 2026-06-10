@@ -241,35 +241,26 @@ func TestAgentFixtures(t *testing.T) {
 			t.Fatalf("expected 1 team run dir, got %d", len(entries))
 		}
 		runDir := filepath.Join(teamRoot, entries[0].Name())
-		requireFile(t, filepath.Join(runDir, "team.events.jsonl"))
-		requireFile(t, filepath.Join(runDir, "team.summary.json"))
+		requireFile(t, filepath.Join(runDir, runs.TrajectoryFile))
 		requireFile(t, filepath.Join(runDir, "report.html"))
 		requireFile(t, filepath.Join(workdir, "workspace", "research", "reports", "agent-team-mechanism.md"))
-
-		data, err := os.ReadFile(filepath.Join(runDir, "team.summary.json"))
+		if _, err := os.Stat(filepath.Join(runDir, "team.events.jsonl")); !os.IsNotExist(err) {
+			t.Fatalf("team.events.jsonl should not be written, stat err=%v", err)
+		}
+		if _, err := os.Stat(filepath.Join(runDir, "team.summary.json")); !os.IsNotExist(err) {
+			t.Fatalf("team.summary.json should not be written, stat err=%v", err)
+		}
+		events, err := trajectory.ReadFile(filepath.Join(runDir, runs.TrajectoryFile))
 		if err != nil {
-			t.Fatalf("read team summary failed: %v", err)
+			t.Fatalf("read team trajectory failed: %v", err)
 		}
-		var summary struct {
-			Status          string   `json:"status"`
-			RoundCount      int      `json:"round_count"`
-			MaxRounds       int      `json:"max_rounds"`
-			DeclaredWorkers []string `json:"declared_workers"`
-			Tasks           map[string]struct {
-				Worker       string `json:"worker"`
-				Status       string `json:"status"`
-				RoundCreated int    `json:"round_created"`
-				RunID        string `json:"run_id"`
-				Verification struct {
-					Passed bool `json:"passed"`
-				} `json:"verification"`
-			} `json:"tasks"`
-			ChildRuns []struct {
-				Role string `json:"role"`
-			} `json:"child_runs"`
+		record := trajectory.Project(events)
+		if record.Integrity != trajectory.IntegrityComplete {
+			t.Fatalf("team trajectory integrity = %q issues=%v", record.Integrity, record.IntegrityIssues)
 		}
-		if err := json.Unmarshal(data, &summary); err != nil {
-			t.Fatalf("unmarshal team summary failed: %v", err)
+		summary, ok := teamrunner.ProjectSummary(record)
+		if !ok {
+			t.Fatal("expected projected team summary")
 		}
 		if summary.Status != "completed" {
 			t.Fatalf("team status = %q, want completed", summary.Status)

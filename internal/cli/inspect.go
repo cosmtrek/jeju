@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/cosmtrek/jeju/internal/runs"
+	teamrunner "github.com/cosmtrek/jeju/internal/team"
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
@@ -20,6 +22,9 @@ func runInspect(runID, runsDir string) error {
 		return err
 	}
 	record := trajectory.Project(events)
+	if summary, ok := teamrunner.ProjectSummary(record); ok {
+		return printTeamInspect(runDir.Path, record, summary)
+	}
 
 	summary := summarizeInspect(events)
 	duration := time.Duration(0)
@@ -61,6 +66,61 @@ func runInspect(runID, runsDir string) error {
 	fmt.Println("\nFiles")
 	fmt.Printf("  trajectory: %s\n", filepath.Join(runDir.Path, runs.TrajectoryFile))
 	fmt.Printf("  report: %s\n", filepath.Join(runDir.Path, runs.ReportFile))
+	return nil
+}
+
+func printTeamInspect(runDir string, record trajectory.RunRecord, summary teamrunner.Summary) error {
+	duration := time.Duration(0)
+	if record.EndedAt != nil {
+		duration = record.EndedAt.Sub(record.StartedAt)
+	}
+	fmt.Printf("Team Run %s\n", summary.TeamRunID)
+	fmt.Printf("  team: %s\n", summary.Team)
+	fmt.Printf("  status: %s\n", summary.Status)
+	fmt.Printf("  integrity: %s\n", record.Integrity)
+	fmt.Printf("  started: %s\n", record.StartedAt.Format("2006-01-02 15:04:05"))
+	if duration > 0 {
+		fmt.Printf("  duration: %s\n", duration.Round(time.Millisecond))
+	}
+	fmt.Printf("  goal: %s\n", summary.Goal)
+
+	fmt.Println("\nSummary")
+	fmt.Printf("  rounds: %d / %d\n", summary.RoundCount, summary.MaxRounds)
+	fmt.Printf("  tasks: %d\n", len(summary.Tasks))
+	fmt.Printf("  child_runs: %d\n", summary.Stats.ChildRuns)
+	fmt.Printf("  model_calls: %d failed=%d\n", summary.Stats.ModelCalls, summary.Stats.ModelErrors)
+	fmt.Printf("  tool_calls: %d failed=%d\n", summary.Stats.ToolCalls, summary.Stats.ToolErrors)
+	fmt.Printf("  tokens: total=%d prompt=%d completion=%d\n", summary.Stats.TotalTokens, summary.Stats.PromptTokens, summary.Stats.CompletionTokens)
+
+	if len(summary.Tasks) > 0 {
+		fmt.Println("\nTasks")
+		ids := make([]string, 0, len(summary.Tasks))
+		for id := range summary.Tasks {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			task := summary.Tasks[id]
+			fmt.Printf("  %s  %-16s  %-10s  %s\n", task.ID, task.Worker, task.Status, task.RunID)
+		}
+	}
+
+	if len(summary.ChildRuns) > 0 {
+		fmt.Println("\nChild Runs")
+		for _, child := range summary.ChildRuns {
+			fmt.Printf("  %s  %-8s  %-10s  %s\n", child.Label, child.Role, child.Status, child.RunDir)
+		}
+	}
+	if len(record.IntegrityIssues) > 0 {
+		fmt.Println("\nTrajectory Issues")
+		for _, issue := range record.IntegrityIssues {
+			fmt.Printf("  - %s\n", issue)
+		}
+	}
+
+	fmt.Println("\nFiles")
+	fmt.Printf("  trajectory: %s\n", filepath.Join(runDir, runs.TrajectoryFile))
+	fmt.Printf("  report: %s\n", filepath.Join(runDir, runs.ReportFile))
 	return nil
 }
 

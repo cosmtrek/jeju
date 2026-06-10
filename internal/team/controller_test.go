@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/cosmtrek/jeju/internal/config"
 	"github.com/cosmtrek/jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
 func TestRunAgentTeamWithMockLeadWorkerRounds(t *testing.T) {
@@ -169,16 +169,30 @@ output:
 	if result.Summary.Stats.ChildRuns < 6 {
 		t.Fatalf("child_runs = %d, want at least 6", result.Summary.Stats.ChildRuns)
 	}
-	if _, err := os.Stat(filepath.Join(result.OutputDir, "team.events.jsonl")); err != nil {
-		t.Fatalf("team.events.jsonl missing: %v", err)
+	if _, err := os.Stat(filepath.Join(result.OutputDir, runs.TrajectoryFile)); err != nil {
+		t.Fatalf("trajectory.jsonl missing: %v", err)
 	}
-	summaryData, err := os.ReadFile(filepath.Join(result.OutputDir, "team.summary.json"))
+	if _, err := os.Stat(filepath.Join(result.OutputDir, "team.events.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("team.events.jsonl should not be written, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(result.OutputDir, "team.summary.json")); !os.IsNotExist(err) {
+		t.Fatalf("team.summary.json should not be written, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(result.OutputDir, "team.snapshot.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("team.snapshot.yaml should not be written, stat err=%v", err)
+	}
+	events, err := trajectory.ReadFile(filepath.Join(result.OutputDir, runs.TrajectoryFile))
 	if err != nil {
-		t.Fatalf("team.summary.json missing: %v", err)
+		t.Fatalf("read trajectory failed: %v", err)
 	}
-	var summary Summary
-	if err := json.Unmarshal(summaryData, &summary); err != nil {
-		t.Fatalf("summary JSON invalid: %v", err)
+	record := trajectory.Project(events)
+	if record.Integrity != trajectory.IntegrityComplete {
+		t.Fatalf("trajectory integrity = %q issues=%v", record.Integrity, record.IntegrityIssues)
+	}
+	requireTeamEventTypes(t, events, trajectory.EventTrajectoryHeader, trajectory.EventSpanStarted, trajectory.EventSpanEnded, trajectory.EventActionCreated, trajectory.EventArtifactCreated, trajectory.EventRunSummary)
+	summary, ok := ProjectSummary(record)
+	if !ok {
+		t.Fatal("expected team summary projection")
 	}
 	if summary.TeamRunID != result.TeamRunID {
 		t.Fatalf("summary team_run_id = %q, want %q", summary.TeamRunID, result.TeamRunID)
@@ -187,7 +201,7 @@ output:
 		t.Fatalf("report missing: %v", err)
 	}
 	leadPlanning := findChildRun(t, result.Summary.ChildRuns, "lead-round-001")
-	planningSnapshot := readConfigSnapshot(t, leadPlanning.RunDir)
+	planningSnapshot := readConfigSnapshot(t, resolveRunDir(result.OutputDir, leadPlanning.RunDir))
 	if !strings.Contains(planningSnapshot, "name: read") {
 		t.Fatalf("planning lead should retain read tool, snapshot:\n%s", planningSnapshot)
 	}
@@ -195,7 +209,7 @@ output:
 		t.Fatalf("planning lead should not expose write tool, snapshot:\n%s", planningSnapshot)
 	}
 	leadSynthesis := findChildRun(t, result.Summary.ChildRuns, "lead-synthesis")
-	synthesisSnapshot := readConfigSnapshot(t, leadSynthesis.RunDir)
+	synthesisSnapshot := readConfigSnapshot(t, resolveRunDir(result.OutputDir, leadSynthesis.RunDir))
 	if !strings.Contains(synthesisSnapshot, "name: write") {
 		t.Fatalf("synthesis lead should retain write tool, snapshot:\n%s", synthesisSnapshot)
 	}
@@ -380,28 +394,13 @@ func TestLeadDecisionInputUsesCompactState(t *testing.T) {
 	}
 }
 
-func TestCreateTeamRunDirAvoidsCollisions(t *testing.T) {
-	root := t.TempDir()
-	startedAt := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
-
-	firstID, firstDir, err := createTeamRunDir(root, startedAt, "review-team")
-	if err != nil {
-		t.Fatalf("create first run dir failed: %v", err)
-	}
-	secondID, secondDir, err := createTeamRunDir(root, startedAt, "review-team")
-	if err != nil {
-		t.Fatalf("create second run dir failed: %v", err)
-	}
-	if secondID != firstID+"-01" {
-		t.Fatalf("second run id = %q, want %q", secondID, firstID+"-01")
-	}
-	if firstDir == secondDir {
-		t.Fatalf("run dirs should differ: %q", firstDir)
-	}
-}
-
 func TestRunTaskClearsPreviousRunOutputOnChildError(t *testing.T) {
 	root := t.TempDir()
+	recorder, err := trajectory.NewRecorderWithOptions(root, trajectory.RecorderOptions{Console: false})
+	if err != nil {
+		t.Fatalf("NewRecorderWithOptions() error = %v", err)
+	}
+	defer recorder.Close()
 	c := &controller{
 		manifest: &AgentTeamManifest{
 			Metadata: config.Metadata{Name: "retry-team"},
@@ -410,7 +409,9 @@ func TestRunTaskClearsPreviousRunOutputOnChildError(t *testing.T) {
 			},
 			Runtime: RuntimeConfig{MaxRetriesPerTask: 0},
 		},
-		runDir: root,
+		id:       "test-run",
+		runDir:   root,
+		recorder: recorder,
 	}
 	task := TaskState{
 		ID:       "retry",
@@ -625,6 +626,13 @@ func findChildRun(t *testing.T, children []ChildRunSummary, label string) ChildR
 	return ChildRunSummary{}
 }
 
+func resolveRunDir(parent, child string) string {
+	if filepath.IsAbs(child) {
+		return child
+	}
+	return filepath.Join(parent, child)
+}
+
 func readConfigSnapshot(t *testing.T, runDir string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(runDir, runs.TrajectoryFile))
@@ -651,4 +659,17 @@ func readConfigSnapshot(t *testing.T, runDir string) string {
 	}
 	t.Fatalf("missing config snapshot in %s", runDir)
 	return ""
+}
+
+func requireTeamEventTypes(t *testing.T, events []trajectory.Event, types ...trajectory.EventType) {
+	t.Helper()
+	seen := map[trajectory.EventType]bool{}
+	for _, event := range events {
+		seen[event.Type] = true
+	}
+	for _, typ := range types {
+		if !seen[typ] {
+			t.Fatalf("missing trajectory event %q", typ)
+		}
+	}
 }

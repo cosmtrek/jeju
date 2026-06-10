@@ -128,12 +128,14 @@ Team artifacts include:
 
 ```text
 .jeju-dev/team/code-review-team/<team_run_id>/
-  team.snapshot.yaml
-  team.events.jsonl
-  team.summary.json
+  trajectory.jsonl
   report.html
   child-runs/
 ```
+
+`trajectory.jsonl` is the canonical parent team record. It stores the team
+manifest snapshot, task lifecycle events, child run references, final answer,
+and projected team summary as standard trajectory events and artifacts.
 
 ## Boundaries
 
@@ -188,4 +190,5 @@ examples/code-review-team/tools/cr-packet.py check --name go_vet
   (`expand_evidence`) implemented as normal worker tools,
 - a judge-style verifier with cross-reviewer dedup, a 0-100 confidence
   rubric, a hard threshold, and capped output,
-- child run trajectories and a team-level `team.summary.json` / `report.html`.
+- child run trajectories linked from a team-level `trajectory.jsonl` and
+  `report.html`.

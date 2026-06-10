@@ -21,6 +21,7 @@ import (
 	"github.com/cosmtrek/jeju/internal/config"
 	"github.com/cosmtrek/jeju/internal/evaluate"
 	"github.com/cosmtrek/jeju/internal/runs"
+	teamrunner "github.com/cosmtrek/jeju/internal/team"
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
@@ -113,6 +114,16 @@ func reportNeedsRender(runDir *runs.RunDir, out string) (bool, error) {
 }
 
 func writeRunReport(store *runs.Store, runDir *runs.RunDir, out string) error {
+	events, err := trajectory.ReadFile(filepath.Join(runDir.Path, runs.TrajectoryFile))
+	if err != nil {
+		return err
+	}
+	if summary, ok := teamrunner.ProjectSummary(trajectory.Project(events)); ok {
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return err
+		}
+		return teamrunner.WriteReport(out, summary)
+	}
 	report, err := buildRunReport(store, runDir)
 	if err != nil {
 		return err

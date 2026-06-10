@@ -136,7 +136,7 @@ team manifest + user goal
   -> verify task output
   -> repeat until synthesize, blocked, or limits reached
   -> optional synthesis agent produces final answer
-  -> write team summary, events, and report
+  -> write a standard trajectory and derived report
 ```
 
 ## Lead Decisions
@@ -253,9 +253,7 @@ Each team run creates a run directory under `output.dir`:
 
 ```text
 .jeju-dev/team/<team_name>/<team_run_id>/
-  team.snapshot.yaml
-  team.events.jsonl
-  team.summary.json
+  trajectory.jsonl
   report.html
   child-runs/
     compile-lead/...
@@ -263,23 +261,30 @@ Each team run creates a run directory under `output.dir`:
     lead-synthesis/...
 ```
 
-`team.events.jsonl` records team-level events such as `team.started`,
-`round.started`, `lead.decision`, `task.created`, `task.started`,
-`task.completed`, `task.verified`, `task.rejected`, `round.completed`, and
-`team.completed`.
+`trajectory.jsonl` is the canonical team run record. Team runs use the same
+Jeju trajectory envelope as normal agent runs:
 
-`team.summary.json` is the machine-readable team result. It includes:
+- `trajectory.header` declares `agent.kind: agent_team`, the team name, goal,
+  topology, limits, and worker catalog.
+- Each team round is a `span` with `kind: step`.
+- Lead decisions, worker tasks, and synthesis runs are `span` events with
+  `kind: subagent`. They reference child run IDs and relative child run paths
+  instead of copying child trajectories into the parent log.
+- Task lifecycle changes are `action.created` events with
+  `kind: orchestration` and an `operation` such as `task.created`,
+  `task.completed`, `task.verified`, `task.rejected`, or `task.blocked`.
+- The team manifest snapshot, lead decision JSON, final answer, and projected
+  team summary are trajectory artifacts.
+- `run.summary` closes the parent team run and points at the final and summary
+  artifacts.
 
-- team run ID, status, goal, started and ended timestamps,
-- round count and runtime limits,
-- declared workers,
-- task states and verification results,
-- child run IDs and child run directories,
-- aggregate model, tool, permission, token, and duration stats,
-- final answer and report path.
-
-`report.html` is a derived inspection view for humans. Child runs still keep
-their own `trajectory.jsonl` as canonical evidence.
+`report.html` is a derived inspection view for humans. Tasks and child runs
+render as expandable cards: collapsed rows show the status overview, and
+expanding a card reveals the task objective, dependencies, output contract,
+verification result, error, and final output (structured JSON contracts are
+pretty-printed), or the child run agent, per-run stats, and task link. Child
+runs still keep their own `trajectory.jsonl` as canonical evidence and are
+linked from the parent report.
 
 ## Runtime Boundaries
 

@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
 type Recorder struct {
 	Sinks           []Sink
 	FailOnSinkError bool
+	mu              sync.Mutex
 	counter         uint64
 	trajectoryID    string
 	sessionID       string
@@ -47,7 +48,10 @@ func (r *Recorder) Emit(ctx context.Context, typ EventType, runID string, step i
 }
 
 func (r *Recorder) emit(ctx context.Context, typ EventType, runID string, step int, spanID, parentSpanID, actor string, payload map[string]any) Event {
-	id := atomic.AddUint64(&r.counter, 1)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.counter++
+	id := r.counter
 	if payload == nil {
 		payload = map[string]any{}
 	}
