@@ -3,14 +3,14 @@ kind: Agent
 
 metadata:
   name: review-lead
-  description: "Lead agent for manifest-only packet-first code review team."
+  description: "Lead agent for the code review team: plans review focuses and gates synthesis."
 
 models:
   providers:
     primary:
       type: openaiCompatible
       preset: deepseek
-      model: deepseek-v4-flash
+      model: deepseek-v4-pro
       envKey: DEEPSEEK_API_KEY
       temperature: 0.1
       thinking:

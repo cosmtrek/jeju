@@ -1,13 +1,15 @@
 # Code Review Team
 
 This is a reusable `kind: AgentTeam` bundle for reviewing a repository's
-current Git working tree changes. It uses one lead, a packet-builder worker,
-five specialist reviewers, and a verifier. The final answer is a synthesized
-Markdown code review with findings first.
+current Git working tree changes. It uses one lead and three workers: a packet
+builder, a generalist reviewer that the lead dispatches 1-3 times with
+different focuses, and a judge verifier. The final answer is a synthesized
+Markdown code review with verified findings first.
 
-Use this team when a single reviewer agent is too shallow and you want separate
-coverage for diff scope, runtime correctness, safety/policy, tests/docs, and
-static command results.
+The design follows the converged shape of current AI code review systems:
+a small pool of generalist finders with dynamically assigned focuses, one
+strong judge that deduplicates and confidence-gates candidate findings, and
+hard output caps with an explicit "clean diff" outcome.
 
 ## Requirements
 
@@ -15,22 +17,49 @@ static command results.
 - Python 3 for the bundled packet tool.
 - A Git repository as the target workspace.
 - `DEEPSEEK_API_KEY` set, unless you edit the manifests to use another
-  OpenAI-compatible provider.
+  OpenAI-compatible provider. The lead, reviewer, verifier, and synthesis
+  agents default to `deepseek-v4-pro`; the packet builder uses
+  `deepseek-v4-flash`.
 
 This team may call the configured model many times. It is intended for
 substantive code review, not as a cheap pre-commit hook.
 
-Execution model:
+## Execution Model
 
-1. `packet_builder` runs the bundled `tools/cr-packet.py` command, creates a
-   unique packet `run_id`, and writes packet artifacts under
-   `.jeju-dev/code-review-team-packets/<run_id>` in the target workspace.
-2. Specialist reviewers read that `run_id` from the packet-builder task context
-   and call only their fixed `get_review_packet` tool.
-3. The verifier receives reviewer outputs through `context_refs`, lists compact
-   packet evidence ids, then fetches targeted evidence bodies for high-risk
-   findings before marking them verified, rejected, downgraded, or uncertain.
-4. The synthesis agent writes the final Markdown answer from verified team
+1. Round 1: the lead creates one `build-review-packets` task. The
+   `packet_builder` worker runs the bundled `tools/cr-packet.py build`
+   command, which writes a single evidence packet under
+   `.jeju-dev/code-review-team-packets/<run_id>/` in the target workspace and
+   reports the `run_id`, changed files, extension histogram, scope flags
+   (binary files, very large changes, generated content, truncation), and
+   which deterministic checks are available. Heavy checks do not run at build
+   time.
+2. Round 2: the lead reads that report and chooses 1-3 review focuses for
+   this specific diff — correctness and runtime behavior, security and data
+   flow, tests and change completeness, conventions — sizing the plan to the
+   diff (one focus for a docs-only change, three for a large risky change).
+   It creates one `reviewer` task per focus with a tailored objective, plus
+   one `verifier` task depending on all of them, in the same round.
+3. Each reviewer task loads the packet once, reviews the diff through its
+   assigned focus, and may call `expand_evidence` (bounded file excerpts, at
+   most 5 calls) to chase context beyond the packet — callers, full function
+   bodies, related files. A correctness-focused task may also run the
+   detected deterministic checks (`go test`, `go vet`, `npm test`, `pytest`)
+   through `run_static_check` and must attribute failures to the diff. The
+   worker limit leaves headroom for the final answer after those tool calls.
+   Reviewer prompts carry an explicit false-positive doctrine: no
+   pre-existing issues, no linter-catchable issues, no nitpicks, no
+   speculation without evidence.
+4. The verifier is the judge: it merges and deduplicates candidates across
+   reviewer tasks (independent agreement raises confidence), re-fetches cited
+   evidence and expanded context, scores every candidate on a 0-100 rubric,
+   drops everything below 80, and caps output at 8 findings. Zero verified
+   findings is a valid result.
+5. The lead synthesizes when the verifier output is clean. If the verifier
+   marked a P0/P1 finding `uncertain`, the lead may run one escalation round:
+   a follow-up reviewer task gathers the missing evidence, and a second
+   verifier task re-checks. At most one escalation round.
+6. The synthesis agent writes the final Markdown answer from verified team
    state.
 
 ## Run From This Repository
@@ -44,7 +73,7 @@ go run ./cmd/jeju team run \
   --workspace /path/to/project \
   --output final \
   examples/code-review-team/teams/code-review.team.yaml \
-  "Review the current working tree changes. Focus on actionable correctness, safety, tests, docs, and reviewability issues."
+  "Review the current working tree changes. Focus on actionable correctness, safety, tests, and reviewability issues."
 ```
 
 When reviewing the Jeju checkout itself, use:
@@ -60,8 +89,8 @@ go run ./cmd/jeju team run \
 Team artifacts are written under repo-root `.jeju-dev/team/code-review-team/`.
 Packet artifacts are written under the target workspace's
 `.jeju-dev/code-review-team-packets/<run_id>/`; a
-`.jeju-dev/code-review-team-packets/current.json` pointer records the most recent
-packet run for manual inspection.
+`.jeju-dev/code-review-team-packets/current.json` pointer records the most
+recent packet run for manual inspection.
 
 ## Install As A Reusable Local Team
 
@@ -81,19 +110,19 @@ jeju team run \
 ```
 
 `--workspace` binds every lead and worker child run to the project being
-reviewed. `--out` keeps team-level artifacts in the reviewed project. Packet
-artifacts are written under the reviewed project's
-`.jeju-dev/code-review-team-packets/<run_id>/`.
+reviewed. `--out` keeps team-level artifacts in the reviewed project.
 
 ## Output
 
 The final answer is Markdown. It should include:
 
-- actionable findings first, ordered by severity,
-- severity, file, line, impact, evidence, confidence, and concrete fix for each
-  finding,
-- rejected or downgraded findings when the verifier identifies them,
-- residual risks, missing dimensions, failed tasks, and test gaps.
+- verified findings first, ordered by severity, each with severity, file,
+  line, impact, evidence, confidence score, and a concrete fix,
+- an explicit statement when the diff is clean,
+- rejected or downgraded findings with the verifier's reason,
+- a coverage section: dispatched and skipped focuses, scope flags, checks
+  status, failed tasks,
+- residual risks and test gaps.
 
 Team artifacts include:
 
@@ -108,25 +137,24 @@ Team artifacts include:
 
 ## Boundaries
 
-- The lead and reviewer agents do not have generic repository read/search
-  tools. Reviewers inspect only the packet returned by their
-  `get_review_packet` tool.
-- `packet_builder` writes packet JSON files under `.jeju-dev/` in the target
-  workspace. The specialist reviewers and verifier are read-only.
-- Findings must cite packet evidence ids. Unsupported suspicions belong in
-  `gaps` or `residual_risk`.
-- The diff-context packet intentionally omits full file excerpts. It focuses on
-  changed-file inventory, diffstat, diff hunks, scope, and reviewability.
-- The static-analysis packet runs lightweight deterministic commands. For Go
-  projects this includes `git diff --check`, `go test ./...`, and
-  `go vet ./...`; for Node/Python projects it uses the available package test
-  conventions in the packet tool. When commands fail, the packet includes
-  changed diff hunks only for files mentioned by the command output so the
-  static reviewer can triage whether the failure is attributable to this diff.
-- Verifier gating is content-aware: it lists compact evidence ids first, then
-  fetches targeted evidence bodies for P0/P1 and suspicious findings. It should
-  reject unsupported claims and downgrade overstated severity instead of relying
-  only on evidence id existence.
+- Reviewer and verifier agents have no generic repository read/search tools.
+  They see the packet plus bounded `expand_evidence` excerpts (workspace
+  paths only, line-capped, binary-rejected); all agents except the packet
+  builder are read-only.
+- Findings must cite packet evidence ids. Context fetched through
+  `expand_evidence` is recorded as `{path, start, end}` ranges so the
+  verifier can re-fetch and check the same content. Unsupported suspicions
+  belong in `gaps` or `residual_risk`.
+- The packet build is fast and deterministic: diff hunks, file inventory,
+  scope flags, and `git diff --check` only. Heavy checks run on demand inside
+  a reviewer task via `run_static_check`, and only when the lead asks for
+  them.
+- The verifier gates on content, not metadata: candidates scoring below 80 on
+  the confidence rubric are dropped, output is capped at 8 findings, and an
+  empty findings list is a legitimate outcome.
+- Worker names (`packet_builder`, `reviewer`, `verifier`) are referenced by
+  the lead prompt; keep the team manifest and `prompts/review-lead.md` in
+  sync if you rename them.
 
 ## Validation
 
@@ -143,16 +171,21 @@ Validate the packet tool:
 ```bash
 python3 -m py_compile examples/code-review-team/tools/cr-packet.py
 examples/code-review-team/tools/cr-packet.py build --run-id smoke
-examples/code-review-team/tools/cr-packet.py list --run-id smoke
+examples/code-review-team/tools/cr-packet.py packet --run-id smoke | head -c 400
 examples/code-review-team/tools/cr-packet.py evidence-index --run-id smoke
-examples/code-review-team/tools/cr-packet.py evidence --run-id smoke --dimension diff_context --id diff_context.scope
+examples/code-review-team/tools/cr-packet.py evidence --run-id smoke --id scope.flags
+examples/code-review-team/tools/cr-packet.py expand --path README.md --start 1 --end 20
+examples/code-review-team/tools/cr-packet.py check --name go_vet
 ```
 
 ## What This Shows
 
-- dynamic lead-worker planning with `runtime.topology: lead_worker`,
-- packet-first evidence collection implemented as a normal worker tool,
-- reviewer agents constrained to packet-scoped evidence,
-- verifier gating through a declared `verifier` worker with targeted evidence
-  body checks,
+- dynamic lead-worker planning with `runtime.topology: lead_worker`, where
+  the lead sizes the review to the diff instead of running a fixed pipeline,
+- one generalist worker type dispatched multiple times with different
+  focuses, instead of one worker type per review dimension,
+- packet-first evidence collection plus bounded agentic retrieval
+  (`expand_evidence`) implemented as normal worker tools,
+- a judge-style verifier with cross-reviewer dedup, a 0-100 confidence
+  rubric, a hard threshold, and capped output,
 - child run trajectories and a team-level `team.summary.json` / `report.html`.

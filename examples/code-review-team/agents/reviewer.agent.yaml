@@ -2,8 +2,8 @@ apiVersion: jeju/v1alpha1
 kind: Agent
 
 metadata:
-  name: code-review-verifier
-  description: "Judge for the code review team: dedups, verifies, scores, and gates findings."
+  name: code-reviewer
+  description: "Generalist code reviewer; the review focus is assigned per task by the lead."
 
 models:
   providers:
@@ -20,7 +20,7 @@ models:
       timeoutSec: 120
 
 instructions:
-  system: ../prompts/verifier.md
+  system: ../prompts/reviewer.md
 
 runtime:
   model: primary
@@ -29,8 +29,8 @@ runtime:
   compressionThreshold: 0.8
   recentTokenBudget: 24000
   limits:
-    maxSteps: 14
-    maxDurationSec: 300
+    maxSteps: 12
+    maxDurationSec: 420
     maxToolCalls: 64
     maxConsecutiveErrors: 2
 
@@ -38,13 +38,13 @@ workspace:
   path: ../workspace/review
 
 tools:
-  - name: list_review_evidence
+  - name: get_review_packet
     uses: command
-    description: "Return compact evidence ids for the review packet so the verifier can plan targeted checks."
+    description: "Return the single review packet for this workspace."
     capabilities: [workspaceRead]
     command:
       run: ../tools/cr-packet.py
-      args: ["evidence-index", "--run-id", "{{run_id}}"]
+      args: ["packet", "--run-id", "{{run_id}}"]
       timeoutSec: 20
     input:
       schema:
@@ -53,32 +53,11 @@ tools:
           run_id:
             type: string
             default: current
-            description: "Packet run_id from build-review-packets or reviewer outputs."
-
-  - name: get_review_evidence
-    uses: command
-    description: "Return one packet evidence body by id so the verifier can check whether a finding is supported."
-    capabilities: [workspaceRead]
-    command:
-      run: ../tools/cr-packet.py
-      args: ["evidence", "--run-id", "{{run_id}}", "--id", "{{id}}"]
-      timeoutSec: 20
-    input:
-      schema:
-        type: object
-        properties:
-          run_id:
-            type: string
-            default: current
-            description: "Packet run_id from build-review-packets or reviewer outputs."
-          id:
-            type: string
-            description: "Evidence id to inspect."
-        required: [id]
+            description: "Packet run_id from the build-review-packets task."
 
   - name: expand_evidence
     uses: command
-    description: "Return a bounded, line-numbered excerpt of one repository file to verify a finding against real content."
+    description: "Return a bounded, line-numbered excerpt of one repository file for targeted context beyond the packet."
     capabilities: [workspaceRead]
     command:
       run: ../tools/cr-packet.py
@@ -91,7 +70,7 @@ tools:
           run_id:
             type: string
             default: current
-            description: "Packet run_id from build-review-packets or reviewer outputs."
+            description: "Packet run_id from the build-review-packets task."
           path:
             type: string
             description: "Repository-relative file path to excerpt."
@@ -104,6 +83,24 @@ tools:
             default: 0
             description: "Last line of the excerpt; 0 means a default-size window from start."
         required: [path]
+
+  - name: run_static_check
+    uses: command
+    description: "Run the detected deterministic checks (tests, vet) for this workspace and return their results."
+    capabilities: [workspaceRead]
+    command:
+      run: ../tools/cr-packet.py
+      args: ["check", "--name", "{{name}}"]
+      timeoutSec: 580
+    input:
+      schema:
+        type: object
+        properties:
+          name:
+            type: string
+            enum: [all, go_vet, go_test, npm_test, pytest]
+            default: all
+            description: "Which detected check to run; `all` runs every detected check."
 
 permissions:
   access: readOnly

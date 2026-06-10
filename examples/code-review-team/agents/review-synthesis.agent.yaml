@@ -3,14 +3,14 @@ kind: Agent
 
 metadata:
   name: review-synthesis
-  description: "Synthesis agent for packet-first code review team."
+  description: "Synthesis agent for the code review team."
 
 models:
   providers:
     primary:
       type: openaiCompatible
       preset: deepseek
-      model: deepseek-v4-flash
+      model: deepseek-v4-pro
       envKey: DEEPSEEK_API_KEY
       temperature: 0.1
       thinking:
