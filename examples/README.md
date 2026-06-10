@@ -19,6 +19,9 @@ evaluation evidence.
   packet-first review with specialist reviewers and a verifier.
 - [Commit plan agent](commit-plan-agent/README.md): clusters large Git changes
   into reviewable commit themes before staging or committing.
+- [HotpotQA evolve benchmark](hotpotqa-agent/README.md): evolves a multi-hop
+  QA solver prompt against official HotpotQA answer EM/F1 and documents the
+  study that validated the default `pareto` search strategy.
 - [Privacy delegation agent](privacy-delegation-agent/README.md): improves a
   weak privacy-preserving delegation prompt using deterministic leakage
   evidence.

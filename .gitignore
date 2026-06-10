@@ -7,3 +7,4 @@ dist/
 /examples/*/.jeju-dev/
 __pycache__/
 *.pyc
+/examples/hotpotqa-agent/datasets/*.jsonl

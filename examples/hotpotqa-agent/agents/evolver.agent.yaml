@@ -1,0 +1,40 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: hotpotqa-evolver
+  description: "Evolver agent proposing solver prompt patches for the HotpotQA benchmark"
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-flash
+      temperature: 0.5
+      thinking:
+        type: disabled
+      maxOutputTokens: 8192
+      contextWindow: 128000
+      timeoutSec: 240
+
+instructions:
+  system: ../prompts/evolver.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  limits:
+    maxSteps: 4
+    maxDurationSec: 300
+    maxToolCalls: 0
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace/evolver
+
+permissions:
+  access: readOnly
+  approval: onRequest

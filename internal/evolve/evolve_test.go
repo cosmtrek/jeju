@@ -69,7 +69,7 @@ func TestRunTestRunsAfterFullSelectionPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	text := strings.Replace(string(data), "  iterations: 1\n", "  iterations: -1\n", 1)
+	text := strings.Replace(string(data), "search:\n  iterations: 1\n", "search:\n  strategy: hillclimb\n  iterations: -1\n", 1)
 	if err := os.WriteFile(manifestPath, []byte(text), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}

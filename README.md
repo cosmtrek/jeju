@@ -238,6 +238,19 @@ baseline agent
   -> best candidate bundle and report
 ```
 
+Two search strategies are built in: `pareto` (default), a GEPA-style search
+that maintains a candidate pool with an instance-wise Pareto frontier over
+train tasks and a cheap mini-batch cascade gate, and `hillclimb`, greedy
+single-lineage search.
+
+Both the loop and the default are validated on a public benchmark: on
+HotpotQA (distractor) with DeepSeek V4 Flash, evolving only the solver
+prompt improved the held-out test split by +3.6pp answer F1 and +7pp exact
+match over the unevolved baseline, while `hillclimb` under the same budget
+managed only +1.7pp F1 / +4pp EM before stalling in a local optimum. See
+[HotpotQA evolve benchmark](examples/hotpotqa-agent/README.md) for the full
+study.
+
 Common commands:
 
 ```bash
@@ -261,6 +274,7 @@ Current examples cover:
 - [Code review agent](examples/code-review-agent/README.md)
 - [Code review team](examples/code-review-team/README.md)
 - [Commit plan agent](examples/commit-plan-agent/README.md)
+- [HotpotQA evolve benchmark](examples/hotpotqa-agent/README.md)
 - [Privacy delegation agent](examples/privacy-delegation-agent/README.md)
 - [SkillsBench Lite agent](examples/skillsbench-lite-agent/README.md)
 

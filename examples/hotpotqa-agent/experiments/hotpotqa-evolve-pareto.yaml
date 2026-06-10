@@ -1,0 +1,46 @@
+apiVersion: jeju/v1alpha1
+kind: EvolutionExperiment
+
+metadata:
+  name: evolve-hotpotqa-pareto
+  description: "Evolve the HotpotQA solver prompt with the GEPA-style pareto strategy."
+
+target:
+  agent: ../agents/solver.agent.yaml
+  editable:
+    - harness:prompt
+
+data:
+  train: ../datasets/train.jsonl
+  selection: ../datasets/selection.jsonl
+  test: ../datasets/test.jsonl
+  render:
+    template: ../prompts/task_input.md.tmpl
+
+objective:
+  metric: evaluation.evaluators["hotpotqa_em_f1"].score
+  minDelta: 0.01
+  guards:
+    - "evaluation.passed_rate >= baseline.evaluation.passed_rate - 0.05"
+    - "run.modelErrors <= baseline.run.modelErrors + 0.1"
+  guidance:
+    - "Improve general multi-hop question answering behavior; selection and test tasks are holdouts."
+    - "The score is official HotpotQA answer F1; passed is exact match. Short verbatim answer spans win."
+    - "Never memorize task ids, questions, or gold answers into the prompt."
+
+evolver:
+  agent: ../agents/evolver.agent.yaml
+  proposals: 2
+
+search:
+  strategy: pareto
+  iterations: 12
+  parallelism: 6
+  minibatch: 12
+  pool: 8
+  seed: 42
+  budget:
+    maxRuns: 2200
+
+output:
+  dir: ../../../.jeju-dev/evolve/hotpotqa-pareto

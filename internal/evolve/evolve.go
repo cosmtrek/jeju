@@ -79,11 +79,20 @@ type EvolverSpec struct {
 }
 
 type SearchSpec struct {
+	Strategy      string     `yaml:"strategy,omitempty"`
 	Iterations    int        `yaml:"iterations"`
 	TrialsPerTask int        `yaml:"trialsPerTask"`
 	Parallelism   int        `yaml:"parallelism"`
+	Minibatch     int        `yaml:"minibatch,omitempty"`
+	Pool          int        `yaml:"pool,omitempty"`
+	Seed          int64      `yaml:"seed,omitempty"`
 	Budget        BudgetSpec `yaml:"budget,omitempty"`
 }
+
+const (
+	strategyHillClimb = "hillclimb"
+	strategyPareto    = "pareto"
+)
 
 type BudgetSpec struct {
 	MaxRuns        int `yaml:"maxRuns,omitempty"`
@@ -143,8 +152,10 @@ type controller struct {
 	train         []TaskCase
 	selection     []TaskCase
 	test          []TaskCase
+	trainByID     map[string]TaskCase
 	renderer      *template.Template
 	history       []historyItem
+	poolDigest    []map[string]any
 	usageMu       sync.Mutex
 	bundleBaseDir string
 	runCount      int
@@ -261,6 +272,9 @@ func (e *Experiment) applyDefaults() {
 	if e.Objective.Direction == "" {
 		e.Objective.Direction = "maximize"
 	}
+	if e.Search.Strategy == "" {
+		e.Search.Strategy = strategyPareto
+	}
 	if e.Search.Iterations == 0 {
 		e.Search.Iterations = 3
 	}
@@ -269,6 +283,15 @@ func (e *Experiment) applyDefaults() {
 	}
 	if e.Search.Parallelism == 0 {
 		e.Search.Parallelism = 1
+	}
+	if e.Search.Minibatch == 0 {
+		e.Search.Minibatch = 8
+	}
+	if e.Search.Pool == 0 {
+		e.Search.Pool = 8
+	}
+	if e.Search.Seed == 0 {
+		e.Search.Seed = 1
 	}
 	if e.Output.Dir == "" && e.Metadata.Name != "" {
 		e.Output.Dir = filepath.Join(".jeju-dev", "evolve", e.Metadata.Name)
@@ -305,6 +328,15 @@ func (e *Experiment) validate() error {
 	}
 	if e.Evolver.Proposals < 1 || e.Evolver.Proposals > 8 {
 		return fmt.Errorf("evolver.proposals must be between 1 and 8")
+	}
+	if e.Search.Strategy != strategyHillClimb && e.Search.Strategy != strategyPareto {
+		return fmt.Errorf("search.strategy must be %s or %s", strategyHillClimb, strategyPareto)
+	}
+	if e.Search.Minibatch < 1 {
+		return fmt.Errorf("search.minibatch must be at least 1")
+	}
+	if e.Search.Pool < 1 {
+		return fmt.Errorf("search.pool must be at least 1")
 	}
 	for _, editable := range e.Target.Editable {
 		for _, forbidden := range e.Target.Forbidden {
@@ -385,7 +417,6 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 	best := baseline
-	bestMetric := selectionBaseline.Metrics[c.exp.Objective.Metric]
 	c.history = append(c.history, historyItem{Candidate: baseline.ID, Accepted: true, Reason: "baseline", Metrics: selectionBaseline.Metrics})
 	if c.opts.BaselineOnly {
 		if err := writeJSON(filepath.Join(c.outDir, "leaderboard.json"), []*candidate{baseline}); err != nil {
@@ -413,71 +444,13 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 	if c.opts.MaxIterations > 0 {
 		iterations = c.opts.MaxIterations
 	}
-	noImprove := 0
-	for iter := 1; iter <= iterations; iter++ {
-		runCount, tokenCount := c.usageSnapshot()
-		if c.exp.Search.Budget.MaxRuns > 0 && runCount >= c.exp.Search.Budget.MaxRuns {
-			c.events.Write("budget.exhausted", map[string]any{"max_runs": c.exp.Search.Budget.MaxRuns})
-			break
-		}
-		if c.exp.Search.Budget.MaxModelTokens > 0 && tokenCount >= c.exp.Search.Budget.MaxModelTokens {
-			c.events.Write("budget.exhausted", map[string]any{"max_model_tokens": c.exp.Search.Budget.MaxModelTokens})
-			break
-		}
-		iterationParent := best
-		proposals, err := c.propose(ctx, iter, best)
-		if err != nil {
-			return nil, err
-		}
-		improved := false
-		for i, proposal := range proposals {
-			cand, err := c.createCandidate(iter, i+1, iterationParent, proposal)
-			if err != nil {
-				c.history = append(c.history, historyItem{Iteration: iter, Candidate: proposal.ID, Accepted: false, Reason: err.Error(), Proposal: &proposal})
-				continue
-			}
-			allCandidates = append(allCandidates, cand)
-			trainResult, err := c.evaluateCandidate(ctx, cand, "train", c.train, trainBaseline.Metrics)
-			if err != nil {
-				return nil, err
-			}
-			cand.Results["train"] = trainResult
-			if !trainResult.GuardPass {
-				c.reject(cand, "train guards failed: "+strings.Join(trainResult.GuardReasons, "; "))
-				continue
-			}
-			selectionResult, err := c.evaluateCandidate(ctx, cand, "selection", c.selection, selectionBaseline.Metrics)
-			if err != nil {
-				return nil, err
-			}
-			cand.Results["selection"] = selectionResult
-			if !selectionResult.GuardPass {
-				c.reject(cand, "selection guards failed: "+strings.Join(selectionResult.GuardReasons, "; "))
-				continue
-			}
-			metric := selectionResult.Metrics[c.exp.Objective.Metric]
-			if isImproved(metric, bestMetric, c.exp.Objective.Direction, c.exp.Objective.MinDelta) {
-				best = cand
-				bestMetric = metric
-				improved = true
-				c.history = append(c.history, historyItem{Iteration: iter, Candidate: cand.ID, Accepted: true, Metrics: selectionResult.Metrics, Proposal: cand.Proposal})
-				c.events.Write("candidate.accepted", map[string]any{"candidate": cand.ID, "metric": metric})
-			} else {
-				c.reject(cand, "objective did not improve by minDelta")
-			}
-			if err := writeJSON(filepath.Join(cand.Dir, "results.json"), cand); err != nil {
-				return nil, err
-			}
-		}
-		if improved {
-			noImprove = 0
-		} else {
-			noImprove++
-		}
-		if noImprove >= 3 {
-			c.events.Write("search.stopped", map[string]any{"reason": "no improvement"})
-			break
-		}
+	if c.exp.Search.Strategy == strategyPareto {
+		best, allCandidates, err = c.searchPareto(ctx, baseline, trainBaseline, selectionBaseline, iterations, allCandidates)
+	} else {
+		best, allCandidates, err = c.searchHillClimb(ctx, baseline, trainBaseline, selectionBaseline, iterations, allCandidates)
+	}
+	if err != nil {
+		return nil, err
 	}
 	bestDir := filepath.Join(c.outDir, "best")
 	if c.opts.RunTest {
@@ -511,6 +484,85 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 	}
 	c.events.Write("experiment.completed", map[string]any{"best": best.ID})
 	return &Result{ExperimentID: c.id, OutputDir: c.outDir, BestID: best.ID, ReportPath: report}, nil
+}
+
+func (c *controller) searchHillClimb(ctx context.Context, baseline *candidate, trainBaseline, selectionBaseline *SplitResult, iterations int, allCandidates []*candidate) (*candidate, []*candidate, error) {
+	best := baseline
+	bestMetric := selectionBaseline.Metrics[c.exp.Objective.Metric]
+	noImprove := 0
+	for iter := 1; iter <= iterations; iter++ {
+		if c.budgetExhausted() {
+			break
+		}
+		iterationParent := best
+		proposals, err := c.propose(ctx, iter, best)
+		if err != nil {
+			return nil, nil, err
+		}
+		improved := false
+		for i, proposal := range proposals {
+			cand, err := c.createCandidate(iter, i+1, iterationParent, proposal)
+			if err != nil {
+				c.history = append(c.history, historyItem{Iteration: iter, Candidate: proposal.ID, Accepted: false, Reason: err.Error(), Proposal: &proposal})
+				continue
+			}
+			allCandidates = append(allCandidates, cand)
+			trainResult, err := c.evaluateCandidate(ctx, cand, "train", c.train, trainBaseline.Metrics)
+			if err != nil {
+				return nil, nil, err
+			}
+			cand.Results["train"] = trainResult
+			if !trainResult.GuardPass {
+				c.reject(cand, "train guards failed: "+strings.Join(trainResult.GuardReasons, "; "))
+				continue
+			}
+			selectionResult, err := c.evaluateCandidate(ctx, cand, "selection", c.selection, selectionBaseline.Metrics)
+			if err != nil {
+				return nil, nil, err
+			}
+			cand.Results["selection"] = selectionResult
+			if !selectionResult.GuardPass {
+				c.reject(cand, "selection guards failed: "+strings.Join(selectionResult.GuardReasons, "; "))
+				continue
+			}
+			metric := selectionResult.Metrics[c.exp.Objective.Metric]
+			if isImproved(metric, bestMetric, c.exp.Objective.Direction, c.exp.Objective.MinDelta) {
+				best = cand
+				bestMetric = metric
+				improved = true
+				c.history = append(c.history, historyItem{Iteration: iter, Candidate: cand.ID, Accepted: true, Metrics: selectionResult.Metrics, Proposal: cand.Proposal})
+				c.events.Write("candidate.accepted", map[string]any{"candidate": cand.ID, "metric": metric})
+			} else {
+				c.reject(cand, "objective did not improve by minDelta")
+			}
+			if err := writeJSON(filepath.Join(cand.Dir, "results.json"), cand); err != nil {
+				return nil, nil, err
+			}
+		}
+		if improved {
+			noImprove = 0
+		} else {
+			noImprove++
+		}
+		if noImprove >= 3 {
+			c.events.Write("search.stopped", map[string]any{"reason": "no improvement"})
+			break
+		}
+	}
+	return best, allCandidates, nil
+}
+
+func (c *controller) budgetExhausted() bool {
+	runCount, tokenCount := c.usageSnapshot()
+	if c.exp.Search.Budget.MaxRuns > 0 && runCount >= c.exp.Search.Budget.MaxRuns {
+		c.events.Write("budget.exhausted", map[string]any{"max_runs": c.exp.Search.Budget.MaxRuns})
+		return true
+	}
+	if c.exp.Search.Budget.MaxModelTokens > 0 && tokenCount >= c.exp.Search.Budget.MaxModelTokens {
+		c.events.Write("budget.exhausted", map[string]any{"max_model_tokens": c.exp.Search.Budget.MaxModelTokens})
+		return true
+	}
+	return false
 }
 
 func (c *controller) dryRun(ctx context.Context) (*Result, error) {
@@ -554,6 +606,10 @@ func (c *controller) loadData() error {
 	c.train, err = loadTasks(c.resolvePath(c.exp.Data.Train))
 	if err != nil {
 		return fmt.Errorf("load train: %w", err)
+	}
+	c.trainByID = map[string]TaskCase{}
+	for _, task := range c.train {
+		c.trainByID[task.ID] = task
 	}
 	c.selection, err = loadTasks(c.resolvePath(c.exp.Data.Selection))
 	if err != nil {
@@ -1472,18 +1528,30 @@ func (c *controller) propose(ctx context.Context, iteration int, best *candidate
 		return nil, err
 	}
 	auto := ""
-	result, err := runtime.NewWithOptions(runtime.Options{AutoApprove: true, AutoUserInput: &auto}).Run(ctx, agent, string(digestData))
-	if err != nil {
-		return nil, err
-	}
-	if runDir, err := agent.RunStore.LoadRun(result.RunID); err == nil {
-		if events, err := trajectory.ReadFile(filepath.Join(runDir.Path, runs.TrajectoryFile)); err == nil {
-			c.recordUsage(statsFromEvents(events))
+	input := string(digestData)
+	var proposals []Proposal
+	var lastRunID string
+	for attempt := 1; attempt <= 2; attempt++ {
+		result, err := runtime.NewWithOptions(runtime.Options{AutoApprove: true, AutoUserInput: &auto}).Run(ctx, agent, input)
+		if err != nil {
+			return nil, err
 		}
-	}
-	proposals, err := parseProposals(result.Final)
-	if err != nil {
-		return nil, err
+		lastRunID = result.RunID
+		if runDir, err := agent.RunStore.LoadRun(result.RunID); err == nil {
+			if events, err := trajectory.ReadFile(filepath.Join(runDir.Path, runs.TrajectoryFile)); err == nil {
+				c.recordUsage(statsFromEvents(events))
+			}
+		}
+		var parseErr error
+		proposals, parseErr = parseProposals(result.Final)
+		if parseErr == nil {
+			break
+		}
+		if attempt == 2 {
+			return nil, parseErr
+		}
+		c.events.Write("proposals.parse_retry", map[string]any{"iteration": iteration, "error": parseErr.Error()})
+		input = string(digestData) + "\n\nYour previous reply was not valid proposal JSON (" + parseErr.Error() + "). Reply with only the proposal JSON object, no prose and no markdown fences."
 	}
 	if len(proposals) > c.exp.Evolver.Proposals {
 		proposals = proposals[:c.exp.Evolver.Proposals]
@@ -1496,12 +1564,12 @@ func (c *controller) propose(ctx context.Context, iteration int, best *candidate
 	if err := writeJSON(filepath.Join(iterDir, "proposals.json"), proposals); err != nil {
 		return nil, err
 	}
-	c.events.Write("proposals.generated", map[string]any{"iteration": iteration, "count": len(proposals), "evolver_run_id": result.RunID})
+	c.events.Write("proposals.generated", map[string]any{"iteration": iteration, "count": len(proposals), "evolver_run_id": lastRunID})
 	return proposals, nil
 }
 
 func (c *controller) buildDigest(iteration int, best *candidate) map[string]any {
-	return map[string]any{
+	digest := map[string]any{
 		"iteration": iteration,
 		"objective": c.exp.Objective,
 		"target": map[string]any{
@@ -1513,11 +1581,106 @@ func (c *controller) buildDigest(iteration int, best *candidate) map[string]any 
 		},
 		"best_candidate":   best.ID,
 		"train_results":    best.Results["train"],
+		"reflection":       c.reflectionDigest(best),
 		"history":          c.history,
 		"editable_content": c.editableContent(best.ManifestPath),
 		"guidance":         c.exp.Objective.Guidance,
 		"instructions":     "Return strict JSON with a proposals array or a single proposal. Each change may use op=replace with target/find/replace, or op=write with target/content for an editable file target. For replace, find must be copied exactly from editable_content. Selection task details are intentionally withheld; use train feedback to propose general improvements.",
 	}
+	if rejected := c.rejectedDigest(); len(rejected) > 0 {
+		digest["rejected_proposals"] = rejected
+	}
+	if c.poolDigest != nil {
+		digest["pool"] = c.poolDigest
+	}
+	return digest
+}
+
+const (
+	reflectionMaxTasks   = 12
+	reflectionInputChars = 900
+	reflectionFinalChars = 600
+	rejectedDigestMax    = 10
+)
+
+// reflectionDigest distills the parent candidate's worst train trials into
+// per-task material the evolver can reason over: the rendered task input, the
+// produced final answer, and evaluator feedback. Train split only.
+func (c *controller) reflectionDigest(cand *candidate) []map[string]any {
+	trainResult := cand.Results["train"]
+	if trainResult == nil {
+		return nil
+	}
+	trials := append([]TrialResult{}, trainResult.Trials...)
+	sort.SliceStable(trials, func(i, j int) bool {
+		return trials[i].Evaluation.Score < trials[j].Evaluation.Score
+	})
+	var out []map[string]any
+	for _, trial := range trials {
+		if len(out) >= reflectionMaxTasks {
+			break
+		}
+		entry := map[string]any{
+			"task_id":  trial.TaskID,
+			"score":    trial.Evaluation.Score,
+			"passed":   trial.Evaluation.Passed,
+			"final":    truncateText(trial.Final, reflectionFinalChars),
+			"feedback": evaluationFeedback(trial.Evaluation),
+		}
+		if trial.Error != "" {
+			entry["error"] = trial.Error
+		}
+		if task, ok := c.trainByID[trial.TaskID]; ok {
+			if input, err := c.renderInput(task); err == nil {
+				entry["input"] = truncateText(input, reflectionInputChars)
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func evaluationFeedback(result evaluate.Result) []string {
+	var out []string
+	for _, ev := range result.Evaluators {
+		for _, rule := range ev.Results {
+			if rule.Message == "" {
+				continue
+			}
+			out = append(out, fmt.Sprintf("%s/%s: %s", ev.Name, rule.Rule, rule.Message))
+		}
+	}
+	return out
+}
+
+// rejectedDigest summarizes recently rejected proposals so the evolver stops
+// resubmitting ideas that already failed.
+func (c *controller) rejectedDigest() []map[string]any {
+	var out []map[string]any
+	for _, item := range c.history {
+		if item.Accepted || item.Proposal == nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"hypothesis": item.Proposal.Hypothesis,
+			"reason":     item.Reason,
+		})
+	}
+	if len(out) > rejectedDigestMax {
+		out = out[len(out)-rejectedDigestMax:]
+	}
+	return out
+}
+
+func truncateText(text string, limit int) string {
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "…(truncated)"
 }
 
 func (c *controller) editableContent(manifestPath string) map[string]string {
@@ -1656,7 +1819,7 @@ func (c *controller) writeReport(best *candidate, candidates []*candidate) (stri
 	path := filepath.Join(c.outDir, "report.md")
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Evolution Report: %s\n\n", c.exp.Metadata.Name)
-	fmt.Fprintf(&b, "- experiment: `%s`\n- best: `%s`\n- objective: `%s` `%s`\n\n", c.id, best.ID, c.exp.Objective.Direction, c.exp.Objective.Metric)
+	fmt.Fprintf(&b, "- experiment: `%s`\n- best: `%s`\n- objective: `%s` `%s`\n- strategy: `%s`\n\n", c.id, best.ID, c.exp.Objective.Direction, c.exp.Objective.Metric, c.exp.Search.Strategy)
 	fmt.Fprintf(&b, "## Best Metrics\n\n")
 	if best.Results != nil {
 		for _, split := range []string{"train", "selection", "test"} {

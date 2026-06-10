@@ -273,6 +273,17 @@ evolver:
 
 The evolver receives a feedback digest as its task input. It should return either a single proposal or a wrapper with `proposals`.
 
+Beyond objective, editable targets, train results, history, and editable
+content, the digest carries reflection material for trace-grounded proposals:
+
+| Digest field | Description |
+| --- | --- |
+| `reflection` | The lowest-scoring train trials of the parent candidate, each with the rendered task input, the final output, the score, and evaluator feedback messages (truncated excerpts). |
+| `rejected_proposals` | The most recent rejected proposal hypotheses with their rejection reasons, so the evolver does not resubmit failed ideas. |
+| `pool` | `pareto` strategy only: the current candidate pool with train metrics and instance win counts. |
+
+Selection and test split details are always withheld from the digest.
+
 Single proposal:
 
 ```json
@@ -343,26 +354,65 @@ Patch operation fields:
 
 ```yaml
 search:
-  iterations: 3
+  strategy: pareto
+  iterations: 10
   parallelism: 2
+  minibatch: 10
+  pool: 8
+  seed: 42
 ```
 
 | Field | Required | Default | Description |
 | --- | --- | --- | --- |
+| `strategy` | no | `pareto` | Search strategy: `pareto` (default) or `hillclimb`. |
 | `iterations` | no | `3` | Maximum proposal iterations. |
 | `trialsPerTask` | no | `1` | Repeated runs per candidate/task. |
 | `parallelism` | no | `1` | Concurrent trial workers. |
+| `minibatch` | no | `8` | `pareto` only: train tasks per cascade gate batch. |
+| `pool` | no | `8` | `pareto` only: maximum candidate pool size. |
+| `seed` | no | `1` | `pareto` only: RNG seed for parent and mini-batch sampling. |
 | `budget.maxRuns` | no | unset | Stop when recorded candidate/evolver run count reaches this value. |
 | `budget.maxModelTokens` | no | unset | Stop when recorded model token usage reaches this value. |
 
-The built-in search strategy is batch hill-climbing:
+`pareto` is the default: on the public HotpotQA benchmark it more than
+doubled the held-out test gain of `hillclimb` under the same budget
+(+3.6pp F1 / +7pp EM vs +1.7pp / +4pp; see
+`examples/hotpotqa-agent/README.md`). Use `hillclimb` when you want the
+cheapest possible single-lineage search.
+
+### hillclimb
+
+`hillclimb` is batch hill-climbing on a single lineage:
 
 1. Run baseline train and selection.
-2. Ask the evolver for up to `proposals` proposals.
+2. Ask the evolver for up to `proposals` proposals against the current best.
 3. Evaluate each candidate on train.
 4. If train guards pass, evaluate on selection.
 5. Accept a candidate only if it improves the current best selection metric by `minDelta` and passes guards.
 6. Stop after the iteration limit, budget exhaustion, or three consecutive no-improvement iterations.
+
+### pareto
+
+`pareto` is a GEPA-style instance-wise Pareto search that avoids the greedy
+single-lineage local optimum:
+
+1. Run baseline train and selection; the baseline seeds the candidate pool.
+2. Each iteration samples a parent from the pool with probability
+   proportional to the number of train tasks the candidate currently wins
+   (its membership count on the instance-wise Pareto frontier).
+3. The evolver proposes patches against that parent. The digest additionally
+   carries a `pool` summary.
+4. Each candidate first runs a cheap train mini-batch cascade gate
+   (`minibatch` tasks); candidates that score worse than the parent on the
+   same tasks are rejected before full evaluation.
+5. Survivors are evaluated on full train and selection with the same guard
+   rules as `hillclimb`.
+6. A candidate joins the pool if it wins at least one train task or improves
+   the parent's train aggregate. The pool keeps frontier members plus the
+   current best, capped at `pool` by train aggregate.
+7. The final best is the pool candidate with the strongest selection metric.
+8. Stop after the iteration limit, budget exhaustion, or three consecutive
+   iterations without pool additions.
 
 ## Output
 
@@ -428,5 +478,8 @@ Options:
 - `data.test` is opt-in with `--test`; it runs only after candidate selection and does not affect candidate acceptance.
 - Non-interactive evolution auto-approves runtime prompts and auto-answers `ask_user` with an empty string. Hard policy denials still block execution.
 - Patch operations are exact text replacements, not YAML AST patches.
-- Proposal parsing is JSON-based and may reject free-form evolver output.
-- Search strategy is fixed; advanced beam or successive-halving strategies are not exposed in the manifest.
+- Proposal parsing is JSON-based. When the evolver output is not valid
+  proposal JSON, the controller retries the evolver once with the parse error
+  appended to the digest input, then fails the iteration.
+- Search strategies are limited to `hillclimb` and `pareto`; beam or
+  successive-halving strategies are not exposed in the manifest.
