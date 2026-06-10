@@ -15,6 +15,8 @@ evaluation evidence.
   ledger fixture with DeepSeek V4 Flash, reruns tests, and writes a repair note.
 - [Code review agent](code-review-agent/README.md): reviews a Git diff with
   read-only Git tools and returns structured findings.
+- [Code review team](code-review-team/README.md): runs a lead-worker
+  packet-first review with specialist reviewers and a verifier.
 - [Commit plan agent](commit-plan-agent/README.md): clusters large Git changes
   into reviewable commit themes before staging or committing.
 - [Privacy delegation agent](privacy-delegation-agent/README.md): improves a

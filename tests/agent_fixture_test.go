@@ -14,6 +14,7 @@ import (
 	"github.com/cosmtrek/jeju/internal/compiler"
 	"github.com/cosmtrek/jeju/internal/config"
 	"github.com/cosmtrek/jeju/internal/runs"
+	teamrunner "github.com/cosmtrek/jeju/internal/team"
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
@@ -217,6 +218,110 @@ func TestAgentFixtures(t *testing.T) {
 		}
 	})
 
+	t.Run("agent team deep research fixture runs", func(t *testing.T) {
+		tmp := t.TempDir()
+		workdir := filepath.Join(tmp, "agent-team-deep-research")
+		copyDir(t, fixturePath(t, "agent-team-deep-research"), workdir)
+
+		restoreCWD := chdir(t, workdir)
+		defer restoreCWD()
+
+		ctx := context.Background()
+		goal := "Research agent team mechanisms and recommend the smallest Jeju implementation. Write final report to reports/agent-team-mechanism.md."
+		if err := cli.Execute(ctx, []string{"team", "run", "--output", "final", "teams/agent-team-research.team.yaml", goal}); err != nil {
+			t.Fatalf("team run failed: %v", err)
+		}
+
+		teamRoot := filepath.Join(workdir, ".jeju-dev", "team", "agent-team-deep-research")
+		entries, err := os.ReadDir(teamRoot)
+		if err != nil {
+			t.Fatalf("read team output root failed: %v", err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 team run dir, got %d", len(entries))
+		}
+		runDir := filepath.Join(teamRoot, entries[0].Name())
+		requireFile(t, filepath.Join(runDir, "team.events.jsonl"))
+		requireFile(t, filepath.Join(runDir, "team.summary.json"))
+		requireFile(t, filepath.Join(runDir, "report.html"))
+		requireFile(t, filepath.Join(workdir, "workspace", "research", "reports", "agent-team-mechanism.md"))
+
+		data, err := os.ReadFile(filepath.Join(runDir, "team.summary.json"))
+		if err != nil {
+			t.Fatalf("read team summary failed: %v", err)
+		}
+		var summary struct {
+			Status          string   `json:"status"`
+			RoundCount      int      `json:"round_count"`
+			MaxRounds       int      `json:"max_rounds"`
+			DeclaredWorkers []string `json:"declared_workers"`
+			Tasks           map[string]struct {
+				Worker       string `json:"worker"`
+				Status       string `json:"status"`
+				RoundCreated int    `json:"round_created"`
+				RunID        string `json:"run_id"`
+				Verification struct {
+					Passed bool `json:"passed"`
+				} `json:"verification"`
+			} `json:"tasks"`
+			ChildRuns []struct {
+				Role string `json:"role"`
+			} `json:"child_runs"`
+		}
+		if err := json.Unmarshal(data, &summary); err != nil {
+			t.Fatalf("unmarshal team summary failed: %v", err)
+		}
+		if summary.Status != "completed" {
+			t.Fatalf("team status = %q, want completed", summary.Status)
+		}
+		if summary.RoundCount < 2 || summary.RoundCount > summary.MaxRounds {
+			t.Fatalf("round_count = %d, max = %d", summary.RoundCount, summary.MaxRounds)
+		}
+		if len(summary.Tasks) < 3 {
+			t.Fatalf("expected at least 3 tasks, got %d", len(summary.Tasks))
+		}
+		workers := map[string]bool{}
+		for _, worker := range summary.DeclaredWorkers {
+			workers[worker] = true
+		}
+		for _, want := range []string{"framework_researcher", "jeju_architect", "verifier"} {
+			if !workers[want] {
+				t.Fatalf("declared worker %s missing from summary", want)
+			}
+		}
+		verifierTask, ok := summary.Tasks["synthesis-readiness-check"]
+		if !ok {
+			t.Fatal("verifier task missing")
+		}
+		if verifierTask.RoundCreated <= 1 {
+			t.Fatalf("verifier task round = %d, want after round 1", verifierTask.RoundCreated)
+		}
+		for id, task := range summary.Tasks {
+			if !workers[task.Worker] {
+				t.Fatalf("task %s used undeclared worker %s", id, task.Worker)
+			}
+			if task.Status != "verified" {
+				t.Fatalf("task %s status = %q, want verified", id, task.Status)
+			}
+			if task.RunID == "" || !task.Verification.Passed {
+				t.Fatalf("task %s missing run id or verification pass: %+v", id, task)
+			}
+		}
+		leadRuns := 0
+		workerRuns := 0
+		for _, run := range summary.ChildRuns {
+			if run.Role == "lead" {
+				leadRuns++
+			}
+			if run.Role == "worker" {
+				workerRuns++
+			}
+		}
+		if leadRuns == 0 || workerRuns < 3 {
+			t.Fatalf("unexpected child run roles: lead=%d worker=%d", leadRuns, workerRuns)
+		}
+	})
+
 	t.Run("long horizon fixture compiles", func(t *testing.T) {
 		tmp := t.TempDir()
 		workdir := filepath.Join(tmp, "long-horizon")
@@ -273,6 +378,37 @@ func TestAgentFixtures(t *testing.T) {
 	})
 }
 
+func TestCodeReviewTeamExampleCompiles(t *testing.T) {
+	root := repoRoot(t)
+	teamPath := filepath.Join(root, "examples", "code-review-team", "teams", "code-review.team.yaml")
+	manifest, _, err := teamrunner.LoadFile(teamPath)
+	if err != nil {
+		t.Fatalf("LoadFile(%s) failed: %v", teamPath, err)
+	}
+	if manifest.Metadata.Name != "code-review-team" {
+		t.Fatalf("team name = %q, want code-review-team", manifest.Metadata.Name)
+	}
+	if !manifest.Verification.RequireVerifier {
+		t.Fatal("code review team example should require verifier")
+	}
+	if _, ok := manifest.Workers[teamrunner.VerifierWorkerName]; !ok {
+		t.Fatalf("code review team example missing %q worker", teamrunner.VerifierWorkerName)
+	}
+
+	agentPaths := []string{manifest.Lead.Agent}
+	if manifest.Lead.SynthesisAgent != "" {
+		agentPaths = append(agentPaths, manifest.Lead.SynthesisAgent)
+	}
+	for _, worker := range manifest.Workers {
+		agentPaths = append(agentPaths, worker.Agent)
+	}
+	for _, path := range agentPaths {
+		if _, err := compiler.Compile(path); err != nil {
+			t.Fatalf("Compile(%s) failed: %v", path, err)
+		}
+	}
+}
+
 func copyAgentFixtureWithProvider(t *testing.T, provider, model, envKey string) string {
 	t.Helper()
 	workdir := filepath.Join(t.TempDir(), provider+"-agent")
@@ -299,6 +435,15 @@ func fixturePath(t *testing.T, name string) string {
 		t.Fatal("runtime.Caller failed")
 	}
 	return filepath.Join(filepath.Dir(file), "fixtures", name)
+}
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Dir(filepath.Dir(file))
 }
 
 func copyDir(t *testing.T, src, dst string) {

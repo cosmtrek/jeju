@@ -1,0 +1,92 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: code-review-verifier
+  description: "Verifier for packet-first code review outputs."
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-flash
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.1
+      thinking:
+        type: disabled
+      maxOutputTokens: 4096
+      contextWindow: 128000
+      timeoutSec: 120
+
+instructions:
+  system: ../prompts/verifier.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  recentTokenBudget: 24000
+  limits:
+    maxSteps: 8
+    maxDurationSec: 180
+    maxToolCalls: 8
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace/review
+
+tools:
+  - name: list_review_evidence
+    uses: command
+    description: "Return compact evidence ids for all review packets so verifier can plan targeted evidence checks without loading full packets."
+    capabilities: [workspaceRead]
+    command:
+      run: ../tools/cr-packet.py
+      args: ["evidence-index", "--run-id", "{{run_id}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          run_id:
+            type: string
+            default: current
+            description: "Packet run_id from build-review-packets or reviewer outputs."
+
+  - name: get_review_evidence
+    uses: command
+    description: "Return one packet evidence body by dimension and evidence id so verifier can check whether a finding is supported."
+    capabilities: [workspaceRead]
+    command:
+      run: ../tools/cr-packet.py
+      args: ["evidence", "--run-id", "{{run_id}}", "--dimension", "{{dimension}}", "--id", "{{id}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          run_id:
+            type: string
+            default: current
+            description: "Packet run_id from build-review-packets or reviewer outputs."
+          dimension:
+            type: string
+            enum: [diff_context, runtime_correctness, safety_policy, tests_docs, static_analysis]
+            description: "Packet dimension that owns the evidence id."
+          id:
+            type: string
+            description: "Evidence id to inspect."
+        required: [dimension, id]
+
+permissions:
+  access: readOnly
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules: [finalAnswerExists, runCompleted]

@@ -44,6 +44,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 	root.AddCommand(newInfoCommand())
 	root.AddCommand(newValidateCommand())
 	root.AddCommand(newRunCommand(ctx))
+	root.AddCommand(newTeamCommand(ctx))
 	root.AddCommand(newEvolveCommand(ctx))
 	root.AddCommand(newInspectCommand())
 	root.AddCommand(newViewCommand())

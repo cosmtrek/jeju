@@ -1,0 +1,47 @@
+apiVersion: jeju/v1alpha1
+kind: AgentTeam
+
+metadata:
+  name: agent-team-deep-research
+  description: "Lead-worker team that researches agent team mechanisms."
+
+lead:
+  agent: ../agents/research-lead.agent.yaml
+  synthesisAgent: ../agents/research-synthesis.agent.yaml
+  description: "Plan research tasks, inspect worker gaps, and synthesize the final recommendation."
+
+workers:
+  framework_researcher:
+    agent: ../agents/framework-researcher.agent.yaml
+    description: "Compare external multi-agent mechanisms and extract reusable design patterns."
+    maxTasks: 2
+
+  jeju_architect:
+    agent: ../agents/jeju-architect.agent.yaml
+    description: "Map research patterns onto Jeju's manifest, runtime, context, policy, and trajectory constraints."
+    maxTasks: 2
+
+  verifier:
+    agent: ../agents/verifier.agent.yaml
+    description: "Check worker claims, detect gaps or conflicts, and decide whether synthesis is ready."
+    maxTasks: 2
+
+runtime:
+  topology: lead_worker
+  maxRounds: 4
+  maxTasks: 6
+  maxParallel: 2
+  maxRetriesPerTask: 1
+
+verification:
+  requireStructuredTaskOutput: true
+  requireVerifier: true
+  requiredTaskFields:
+    - summary
+    - findings
+    - evidence
+    - gaps
+    - residual_risk
+
+output:
+  dir: ../.jeju-dev/team/agent-team-deep-research

@@ -1,0 +1,44 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: jeju-architect
+  description: "Worker agent for mapping team patterns to Jeju constraints"
+
+models:
+  providers:
+    primary:
+      type: mock
+      model: mock
+
+instructions:
+  system: ../prompts/jeju-architect.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  limits:
+    maxSteps: 6
+    maxDurationSec: 120
+    maxToolCalls: 4
+    maxConsecutiveErrors: 4
+
+workspace:
+  path: ../workspace/research
+
+tools:
+  - read
+
+permissions:
+  access: readOnly
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules:
+        - finalAnswerExists
+        - runCompleted

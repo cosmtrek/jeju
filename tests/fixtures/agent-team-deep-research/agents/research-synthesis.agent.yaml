@@ -1,0 +1,44 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: research-synthesis
+  description: "Synthesis lead agent for the AgentTeam deep research fixture"
+
+models:
+  providers:
+    primary:
+      type: mock
+      model: mock
+
+instructions:
+  system: ../prompts/research-synthesis.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  limits:
+    maxSteps: 4
+    maxDurationSec: 120
+    maxToolCalls: 4
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace/research
+
+tools:
+  - write
+
+permissions:
+  access: full
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules:
+        - finalAnswerExists
+        - runCompleted
