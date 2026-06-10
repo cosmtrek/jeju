@@ -1,0 +1,44 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: framework-researcher
+  description: "Worker agent for external agent-team mechanism patterns"
+
+models:
+  providers:
+    primary:
+      type: mock
+      model: mock
+
+instructions:
+  system: ../prompts/framework-researcher.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  limits:
+    maxSteps: 6
+    maxDurationSec: 120
+    maxToolCalls: 4
+    maxConsecutiveErrors: 4
+
+workspace:
+  path: ../workspace/research
+
+tools:
+  - read
+
+permissions:
+  access: readOnly
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules:
+        - finalAnswerExists
+        - runCompleted

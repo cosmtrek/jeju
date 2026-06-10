@@ -1,0 +1,59 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: cr-packet-builder
+  description: "Build code review packets from the target workspace diff."
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-flash
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.1
+      thinking:
+        type: disabled
+      maxOutputTokens: 2048
+      contextWindow: 128000
+      timeoutSec: 120
+
+instructions:
+  system: ../prompts/packet-builder.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  recentTokenBudget: 12000
+  limits:
+    maxSteps: 3
+    maxDurationSec: 180
+    maxToolCalls: 2
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace/review
+
+tools:
+  - name: build_review_packets
+    uses: command
+    description: "Build packet-scoped code review evidence under a unique .jeju-dev/code-review-team-packets/<run_id> directory in the target workspace."
+    capabilities: [workspaceWrite]
+    command:
+      run: ../tools/cr-packet.py
+      args: ["build"]
+      timeoutSec: 150
+
+permissions:
+  access: workspace
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules: [finalAnswerExists, runCompleted]

@@ -259,6 +259,7 @@ Current examples cover:
 
 - [Bug rescue agent](examples/bug-rescue-agent/README.md)
 - [Code review agent](examples/code-review-agent/README.md)
+- [Code review team](examples/code-review-team/README.md)
 - [Commit plan agent](examples/commit-plan-agent/README.md)
 - [Privacy delegation agent](examples/privacy-delegation-agent/README.md)
 - [SkillsBench Lite agent](examples/skillsbench-lite-agent/README.md)
@@ -271,6 +272,7 @@ evaluation or evolution where useful.
 - [Agent Manifest](docs/agent-manifest.md)
 - [Trajectory Visualization](docs/trajectory-visualization.md)
 - [Trajectory Format](docs/trajectory-format.md)
+- [Agent Team](docs/agent-team.md)
 - [Evolution Manifest](docs/agent-evolution-manifest.md)
 - [Self Evolution](docs/self-evolution.md)
 - [Manual For Agents](docs/manual-for-agents.md)

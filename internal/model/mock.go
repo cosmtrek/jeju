@@ -29,7 +29,19 @@ func (c *MockClient) Generate(ctx context.Context, req Request) (Response, error
 	taskLower := strings.ToLower(task)
 
 	var payload map[string]any
-	if shouldMockWrite(taskLower, observations) {
+	if strings.Contains(taskLower, "jeju team lead decision") {
+		payload = map[string]any{
+			"type":    "final",
+			"thought": "The mock lead returns a deterministic team decision.",
+			"content": mockTeamDecision(taskLower),
+		}
+	} else if strings.Contains(taskLower, "jeju team worker task") {
+		payload = map[string]any{
+			"type":    "final",
+			"thought": "The mock worker returns structured task output.",
+			"content": mockTeamTaskOutput(task),
+		}
+	} else if shouldMockWrite(taskLower, observations) {
 		payload = map[string]any{
 			"type":    "tool_call",
 			"thought": "The task asks for a saved file, so I will write the requested notes into the workspace.",
@@ -72,6 +84,9 @@ func shouldMockWrite(taskLower, observations string) bool {
 }
 
 func mockWritePath(taskLower string) string {
+	if strings.Contains(taskLower, "agent-team-mechanism.md") {
+		return "reports/agent-team-mechanism.md"
+	}
 	if strings.Contains(taskLower, "notes.md") {
 		return "notes.md"
 	}
@@ -82,12 +97,162 @@ func mockReport(task string) string {
 	if strings.TrimSpace(task) == "" {
 		task = "local agent task"
 	}
+	if strings.Contains(strings.ToLower(task), "jeju team synthesis") {
+		return `# Agent Team Mechanism Recommendation
+
+## Executive Summary
+
+Use a lead-worker AgentTeam where the lead dynamically plans rounds and workers execute isolated subtasks.
+
+## Recommended Jeju Mechanism
+
+Keep AgentTeam as an outer controller. Each worker remains a normal compiled Jeju Agent run.
+
+## Round Evidence
+
+The team ran lead planning, worker task execution, verification, and synthesis.
+
+## Worker Findings
+
+Worker outputs are structured JSON with findings, evidence, gaps, and residual risk.
+
+## Verification Result
+
+Verified task outputs are safe for synthesis.
+
+## Risks and Deferred Work
+
+Defer peer-to-peer chat, shared mailbox, and file locking.
+
+## Acceptance Checklist
+
+- lead_worker topology
+- bounded maxRounds
+- declared worker catalog
+- child run trajectories
+- structured verification
+`
+	}
 	return fmt.Sprintf(`# Jeju Mock Result
 
 Task: %s
 
 This is a deterministic mock response. It demonstrates the full Jeju run lifecycle: model action parsing, permission checking, tool execution, trajectory recording, final output, and rule-based evaluation.
 `, task)
+}
+
+func mockTeamDecision(taskLower string) string {
+	if strings.Contains(taskLower, "blocked decision") {
+		return `{
+  "decision": "blocked",
+  "round_summary": "",
+  "tasks": [],
+  "finish": null
+}`
+	}
+	round := mockTeamRound(taskLower)
+	switch round {
+	case 1:
+		return `{
+  "decision": "continue",
+  "round_summary": "Plan initial framework and Jeju-fit research tasks.",
+  "tasks": [
+    {
+      "id": "framework-summary",
+      "worker": "framework_researcher",
+      "objective": "Extract external agent-team mechanism patterns from the local corpus.",
+      "context_refs": [],
+      "depends_on": [],
+      "output_contract": {
+        "format": "json",
+        "required_fields": ["summary", "findings", "evidence", "gaps", "residual_risk"]
+      }
+    },
+    {
+      "id": "jeju-fit-analysis",
+      "worker": "jeju_architect",
+      "objective": "Map agent-team mechanism patterns onto Jeju runtime constraints.",
+      "context_refs": [],
+      "depends_on": [],
+      "output_contract": {
+        "format": "json",
+        "required_fields": ["summary", "findings", "evidence", "gaps", "residual_risk"]
+      }
+    }
+  ],
+  "finish": null
+}`
+	case 2:
+		return `{
+  "decision": "continue",
+  "round_summary": "Add a verifier task after initial worker outputs.",
+  "tasks": [
+    {
+      "id": "synthesis-readiness-check",
+      "worker": "verifier",
+      "objective": "Check whether the worker findings are complete enough for synthesis.",
+      "context_refs": ["task:framework-summary", "task:jeju-fit-analysis"],
+      "depends_on": ["framework-summary", "jeju-fit-analysis"],
+      "output_contract": {
+        "format": "json",
+        "required_fields": ["summary", "findings", "evidence", "gaps", "residual_risk", "ready_for_synthesis"]
+      }
+    }
+  ],
+  "finish": null
+}`
+	default:
+		return `{
+  "decision": "synthesize",
+  "round_summary": "The verifier task is complete; synthesize the final recommendation.",
+  "tasks": [],
+  "finish": null
+}`
+	}
+}
+
+func mockTeamRound(taskLower string) int {
+	for _, marker := range []string{"round: 1", "round: 2", "round: 3"} {
+		if strings.Contains(taskLower, marker) {
+			switch marker {
+			case "round: 1":
+				return 1
+			case "round: 2":
+				return 2
+			case "round: 3":
+				return 3
+			}
+		}
+	}
+	return 3
+}
+
+func mockTeamTaskOutput(task string) string {
+	lower := strings.ToLower(task)
+	worker := "worker"
+	if strings.Contains(lower, "framework_researcher") {
+		worker = "framework_researcher"
+	}
+	if strings.Contains(lower, "jeju_architect") {
+		worker = "jeju_architect"
+	}
+	if strings.Contains(lower, "verifier") {
+		return `{
+  "summary": "The worker outputs support lead-worker synthesis.",
+  "findings": ["lead_worker topology is represented", "verification is present", "peer chat is deferred"],
+  "evidence": ["framework-summary", "jeju-fit-analysis"],
+  "gaps": [],
+  "residual_risk": "Mock verification does not judge factual quality.",
+  "ready_for_synthesis": true
+}`
+	}
+	return fmt.Sprintf(`{
+  "summary": "Structured mock output from %s.",
+  "findings": ["Use a lead-worker topology", "Keep worker runs isolated", "Use artifacts and task state for communication"],
+  "evidence": ["local corpus", "Jeju runtime constraints"],
+  "gaps": ["Live external source freshness is not checked in mock mode"],
+  "residual_risk": "Mock output validates mechanics, not research quality."
+}`, worker)
 }
 
 func metadataString(values map[string]any, key string) string {
