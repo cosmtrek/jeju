@@ -18,13 +18,20 @@ example is also the validation study that made `pareto` the default
 
 ## Setup
 
-Build the fixed-seed train/selection/test task files (downloads and caches
-the HotpotQA dev distractor split under repo-root `.jeju-dev/cache/`; falls
-back to the HuggingFace datasets server when the CMU mirror is down):
+Build the train/selection/test task files (downloads and caches the HotpotQA
+dev distractor split under repo-root `.jeju-dev/cache/`; falls back to the
+HuggingFace datasets server when the CMU mirror is down):
 
 ```bash
-python3 datasets/build_datasets.py --train 100 --selection 50 --test 100
+python3 datasets/build_datasets.py
 ```
+
+The committed `datasets/manifest.json` pins the exact HotpotQA example ids
+of the 100/50/100 splits used in the validation study below, so this command
+reproduces the benchmark byte-for-byte for anyone, independent of source
+ordering or Python version. To draw a fresh sample instead, pass
+`--resample [--train N --selection N --test N --seed N]`, which also rewrites
+the manifest.
 
 ## Run
 

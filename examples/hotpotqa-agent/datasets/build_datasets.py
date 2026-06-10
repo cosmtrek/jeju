@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Build HotpotQA distractor train/selection/test task files for jeju evolve.
 
-Downloads the official HotpotQA dev (distractor) split, samples a fixed-seed
-subset, and writes train.jsonl / selection.jsonl / test.jsonl next to this
-script. The download is cached under <repo-root>/.jeju-dev/cache/hotpotqa/.
+Downloads the official HotpotQA dev (distractor) split and writes
+train.jsonl / selection.jsonl / test.jsonl next to this script. The download
+is cached under <repo-root>/.jeju-dev/cache/hotpotqa/.
+
+When manifest.json exists next to this script (the committed default), tasks
+are selected by their HotpotQA example ids, which reproduces the exact
+benchmark splits regardless of source ordering or Python version. Without a
+manifest, a fixed-seed random sample is drawn and a new manifest is written.
 
 Usage:
-  python3 build_datasets.py [--train 50] [--selection 30] [--test 50] [--seed 42]
+  python3 build_datasets.py                      # reproduce committed splits
+  python3 build_datasets.py --resample [--train 100] [--selection 50] [--test 100] [--seed 42]
 """
 
 import argparse
@@ -28,6 +34,7 @@ MAX_CONTEXT_CHARS = 20000
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[2]
 CACHE_PATH = REPO_ROOT / ".jeju-dev" / "cache" / "hotpotqa" / "hotpot_dev_distractor_v1.json"
+MANIFEST_PATH = SCRIPT_DIR / "manifest.json"
 
 
 def fetch_from_hf():
@@ -120,16 +127,19 @@ def to_task(example, split, index):
     }
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--train", type=int, default=50)
-    parser.add_argument("--selection", type=int, default=30)
-    parser.add_argument("--test", type=int, default=50)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--url", default=HOTPOT_URL)
-    args = parser.parse_args()
+def splits_from_manifest(examples):
+    manifest = json.loads(MANIFEST_PATH.read_text())
+    by_id = {ex.get("_id", ""): ex for ex in examples}
+    splits = {}
+    for split, ids in manifest["splits"].items():
+        missing = [i for i in ids if i not in by_id]
+        if missing:
+            sys.exit(f"manifest ids missing from source data: {missing[:5]} ...")
+        splits[split] = [by_id[i] for i in ids]
+    return splits
 
-    examples = load_source(args.url)
+
+def splits_from_sample(examples, args):
     usable = [
         ex
         for ex in examples
@@ -139,14 +149,43 @@ def main():
     total = args.train + args.selection + args.test
     if len(usable) < total:
         sys.exit(f"not enough usable examples: have {len(usable)}, need {total}")
-
     rng = random.Random(args.seed)
     sampled = rng.sample(usable, total)
-    splits = {
+    return {
         "train": sampled[: args.train],
         "selection": sampled[args.train : args.train + args.selection],
         "test": sampled[args.train + args.selection :],
     }
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train", type=int, default=100)
+    parser.add_argument("--selection", type=int, default=50)
+    parser.add_argument("--test", type=int, default=100)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--url", default=HOTPOT_URL)
+    parser.add_argument(
+        "--resample",
+        action="store_true",
+        help="ignore manifest.json and draw a fresh fixed-seed sample",
+    )
+    args = parser.parse_args()
+
+    examples = load_source(args.url)
+    if MANIFEST_PATH.exists() and not args.resample:
+        print(f"selecting tasks by id from {MANIFEST_PATH}")
+        splits = splits_from_manifest(examples)
+    else:
+        splits = splits_from_sample(examples, args)
+        manifest = {
+            "source": "hotpot_dev_distractor_v1",
+            "seed": args.seed,
+            "splits": {split: [ex.get("_id", "") for ex in items] for split, items in splits.items()},
+        }
+        MANIFEST_PATH.write_text(json.dumps(manifest, indent=2) + "\n")
+        print(f"wrote {MANIFEST_PATH}")
+
     for split, items in splits.items():
         path = SCRIPT_DIR / f"{split}.jsonl"
         with path.open("w") as f:
