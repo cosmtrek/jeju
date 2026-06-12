@@ -241,6 +241,10 @@ func defaultToolDescription(uses string) string {
 	switch uses {
 	case "builtin:read":
 		return "Read a workspace file in line-based pages. Defaults to the first 200 lines; use offset and limit to continue reading later pages."
+	case "builtin:write":
+		return "Write complete content to a workspace file, creating or replacing the file at the given workspace-relative path."
+	case "builtin:edit":
+		return "Edit a workspace file by replacing one exact text match with new text. The oldText value must appear exactly once."
 	case "builtin:search":
 		return "Search workspace file contents. This is similar to grep or rg: provide a pattern, optional path, optional glob, match mode, context lines, and result limit."
 	default:
