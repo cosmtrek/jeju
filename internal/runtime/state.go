@@ -43,6 +43,7 @@ type RunState struct {
 	LastTokenEstimate     int
 	LastRawTokenEstimate  int
 	TokenCorrectionFactor float64
+	ToolBudgetFinalTried  bool
 }
 
 type RunError struct {

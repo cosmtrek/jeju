@@ -88,7 +88,7 @@ func (c *OpenAICompatibleClient) Generate(ctx context.Context, req Request) (Res
 	}
 	if req.ResponseFormat != nil {
 		body.ResponseFormat = c.responseFormat(req.ResponseFormat)
-	} else if c.Config.JSONMode && len(req.Tools) == 0 {
+	} else if c.Config.JSONMode && len(req.Tools) == 0 && !c.Config.ToolCalling {
 		body.ResponseFormat = &responseFormat{Type: "json_object"}
 	}
 	data, err := json.Marshal(body)

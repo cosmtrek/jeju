@@ -15,6 +15,9 @@ func shouldStop(state *RunState, limits config.RuntimeLimits) error {
 		return fmt.Errorf("max steps exceeded: %d", limits.MaxSteps)
 	}
 	if limits.MaxToolCalls > 0 && state.ToolCalls >= limits.MaxToolCalls {
+		if !state.ToolBudgetFinalTried {
+			return nil
+		}
 		return fmt.Errorf("max tool calls exceeded: %d", limits.MaxToolCalls)
 	}
 	if limits.MaxConsecutiveErrors > 0 && state.ConsecutiveErrors >= limits.MaxConsecutiveErrors {

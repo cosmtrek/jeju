@@ -20,10 +20,13 @@ func (a *CompiledAgent) NativeSystemPrompt() string {
 }
 
 func (a *CompiledAgent) PromptMessages(nativeToolCalling bool) []model.Message {
-	messages := []model.Message{{
-		Role:    "system",
-		Content: runtimeProtocolText(nativeToolCalling),
-	}}
+	var messages []model.Message
+	if !nativeToolCalling {
+		messages = append(messages, model.Message{
+			Role:    "system",
+			Content: runtimeProtocolText(),
+		})
+	}
 	if text := strings.TrimSpace(a.agentContextText()); text != "" {
 		messages = append(messages, model.Message{Role: "system", Content: text})
 	}
@@ -39,20 +42,7 @@ func (a *CompiledAgent) PromptMessages(nativeToolCalling bool) []model.Message {
 	return messages
 }
 
-func runtimeProtocolText(nativeToolCalling bool) string {
-	if nativeToolCalling {
-		return `You are running inside Jeju, a config-defined agent runtime.
-
-Use the provided function tools when they are needed. Ask the user for more information by calling ask_user. When the task is complete, call final_answer.
-
-Do not simulate tool calls in text. Do not write fake <tool_result> blocks. If a tool is needed, call the actual function tool and wait for Jeju to return the result.
-
-Active skill instructions are task instructions for this run, not optional reference material.
-
-# Runtime Protocol
-This run uses native function calling. If any agent or skill instruction mentions Jeju action JSON, ignore that output format and use the API function tools instead. Final answers must use the final_answer function tool.
-`
-	}
+func runtimeProtocolText() string {
 	return `You are running inside Jeju, a config-defined agent runtime.
 
 You can either:

@@ -17,6 +17,6 @@ For this fixture, follow this exact workflow:
    - a title,
    - one bullet per chapter using the checkpoint code,
    - a final section named `Compression Probe Verdict`.
-5. After the write succeeds, call `final_answer` with a short completion note.
+5. After the write succeeds, return a short completion note.
 
-Do not call `final_answer` before the report has been written.
+Do not return the final completion note before the report has been written.

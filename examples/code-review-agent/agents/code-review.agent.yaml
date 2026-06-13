@@ -33,7 +33,7 @@ runtime:
   limits:
     maxSteps: 50
     maxDurationSec: 420
-    maxToolCalls: 45
+    maxToolCalls: 50
     maxConsecutiveErrors: 2
 
 workspace:

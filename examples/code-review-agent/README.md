@@ -35,10 +35,21 @@ From the Jeju checkout, omitting the argument reviews the current directory:
 The default model is `deepseek-v4-pro`. To use another provider, edit the
 manifest's `models.providers.primary` block.
 
-For large diffs, the agent first inspects status, diffstat, and changed file
-lists, then samples the highest-risk subsystems instead of reading the whole
-patch. Any lower-risk clusters it did not inspect are reported as residual risk
-in the final JSON.
+For larger diffs, the agent first inspects status, diffstat, and changed file
+lists before deciding whether to continue. It is intended for small and
+medium-small reviews, not full audits. If the inventory shows a broad,
+unrelated, or full-repository change that cannot be reviewed well with a bounded
+pass, it should return an empty findings array and recommend using a broader
+review tool or splitting the patch. For in-scope diffs, it loads the full
+unstaged and staged diff first, generates internal candidate findings from that
+context, then uses targeted `read` or `search` calls only to validate or reject
+specific candidates. Any lower-risk clusters it did not inspect are reported as
+residual risk in the final JSON.
+
+This is a bounded risk review, not an exhaustive audit. It favors high-signal
+diff evidence, small source reads, and early final output over broad repository
+exploration. Cross-file issues that require deep caller/callee chains or
+lower-risk clusters may be omitted and should be treated as residual risk.
 
 The script runs `jeju run --output final --runs-dir .jeju-dev/runs/code-review`,
 so stdout contains only the JSON review. The full trajectory is still saved

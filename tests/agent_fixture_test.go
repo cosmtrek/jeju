@@ -205,11 +205,12 @@ func TestAgentFixtures(t *testing.T) {
 			t.Fatalf("system prompt does not include loaded deep research skill workflow:\n%s", prompt)
 		}
 		messages := agent.PromptMessages(true)
-		if len(messages) < 5 {
+		if len(messages) < 4 {
 			t.Fatalf("expected layered prompt messages, got %+v", messages)
 		}
-		if messages[0].Role != "system" || !strings.Contains(messages[0].Content, "Jeju, a config-defined agent runtime") {
-			t.Fatalf("first prompt layer should be runtime system protocol: %+v", messages[0])
+		if messages[0].Role != "system" || !strings.Contains(messages[0].Content, "# Agent Instructions") ||
+			strings.Contains(messages[0].Content, "Jeju, a config-defined agent runtime") {
+			t.Fatalf("first native prompt layer should be agent instructions without Jeju runtime protocol: %+v", messages[0])
 		}
 		last := messages[len(messages)-1]
 		if last.Role != "user" || !strings.Contains(last.Content, "# Active Skill Instructions") ||

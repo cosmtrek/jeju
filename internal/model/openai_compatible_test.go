@@ -247,6 +247,45 @@ func TestOpenAICompatibleClientDoesNotForceJSONModeWhenToolsArePresent(t *testin
 	}
 }
 
+func TestOpenAICompatibleClientDoesNotForceJSONModeForNativePlainFinal(t *testing.T) {
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"test-model",
+			"choices":[{"message":{"role":"assistant","content":"plain final"}}],
+			"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}
+		}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("JEJU_TEST_API_KEY", "test")
+	client := NewOpenAICompatibleClient(ProviderConfig{
+		Provider:    "mimo",
+		Model:       "test-model",
+		BaseURL:     server.URL,
+		EnvKey:      "JEJU_TEST_API_KEY",
+		JSONMode:    true,
+		ToolCalling: true,
+	})
+
+	resp, err := client.Generate(context.Background(), Request{
+		Messages: []Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if resp.Text != "plain final" {
+		t.Fatalf("unexpected response text %q", resp.Text)
+	}
+	if _, ok := request["response_format"]; ok {
+		t.Fatalf("did not expect automatic JSON response_format for native plain final: %#v", request["response_format"])
+	}
+}
+
 func TestOpenAICompatibleClientReplaysReasoningContent(t *testing.T) {
 	var request map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

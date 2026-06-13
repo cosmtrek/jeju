@@ -223,11 +223,22 @@ func (r *Runtime) buildModelRequest(agent *compiler.CompiledAgent, state *RunSta
 	messages := agent.PromptMessages(cfg.ToolCalling)
 	var requestTools []model.ToolDefinition
 	var responseFormat *model.ResponseFormat
-	if cfg.ToolCalling {
-		requestTools = nativeToolDefinitions(agent.Tools.Specs(), cfg)
-		if len(requestTools) == 0 {
-			responseFormat = finalResponseFormat(cfg)
-		}
+	toolBudgetExhausted := agent.Config.Runtime.Limits.MaxToolCalls > 0 && state.ToolCalls >= agent.Config.Runtime.Limits.MaxToolCalls
+	if cfg.ToolCalling && !toolBudgetExhausted {
+		requestTools = nativeToolDefinitions(agent.Tools.Specs())
+	}
+	if toolBudgetExhausted && cfg.JSONMode {
+		responseFormat = &model.ResponseFormat{Type: "jsonObject"}
+	}
+	if toolBudgetExhausted && !state.ToolBudgetFinalTried {
+		state.Messages = append(state.Messages, model.Message{
+			Role: "user",
+			Content: fmt.Sprintf(
+				"Tool budget exhausted after %d completed tool calls. Do not call tools. Return the best final answer now using the available evidence.",
+				state.ToolCalls,
+			),
+		})
+		state.ToolBudgetFinalTried = true
 	}
 	messages = append(messages, state.Messages...)
 	return model.Request{
@@ -548,8 +559,8 @@ func parseSummaryResponse(text string) (string, error) {
 	return summary, nil
 }
 
-func nativeToolDefinitions(specs []tools.Spec, cfg model.ProviderConfig) []model.ToolDefinition {
-	defs := make([]model.ToolDefinition, 0, len(specs)+2)
+func nativeToolDefinitions(specs []tools.Spec) []model.ToolDefinition {
+	defs := make([]model.ToolDefinition, 0, len(specs))
 	for _, spec := range specs {
 		defs = append(defs, model.ToolDefinition{
 			Name:        spec.Name,
@@ -558,50 +569,7 @@ func nativeToolDefinitions(specs []tools.Spec, cfg model.ProviderConfig) []model
 			Strict:      false,
 		})
 	}
-	defs = append(defs, model.ToolDefinition{
-		Name:        "ask_user",
-		Description: "Ask the user for required missing information before continuing.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"question": map[string]any{"type": "string"},
-			},
-			"required":             []string{"question"},
-			"additionalProperties": false,
-		},
-		Strict: cfg.JSONSchemaMode,
-	})
-	defs = append(defs, model.ToolDefinition{
-		Name:        "final_answer",
-		Description: "Finish the run with the final answer after required tool work is complete.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"content": map[string]any{"type": "string"},
-			},
-			"required":             []string{"content"},
-			"additionalProperties": false,
-		},
-		Strict: cfg.JSONSchemaMode,
-	})
 	return defs
-}
-
-func finalResponseFormat(cfg model.ProviderConfig) *model.ResponseFormat {
-	return &model.ResponseFormat{
-		Type:   "jsonSchema",
-		Name:   "jeju_final_response",
-		Strict: cfg.JSONSchemaMode,
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"thought": map[string]any{"type": "string"},
-				"content": map[string]any{"type": "string"},
-			},
-			"required":             []string{"content"},
-			"additionalProperties": false,
-		},
-	}
 }
 
 func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, resp model.Response) error {
@@ -612,60 +580,6 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 			ReasoningContent: resp.ReasoningContent,
 			ToolCalls:        resp.ToolCalls,
 		})
-		if len(resp.ToolCalls) == 1 && resp.ToolCalls[0].Name == "ask_user" {
-			call := resp.ToolCalls[0]
-			action := Action{Type: ActionAskUser}
-			var input struct {
-				Question string `json:"question"`
-			}
-			if err := json.Unmarshal(call.Arguments, &input); err != nil {
-				state.AddError("action_parse", err)
-				emitActionParseFailed(ctx, recorder, state, err)
-				addNativeToolFeedback(state, call, fmt.Sprintf("Tool ask_user failed: invalid JSON arguments: %s. Re-issue ask_user with valid JSON arguments.", err.Error()))
-				return nil
-			}
-			action.Question = input.Question
-			state.Messages[len(state.Messages)-1] = model.Message{Role: "assistant", Content: input.Question, ReasoningContent: resp.ReasoningContent}
-			emitAction(ctx, recorder, state, action)
-			r.handleAskUser(ctx, recorder, state, action)
-			return nil
-		}
-		if len(resp.ToolCalls) == 1 && resp.ToolCalls[0].Name == "final_answer" {
-			call := resp.ToolCalls[0]
-			var input struct {
-				Content string `json:"content"`
-			}
-			if err := json.Unmarshal(call.Arguments, &input); err != nil {
-				state.AddError("action_parse", err)
-				emitActionParseFailed(ctx, recorder, state, err)
-				addNativeToolFeedback(state, call, fmt.Sprintf("Tool final_answer failed: invalid JSON arguments: %s. Re-issue final_answer with valid JSON arguments and keep content concise.", err.Error()))
-				return nil
-			}
-			if strings.TrimSpace(input.Content) == "" {
-				err := fmt.Errorf("final_answer missing content")
-				state.AddError("action_parse", err)
-				emitActionParseFailed(ctx, recorder, state, err)
-				addNativeToolFeedback(state, call, "Tool final_answer failed: content must be a non-empty string. Re-issue final_answer with concise non-empty content.")
-				return nil
-			}
-			state.Messages[len(state.Messages)-1] = model.Message{Role: "assistant", Content: input.Content, ReasoningContent: resp.ReasoningContent}
-			emitAction(ctx, recorder, state, Action{Type: ActionFinal, Content: input.Content})
-			state.Final = input.Content
-			state.Status = StatusCompleted
-			return nil
-		}
-
-		for _, call := range resp.ToolCalls {
-			if call.Name == "ask_user" || call.Name == "final_answer" {
-				err := fmt.Errorf("control tool %q must be the only native tool call", call.Name)
-				state.AddError("action_parse", err)
-				emitActionParseFailed(ctx, recorder, state, err)
-				for _, feedbackCall := range resp.ToolCalls {
-					addNativeToolFeedback(state, feedbackCall, fmt.Sprintf("Tool %s failed: %s. Return ask_user or final_answer as a single function tool call.", feedbackCall.Name, err.Error()))
-				}
-				return nil
-			}
-		}
 
 		for _, call := range resp.ToolCalls {
 			action := Action{
@@ -696,47 +610,18 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 	}
 
 	state.Messages = append(state.Messages, model.Message{Role: "assistant", Content: resp.Text, ReasoningContent: resp.ReasoningContent})
-	content, err := parseFinalContent(resp.Text)
-	if err != nil {
-		state.AddError("action_parse", err)
-		emitActionParseFailed(ctx, recorder, state, err)
-		state.AddObservation("Final response must be a JSON object with a non-empty content string. Use function tools for tool calls; do not simulate tool calls in text.")
-		return nil
-	}
-	if strings.TrimSpace(content) == "" {
+	content := strings.TrimSpace(resp.Text)
+	if content == "" {
 		err := fmt.Errorf("native model response missing final content")
 		state.AddError("action_parse", err)
 		emitActionParseFailed(ctx, recorder, state, err)
-		state.AddObservation("Return a final response with a non-empty content field.")
+		state.AddObservation("Return a non-empty final response, or call one of the provided function tools.")
 		return nil
 	}
 	emitAction(ctx, recorder, state, Action{Type: ActionFinal, Content: content})
 	state.Final = content
 	state.Status = StatusCompleted
 	return nil
-}
-
-func addNativeToolFeedback(state *RunState, call model.ToolCall, content string) {
-	state.Observations = append(state.Observations, content)
-	if call.ID == "" {
-		state.Messages = append(state.Messages, model.Message{Role: "user", Content: "Observation: " + content})
-		return
-	}
-	state.Messages = append(state.Messages, model.Message{
-		Role:       "tool",
-		ToolCallID: call.ID,
-		Content:    content,
-	})
-}
-
-func parseFinalContent(text string) (string, error) {
-	var envelope struct {
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal([]byte(text), &envelope); err == nil && envelope.Content != "" {
-		return envelope.Content, nil
-	}
-	return "", fmt.Errorf("native final response is not valid structured JSON")
 }
 
 func lastObservation(state *RunState) string {
@@ -755,6 +640,12 @@ func reasoningPreview(text string) string {
 }
 
 func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, action Action) {
+	if max := agent.Config.Runtime.Limits.MaxToolCalls; max > 0 && state.ToolCalls >= max {
+		err := fmt.Errorf("max tool calls exceeded: %d", max)
+		state.AddError("tool", err)
+		state.AddObservation(fmt.Sprintf("Tool %s was not run because the tool budget is exhausted. Return a final answer using the available evidence.", action.Tool))
+		return
+	}
 	if action.ToolCallID == "" {
 		action.ToolCallID = fmt.Sprintf("call_%03d_%s", state.Step, sanitizeArtifactSuffix(action.Tool))
 	}
