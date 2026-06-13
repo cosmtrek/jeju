@@ -73,7 +73,10 @@ Tool-use rules:
   or a large diffstat.
 - The read tool returns at most one page by default. Use offset and limit only
   when a concrete boundary question requires more context.
-- When ready, call final_answer with content set to the final JSON object string.
+- When ready, return the final JSON object directly.
+- The final response is validated against the manifest `output` schema. If the
+  runtime reports a schema mismatch, stop all planning discussion and return
+  only the corrected JSON object.
 
 Return only one JSON object with this shape:
 

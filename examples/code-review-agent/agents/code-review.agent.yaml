@@ -157,3 +157,45 @@ tools:
 permissions:
   access: readOnly
   approval: never
+
+output:
+  name: code_review_result
+  schema:
+    type: object
+    required: [summary, findings, residual_risk]
+    additionalProperties: false
+    properties:
+      summary:
+        type: string
+      findings:
+        type: array
+        items:
+          type: object
+          required:
+            - severity
+            - file
+            - line
+            - title
+            - evidence
+            - impact
+            - recommendation
+          additionalProperties: false
+          properties:
+            severity:
+              type: string
+              enum: [P0, P1, P2, P3]
+            file:
+              type: string
+            line:
+              type: integer
+              description: "Use a 1-based line number when there is a specific line; use 0 for file-level findings."
+            title:
+              type: string
+            evidence:
+              type: string
+            impact:
+              type: string
+            recommendation:
+              type: string
+      residual_risk:
+        type: string

@@ -10,6 +10,7 @@ import (
 
 	"github.com/cosmtrek/jeju/internal/compiler"
 	"github.com/cosmtrek/jeju/internal/config"
+	"github.com/cosmtrek/jeju/internal/jsonschemautil"
 	"github.com/cosmtrek/jeju/internal/memory"
 	"github.com/cosmtrek/jeju/internal/model"
 	"github.com/cosmtrek/jeju/internal/policy"
@@ -122,6 +123,51 @@ func (c *nativeToolBudgetClient) Generate(ctx context.Context, req model.Request
 	}, nil
 }
 
+type nativeOutputSchemaClient struct {
+	requests []model.Request
+}
+
+func (c *nativeOutputSchemaClient) Generate(ctx context.Context, req model.Request) (model.Response, error) {
+	c.requests = append(c.requests, req)
+	switch len(c.requests) {
+	case 1:
+		return model.Response{
+			Provider: "openaiCompatible",
+			Model:    "fake-native",
+			ToolCalls: []model.ToolCall{{
+				ID:        "call_1",
+				Name:      "write",
+				Arguments: json.RawMessage(`{"path":"notes.md","content":"evidence"}`),
+			}},
+		}, nil
+	case 2:
+		return model.Response{
+			Provider: "openaiCompatible",
+			Model:    "fake-native",
+			Text:     `{"summary":""}`,
+		}, nil
+	default:
+		return model.Response{
+			Provider: "openaiCompatible",
+			Model:    "fake-native",
+			Text:     `{"summary":"done","count":1}`,
+		}, nil
+	}
+}
+
+type nativeAlwaysInvalidOutputClient struct {
+	requests []model.Request
+}
+
+func (c *nativeAlwaysInvalidOutputClient) Generate(ctx context.Context, req model.Request) (model.Response, error) {
+	c.requests = append(c.requests, req)
+	return model.Response{
+		Provider: "openaiCompatible",
+		Model:    "fake-native",
+		Text:     `{"summary":""}`,
+	}, nil
+}
+
 func TestRuntimeUsesNativeToolCalls(t *testing.T) {
 	tmp := t.TempDir()
 	workspace := filepath.Join(tmp, "workspace")
@@ -214,6 +260,157 @@ func TestRuntimeUsesNativeToolCalls(t *testing.T) {
 	}
 	if second[len(second)-2].Content != "I will write the requested note before finishing." {
 		t.Fatalf("second request did not replay assistant content from tool-call turn: %+v", second[len(second)-2])
+	}
+}
+
+func TestRuntimeValidatesOutputSchemaAfterNativeToolCalls(t *testing.T) {
+	tmp := t.TempDir()
+	workspace := filepath.Join(tmp, "workspace")
+	box, err := sandbox.NewLocal(workspace)
+	if err != nil {
+		t.Fatalf("NewLocal failed: %v", err)
+	}
+	registry := tools.NewRegistry()
+	if err := registry.Register(builtin.NewFileWrite(tools.Spec{
+		Name:         "write",
+		Description:  "Write a file",
+		Capabilities: []string{"workspaceWrite"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":    map[string]any{"type": "string"},
+				"content": map[string]any{"type": "string"},
+			},
+			"required": []string{"path", "content"},
+		},
+	}, box)); err != nil {
+		t.Fatalf("register write failed: %v", err)
+	}
+
+	client := &nativeOutputSchemaClient{}
+	models := model.NewRegistry()
+	models.Add("primary", model.ProviderConfig{
+		Name:           "primary",
+		Provider:       "openaiCompatible",
+		Model:          "fake-native",
+		ToolCalling:    true,
+		JSONSchemaMode: true,
+	}, client)
+
+	store := runs.NewStore(filepath.Join(tmp, "runs"))
+	agent := &compiler.CompiledAgent{
+		Name:         "native-output",
+		Instructions: "Write evidence, then return structured output.",
+		Config: config.AgentManifest{
+			Metadata: config.Metadata{Name: "native-output"},
+			Runtime: config.RuntimeConfig{
+				Model: "primary",
+				Limits: config.RuntimeLimits{
+					MaxSteps:             2,
+					MaxDurationSec:       30,
+					MaxToolCalls:         4,
+					MaxConsecutiveErrors: 3,
+				},
+			},
+			Permissions: config.PermissionsConfig{Access: "workspace", Approval: "never"},
+		},
+		ConfigSnapshot: []byte("apiVersion: jeju/v1alpha1\nkind: Agent\n"),
+		Models:         models,
+		Tools:          registry,
+		Skills:         skills.NewRegistry(),
+		Memory:         memory.Noop{},
+		Sandbox:        box,
+		Policy:         policy.NewGate(config.PermissionsConfig{Access: "workspace", Approval: "never"}),
+		Output:         mustOutputSpec(t),
+		RunStore:       store,
+	}
+
+	result, err := New().Run(context.Background(), agent, "save evidence and summarize")
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.Status != StatusCompleted || result.Final != `{"summary":"done","count":1}` {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(client.requests) != 3 {
+		t.Fatalf("expected three model requests, got %d", len(client.requests))
+	}
+	if len(client.requests[0].Tools) == 0 {
+		t.Fatal("first request should keep normal tool calling available")
+	}
+	if client.requests[0].ResponseFormat == nil || client.requests[0].ResponseFormat.Type != "jsonSchema" {
+		t.Fatalf("first request should include final response schema without blocking tools: %+v", client.requests[0].ResponseFormat)
+	}
+	if len(client.requests[2].Tools) != 0 {
+		t.Fatalf("schema retry should disable tools, got %+v", client.requests[2].Tools)
+	}
+	events, err := trajectory.ReadFile(filepath.Join(store.BasePath, result.RunID, runs.TrajectoryFile))
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if !hasActionKind(events, "final_validation_failed") {
+		t.Fatalf("missing final validation failure action: %+v", events)
+	}
+	if !hasFinalArtifactMediaType(events, "application/json") {
+		t.Fatalf("missing JSON final artifact: %+v", events)
+	}
+}
+
+func TestRuntimeFailsWhenOutputSchemaRetryIsInvalid(t *testing.T) {
+	tmp := t.TempDir()
+	box, err := sandbox.NewLocal(filepath.Join(tmp, "workspace"))
+	if err != nil {
+		t.Fatalf("NewLocal failed: %v", err)
+	}
+	client := &nativeAlwaysInvalidOutputClient{}
+	models := model.NewRegistry()
+	models.Add("primary", model.ProviderConfig{
+		Name:           "primary",
+		Provider:       "openaiCompatible",
+		Model:          "fake-native",
+		ToolCalling:    true,
+		JSONSchemaMode: true,
+	}, client)
+
+	agent := &compiler.CompiledAgent{
+		Name:         "native-output-fail",
+		Instructions: "Return structured output.",
+		Config: config.AgentManifest{
+			Metadata: config.Metadata{Name: "native-output-fail"},
+			Runtime: config.RuntimeConfig{
+				Model: "primary",
+				Limits: config.RuntimeLimits{
+					MaxSteps:             3,
+					MaxDurationSec:       30,
+					MaxToolCalls:         4,
+					MaxConsecutiveErrors: 3,
+				},
+			},
+			Permissions: config.PermissionsConfig{Access: "workspace", Approval: "never"},
+		},
+		ConfigSnapshot: []byte("apiVersion: jeju/v1alpha1\nkind: Agent\n"),
+		Models:         models,
+		Tools:          tools.NewRegistry(),
+		Skills:         skills.NewRegistry(),
+		Memory:         memory.Noop{},
+		Sandbox:        box,
+		Policy:         policy.NewGate(config.PermissionsConfig{Access: "workspace", Approval: "never"}),
+		Output:         mustOutputSpec(t),
+		RunStore:       runs.NewStore(filepath.Join(tmp, "runs")),
+	}
+
+	result, err := New().Run(context.Background(), agent, "summarize")
+	if err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+	if result.Status != StatusFailed {
+		t.Fatalf("expected failed status, got %+v", result)
+	}
+	if len(client.requests) != 2 {
+		t.Fatalf("expected initial request plus one schema retry, got %d", len(client.requests))
+	}
+	if !strings.Contains(result.Final, "did not match output schema") {
+		t.Fatalf("unexpected final failure message: %q", result.Final)
 	}
 }
 
@@ -564,6 +761,58 @@ func TestRuntimeReplaysAllNativeToolCalls(t *testing.T) {
 			t.Fatalf("expected distinct tool output artifact %s", id)
 		}
 	}
+}
+
+func mustOutputSpec(t *testing.T) compiler.OutputSpec {
+	t.Helper()
+	raw := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"summary": map[string]any{"type": "string", "minLength": 1},
+			"count":   map[string]any{"type": "integer"},
+		},
+		"required":             []string{"summary", "count"},
+		"additionalProperties": false,
+	}
+	schema, err := jsonschemautil.Normalize(raw)
+	if err != nil {
+		t.Fatalf("Normalize schema failed: %v", err)
+	}
+	compiled, err := jsonschemautil.Compile("task_result", schema)
+	if err != nil {
+		t.Fatalf("Compile schema failed: %v", err)
+	}
+	return compiler.OutputSpec{
+		Name:           "task_result",
+		Schema:         schema,
+		CompiledSchema: compiled,
+		MaxRetries:     1,
+	}
+}
+
+func hasActionKind(events []trajectory.Event, kind string) bool {
+	for _, event := range events {
+		if event.Type == trajectory.EventActionCreated {
+			if value, ok := event.Payload["kind"].(string); ok && value == kind {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasFinalArtifactMediaType(events []trajectory.Event, mediaType string) bool {
+	for _, event := range events {
+		if event.Type != trajectory.EventArtifactCreated {
+			continue
+		}
+		role, _ := event.Payload["role"].(string)
+		got, _ := event.Payload["media_type"].(string)
+		if role == "final" && got == mediaType {
+			return true
+		}
+	}
+	return false
 }
 
 func hasPermissionDecision(events []trajectory.Event, decision string) bool {

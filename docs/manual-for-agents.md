@@ -28,8 +28,9 @@ Before writing files, identify:
 
 - Purpose: one sentence describing the repeated workflow.
 - Input contract: what the user or parent agent passes to `jeju run`.
-- Output contract: final answer shape, preferably structured JSON or concise
-  markdown.
+- Output contract: final answer shape. Prefer manifest `output` with inline
+  JSON Schema for structured JSON; use concise markdown only when free-form
+  prose is the intended product.
 - Workspace binding: which local project directory is inspected or changed.
 - Tool needs: read/search/write/edit/shell/http/command tools, with why each is
   needed.
@@ -96,6 +97,7 @@ Optional top-level fields:
 - `tools`: built-in, command, or HTTP tools.
 - `skills`: skill roots and manually active skill names.
 - `permissions`: access and approval policy.
+- `output`: final answer JSON Schema contract.
 - `evaluate`: post-run evaluators.
 
 Minimal read-only specialist:
@@ -147,6 +149,22 @@ tools:
 permissions:
   access: readOnly
   approval: never
+
+output:
+  name: repo_summary
+  schema:
+    type: object
+    required: [summary, findings, residual_risk]
+    additionalProperties: false
+    properties:
+      summary:
+        type: string
+      findings:
+        type: array
+        items:
+          type: string
+      residual_risk:
+        type: string
 
 evaluate:
   enabled: true
@@ -236,6 +254,34 @@ tools:
 
 Declare capabilities accurately: `workspaceRead`, `workspaceWrite`, `command`,
 `networkRead`, or `networkWrite`.
+
+## Output
+
+Use `output` when the final answer is machine-consumed JSON:
+
+```yaml
+output:
+  name: triage_result
+  schema:
+    type: object
+    required: [summary, severity]
+    additionalProperties: false
+    properties:
+      summary:
+        type: string
+      severity:
+        type: string
+        enum: [low, medium, high]
+```
+
+Keep the exact JSON shape in the manifest and keep the prompt focused on
+workflow, field semantics, and non-goals. Do not duplicate a large JSON Schema
+block in the prompt unless a weak provider needs a short reminder.
+
+`output.schema` currently supports inline JSON Schema. Jeju validates final
+answers locally. If the model returns non-JSON or JSON that does not match the
+schema, Jeju retries once with tools disabled and then fails the run if the
+retry also violates the schema.
 
 ## Skills
 
@@ -357,7 +403,7 @@ the repository can be reorganized:
 ```bash
 rg -n "AgentManifest|ToolConfig|finalAnswerExists|workspace.path|permissions.access|compressionThreshold"
 rg -n "config.LoadFile|config.Validate|compiler.Compile|runtime.Run"
-rg -n "uses: command|uses: http|allowed-tools|active skills|evaluate"
+rg -n "uses: command|uses: http|allowed-tools|active skills|evaluate|output.schema"
 ```
 
 Look for current docs, schema structs, defaults, validators, compiler behavior,

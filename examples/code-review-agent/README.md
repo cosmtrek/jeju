@@ -8,7 +8,7 @@ returns structured findings directly as the final answer.
 It demonstrates:
 
 - fixed task shape: review the current workspace changes
-- fixed output contract: JSON review findings
+- fixed output contract: manifest `output.schema` for JSON review findings
 - read-only repository inspection with `git_status`, diffstat/name-only tools,
   path-scoped `git_diff` / `git_diff_cached`, `read`, and `search`
 - provider swap point: the manifest's `models.providers.primary` block
@@ -35,6 +35,12 @@ From the Jeju checkout, omitting the argument reviews the current directory:
 The default model is `deepseek-v4-pro`. To use another provider, edit the
 manifest's `models.providers.primary` block.
 
+The manifest declares the final review shape in `output.schema`. Jeju validates
+the final answer locally, retries once if the model returns non-JSON or schema
+invalid JSON, and fails the run if the retry still does not match. The prompt
+therefore describes workflow and field semantics, while the manifest owns the
+machine-readable output contract.
+
 For larger diffs, the agent first inspects status, diffstat, and changed file
 lists before deciding whether to continue. It is intended for small and
 medium-small reviews, not full audits. If the inventory shows a broad,
@@ -52,9 +58,10 @@ exploration. Cross-file issues that require deep caller/callee chains or
 lower-risk clusters may be omitted and should be treated as residual risk.
 
 The script runs `jeju run --output final --runs-dir .jeju-dev/runs/code-review`,
-so stdout contains only the JSON review. The full trajectory is still saved
-under `.jeju-dev/runs/code-review/<run_id>/trajectory.jsonl`; the final answer
-is recorded as a `final` artifact inside that log.
+so stdout contains only the JSON review after a direct JSON parse. The full
+trajectory is still saved under
+`.jeju-dev/runs/code-review/<run_id>/trajectory.jsonl`; the final answer is
+recorded as a JSON `final` artifact inside that log.
 
 The manifest keeps `workspace.path` pointed at this example's local placeholder
 workspace so it can be validated in place. For normal reuse, keep the agent

@@ -33,6 +33,9 @@ func (a *CompiledAgent) PromptMessages(nativeToolCalling bool) []model.Message {
 	if text := strings.TrimSpace(a.toolContextText()); text != "" {
 		messages = append(messages, model.Message{Role: "system", Content: text})
 	}
+	if text := strings.TrimSpace(a.outputContextText(nativeToolCalling)); text != "" {
+		messages = append(messages, model.Message{Role: "system", Content: text})
+	}
 	if text := strings.TrimSpace(skills.DisclosureText(a.Skills)); text != "" {
 		messages = append(messages, model.Message{Role: "system", Content: "# Disclosed Skills\n" + text})
 	}
@@ -92,6 +95,26 @@ func (a *CompiledAgent) toolContextText() string {
 		b.Write(data)
 		b.WriteString("\n")
 	}
+	return b.String()
+}
+
+func (a *CompiledAgent) outputContextText(nativeToolCalling bool) string {
+	if a.Output.CompiledSchema == nil {
+		return ""
+	}
+	data, _ := json.MarshalIndent(a.Output.Schema, "", "  ")
+	var b strings.Builder
+	b.WriteString("# Final Output Schema\n")
+	b.WriteString("Name: ")
+	b.WriteString(a.Output.Name)
+	b.WriteString("\n")
+	if nativeToolCalling {
+		b.WriteString("When you are ready to finish, return only a JSON value that matches this schema. Intermediate tool calls use each tool's own input schema and do not need to match this final output schema.\n")
+	} else {
+		b.WriteString("When you are ready to finish, the final action content must be a JSON value encoded as a string that matches this schema.\n")
+	}
+	b.Write(data)
+	b.WriteString("\n")
 	return b.String()
 }
 

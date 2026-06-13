@@ -110,6 +110,24 @@ permissions:
   access: workspace
   approval: onRequest
 
+output:
+  name: research_result
+  schema:
+    type: object
+    properties:
+      summary: { type: string }
+      sources:
+        type: array
+        items:
+          type: object
+          properties:
+            title: { type: string }
+            url: { type: string }
+          required: [title, url]
+          additionalProperties: false
+    required: [summary, sources]
+    additionalProperties: false
+
 evaluate:
   enabled: true
   evaluators:
@@ -147,6 +165,7 @@ evaluate:
 | `tools` | no | Tool capabilities exposed to the agent. |
 | `skills` | no | Skill directories and active skills. |
 | `permissions` | no | Access and approval profile. |
+| `output` | no | Optional final answer JSON Schema contract. |
 | `evaluate` | no | Optional evaluators run after completion. |
 
 ## Models
@@ -186,7 +205,7 @@ Provider fields:
 
 Jeju keeps the manifest model fields provider-neutral and maps them in the model adapter. OpenAI-style structured output and function calling are protocol capabilities, not user-facing loop-format knobs: the runtime prefers native tool/function calling when the provider supports it, and uses structured outputs or JSON mode for final/evaluator outputs. Provider presets are where API spelling differences live, such as OpenAI `reasoning_effort`, DeepSeek/MiMo `thinking.type`, and MiMo `max_completion_tokens`.
 
-For `openaiCompatible` providers, Jeju sends tools as function definitions by default. It asks for final answers with a structured response schema when the provider supports JSON Schema response formats, and falls back to JSON object mode for providers such as DeepSeek where the documented structured-output surface is JSON mode rather than schema-strict response format.
+For `openaiCompatible` providers, Jeju sends tools as function definitions by default. It asks for final answers with a structured response schema when the provider supports JSON Schema response formats. For providers such as DeepSeek where the documented structured-output surface is JSON mode rather than schema-strict response format, Jeju relies on prompt guidance while tools are available, validates the final answer locally, and uses JSON object mode on the tool-disabled schema retry turn.
 
 When `thinking.type: enabled` is used with providers that return `reasoning_content` such as DeepSeek and MiMo, Jeju writes the full thinking text as a trajectory artifact, shows a short console preview, and keeps the assistant `reasoning_content` in message history so the next tool-call turn can pass it back to the API. OpenAI Responses reasoning items and Gemini thought signatures follow the same preservation principle, but require provider-specific adapters.
 
@@ -320,6 +339,30 @@ permissions:
 - `never`: allowed calls run, blocked calls fail.
 - `onRequest`: sensitive calls such as writes, command execution, and network access ask first.
 - `always`: all side-effecting calls ask first.
+
+## Output
+
+```yaml
+output:
+  name: triage_result
+  schema:
+    type: object
+    properties:
+      summary: { type: string }
+      severity: { type: string, enum: [low, medium, high] }
+    required: [summary, severity]
+    additionalProperties: false
+```
+
+`output` defines the final answer contract for a run. The schema is inline JSON
+Schema; schema files are not supported yet. When configured, Jeju asks providers
+that support JSON Schema response formats to use the schema for final assistant
+content. Intermediate tool calls still follow each tool's own input schema.
+
+Jeju always validates the final answer locally. If the model returns output that
+is not valid JSON or does not match the schema, Jeju retries once with tools
+disabled and asks for the final JSON again. If the retry also fails, the run
+fails and records the schema validation error in the trajectory.
 
 ## Evaluate
 

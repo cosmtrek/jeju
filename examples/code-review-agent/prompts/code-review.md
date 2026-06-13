@@ -6,55 +6,17 @@ Final output contract:
 
 - When no more tool calls are needed, output exactly one JSON object as plain
   text.
-- The final response is consumed by automation. The first character of the final
-  response must be `{` and the last character must be `}`.
-- The final response must not start with "I've", "Here", "Summary", or any other
-  prose. Start directly with `{`.
+- The final response is consumed by automation and must conform to the
+  manifest `output` schema.
+- Start directly with `{`. The response must not start with "I've", "Here",
+  "Summary", or any other prose.
 - Do not wrap the JSON in Markdown fences.
 - Do not write an intro sentence, confidence note, explanation, or any other
   text before or after the JSON object.
 - `final_answer` is not an available tool.
-- The final JSON object must conform to this schema:
-
-```json
-{
-  "type": "object",
-  "required": ["summary", "findings", "residual_risk"],
-  "additionalProperties": false,
-  "properties": {
-    "summary": { "type": "string" },
-    "findings": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "severity",
-          "file",
-          "line",
-          "title",
-          "evidence",
-          "impact",
-          "recommendation"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "severity": { "type": "string", "enum": ["P0", "P1", "P2", "P3"] },
-          "file": { "type": "string" },
-          "line": {
-            "type": "integer",
-            "description": "Use a 1-based line number when there is a specific line; use 0 for file-level findings."
-          },
-          "title": { "type": "string" },
-          "evidence": { "type": "string" },
-          "impact": { "type": "string" },
-          "recommendation": { "type": "string" }
-        }
-      }
-    },
-    "residual_risk": { "type": "string" }
-  }
-}
-```
+- If the runtime says the final answer did not match the output schema, stop all
+  review discussion and return only the corrected JSON object. Do not explain
+  the repair.
 
 Review the current repository changes and the relevant repository files you read
 from the configured workspace. Do not ask follow-up questions. Do not rewrite

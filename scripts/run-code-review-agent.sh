@@ -41,32 +41,17 @@ printf '%s\n' "$validate_output" >&2
   final_output="$("$bin" run --output final --runs-dir "$runs_dir" --workspace "$target_workspace" "$agent_dir/$manifest" "Review the current repository workspace changes. Use read-only Git and file inspection tools, then return the JSON review result directly.")"
   printf '%s\n' "$final_output" | python3 -c '
 import json
-import re
 import sys
 
 text = sys.stdin.read().strip()
 
-def try_emit(candidate):
-    parsed = json.loads(candidate)
-    print(json.dumps(parsed, ensure_ascii=False, separators=(",", ":")))
+try:
+    parsed = json.loads(text)
+except json.JSONDecodeError:
+    print("code-review final output was not valid JSON", file=sys.stderr)
+    print(text, file=sys.stderr)
+    raise SystemExit(1)
 
-candidates = [text]
-for match in re.finditer(r"```(?:json)?\s*(.*?)\s*```", text, re.S):
-    candidates.append(match.group(1).strip())
-start = text.find("{")
-end = text.rfind("}")
-if start != -1 and end != -1 and end > start:
-    candidates.append(text[start : end + 1])
-
-for candidate in candidates:
-    try:
-        try_emit(candidate)
-        raise SystemExit(0)
-    except json.JSONDecodeError:
-        continue
-
-print("code-review final output was not valid JSON", file=sys.stderr)
-print(text, file=sys.stderr)
-raise SystemExit(1)
+print(json.dumps(parsed, ensure_ascii=False, separators=(",", ":")))
 '
 )

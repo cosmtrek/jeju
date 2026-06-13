@@ -34,16 +34,18 @@ type RunState struct {
 	Final        string
 	FinalRef     string
 
-	ModelCalls            int
-	ToolCalls             int
-	ModelErrors           int
-	ToolErrors            int
-	PermissionDenied      int
-	ConsecutiveErrors     int
-	LastTokenEstimate     int
-	LastRawTokenEstimate  int
-	TokenCorrectionFactor float64
-	ToolBudgetFinalTried  bool
+	ModelCalls                  int
+	ToolCalls                   int
+	ModelErrors                 int
+	ToolErrors                  int
+	PermissionDenied            int
+	ConsecutiveErrors           int
+	LastTokenEstimate           int
+	LastRawTokenEstimate        int
+	TokenCorrectionFactor       float64
+	ToolBudgetFinalTried        bool
+	FinalValidationRetries      int
+	FinalValidationRetryPending bool
 }
 
 type RunError struct {

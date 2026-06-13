@@ -5,7 +5,8 @@ changes into coherent commit themes.
 
 It is intended to run before code review or committing. The agent does not stage
 files, create commits, edit files, or judge code correctness. It returns a
-strict JSON plan that a supervising agent or human can verify.
+strict JSON plan, validated by the manifest `output.schema`, that a supervising
+agent or human can verify.
 
 It demonstrates:
 
@@ -40,12 +41,14 @@ The script builds the local Jeju binary and runs:
 jeju run --output final --runs-dir .jeju-dev/runs/commit-plan ...
 ```
 
-stdout contains only the JSON commit plan. The full trajectory is saved under
+stdout contains only the JSON commit plan. If the model returns non-JSON or
+schema-invalid JSON, Jeju retries once and then fails the run if the retry still
+does not match. The full trajectory is saved under
 `.jeju-dev/runs/commit-plan/<run_id>/trajectory.jsonl`.
 
 ## Output Contract
 
-The final answer is one JSON object with:
+The manifest `output.schema` requires one JSON object with:
 
 - `summary`: overall worktree theme
 - `scale`: changed/staged/unstaged/untracked file counts and large-change flag

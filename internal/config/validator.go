@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/cosmtrek/jeju/internal/jsonschemautil"
 )
 
 var validNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
@@ -163,6 +165,9 @@ func Validate(m *AgentManifest) error {
 	if err := validateSkills(m.Skills); err != nil {
 		return err
 	}
+	if err := validateOutput(m.Output); err != nil {
+		return err
+	}
 	if err := validateEvaluators(m.Evaluate, m.Models.Providers, m.Runtime.Model); err != nil {
 		return err
 	}
@@ -261,6 +266,26 @@ func validateSkills(cfg SkillsConfig) error {
 		if !info.IsDir() {
 			return fmt.Errorf("skills dir %q is not a directory", dir)
 		}
+	}
+	return nil
+}
+
+func validateOutput(cfg OutputConfig) error {
+	if cfg.Name == "" && cfg.Schema == nil {
+		return nil
+	}
+	if cfg.Name == "" {
+		return fmt.Errorf("output.name is required when output is configured")
+	}
+	if cfg.Schema == nil {
+		return fmt.Errorf("output.schema is required when output is configured")
+	}
+	schema, err := jsonschemautil.Normalize(cfg.Schema)
+	if err != nil {
+		return fmt.Errorf("output.schema is invalid: %w", err)
+	}
+	if _, err := jsonschemautil.Compile(cfg.Name, schema); err != nil {
+		return fmt.Errorf("output.schema is invalid: %w", err)
 	}
 	return nil
 }

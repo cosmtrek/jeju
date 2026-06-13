@@ -57,3 +57,35 @@ tools:
 permissions:
   access: workspace
   approval: never
+
+output:
+  name: bug_rescue_result
+  schema:
+    type: object
+    required: [status, bug, changed_files, tests, repair_note, residual_risk]
+    additionalProperties: false
+    properties:
+      status:
+        type: string
+        enum: [fixed, partial, failed]
+      bug:
+        type: string
+      changed_files:
+        type: array
+        items:
+          type: string
+      tests:
+        type: object
+        required: [before, after]
+        additionalProperties: false
+        properties:
+          before:
+            type: string
+            enum: [passed, failed, not_run]
+          after:
+            type: string
+            enum: [passed, failed, not_run]
+      repair_note:
+        type: string
+      residual_risk:
+        type: string

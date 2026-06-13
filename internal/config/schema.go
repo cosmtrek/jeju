@@ -18,6 +18,7 @@ type AgentManifest struct {
 	Tools        []ToolConfig       `yaml:"tools,omitempty"`
 	Skills       SkillsConfig       `yaml:"skills,omitempty"`
 	Permissions  PermissionsConfig  `yaml:"permissions,omitempty"`
+	Output       OutputConfig       `yaml:"output,omitempty"`
 	Evaluate     EvaluateConfig     `yaml:"evaluate,omitempty"`
 }
 
@@ -142,6 +143,11 @@ type SkillsConfig struct {
 type PermissionsConfig struct {
 	Access   string `yaml:"access,omitempty"`
 	Approval string `yaml:"approval,omitempty"`
+}
+
+type OutputConfig struct {
+	Name   string `yaml:"name,omitempty"`
+	Schema any    `yaml:"schema,omitempty"`
 }
 
 type EvaluateConfig struct {

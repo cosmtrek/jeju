@@ -8,6 +8,7 @@ import (
 
 	"github.com/cosmtrek/jeju/internal/config"
 	"github.com/cosmtrek/jeju/internal/evaluate"
+	"github.com/cosmtrek/jeju/internal/jsonschemautil"
 	"github.com/cosmtrek/jeju/internal/memory"
 	"github.com/cosmtrek/jeju/internal/model"
 	"github.com/cosmtrek/jeju/internal/policy"
@@ -19,6 +20,7 @@ import (
 	toolcli "github.com/cosmtrek/jeju/internal/tools/cli"
 	"github.com/cosmtrek/jeju/internal/tools/command"
 	toolhttp "github.com/cosmtrek/jeju/internal/tools/http"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"gopkg.in/yaml.v3"
 )
@@ -35,9 +37,17 @@ type CompiledAgent struct {
 	Memory         memory.Store
 	Sandbox        sandbox.Sandbox
 	Policy         *policy.Gate
+	Output         OutputSpec
 	Evaluators     []evaluate.Evaluator
 	RunStore       *runs.Store
 	systemPrompt   string
+}
+
+type OutputSpec struct {
+	Name           string
+	Schema         any
+	CompiledSchema *jsonschema.Schema
+	MaxRetries     int
 }
 
 type Options struct {
@@ -89,6 +99,10 @@ func CompileWithOptions(manifestPath string, opts Options) (*CompiledAgent, erro
 	if err != nil {
 		return nil, err
 	}
+	output, err := compileOutput(manifest.Output)
+	if err != nil {
+		return nil, err
+	}
 
 	agent := &CompiledAgent{
 		Name:           manifest.Metadata.Name,
@@ -102,6 +116,7 @@ func CompileWithOptions(manifestPath string, opts Options) (*CompiledAgent, erro
 		Memory:         memory.Noop{},
 		Sandbox:        box,
 		Policy:         policy.NewGate(manifest.Permissions),
+		Output:         output,
 		Evaluators:     evaluators,
 		RunStore:       opts.RunStore,
 	}
@@ -235,6 +250,26 @@ func compileToolSpec(cfg config.ToolConfig) (tools.Spec, error) {
 	}
 	spec.InputSchema = schema
 	return spec, nil
+}
+
+func compileOutput(cfg config.OutputConfig) (OutputSpec, error) {
+	if cfg.Name == "" && cfg.Schema == nil {
+		return OutputSpec{}, nil
+	}
+	schema, err := jsonschemautil.Normalize(cfg.Schema)
+	if err != nil {
+		return OutputSpec{}, fmt.Errorf("output.schema: %w", err)
+	}
+	compiled, err := jsonschemautil.Compile(cfg.Name, schema)
+	if err != nil {
+		return OutputSpec{}, fmt.Errorf("output.schema: %w", err)
+	}
+	return OutputSpec{
+		Name:           cfg.Name,
+		Schema:         schema,
+		CompiledSchema: compiled,
+		MaxRetries:     1,
+	}, nil
 }
 
 func defaultToolDescription(uses string) string {

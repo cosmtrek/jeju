@@ -10,6 +10,7 @@ It demonstrates a full bounded workflow:
 - make a minimal source edit
 - rerun tests
 - write a short repair note
+- return a manifest-validated JSON repair result
 - inspect the complete trajectory and HTML report
 
 The committed fixture is never edited directly. The run script copies it to
@@ -46,6 +47,7 @@ jeju view --runs-dir .jeju-dev/runs/bug-rescue <run_id>
 ## Expected Result
 
 The agent should fix the ledger rounding bug, make the tests pass, and write
-`REPAIR.md` in the copied workspace. The run evidence is saved under
+`REPAIR.md` in the copied workspace. The final JSON result is validated by the
+manifest `output.schema`. The run evidence is saved under
 `.jeju-dev/runs/bug-rescue/<run_id>/trajectory.jsonl` with a derived
 `report.html`.

@@ -542,6 +542,32 @@ func TestValidateExplainDistinguishesEnabledEmptyEvaluators(t *testing.T) {
 	}
 }
 
+func TestValidateExplainPrintsOutputContract(t *testing.T) {
+	manifest := minimalExplainManifest(t, true)
+	manifest.Output = config.OutputConfig{
+		Name: "review_result",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"summary": map[string]any{"type": "string"},
+			},
+			"required": []string{"summary"},
+		},
+	}
+	output := captureStdout(t, func() {
+		printManifestExplanation(manifest)
+	})
+	for _, want := range []string{
+		"Output:",
+		"output.name -> review_result",
+		"output.schema -> inline",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("validate --explain output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestValidateRejectsUnknownOption(t *testing.T) {
 	err := Execute(context.Background(), []string{"validate", "--unknown", "agent.yaml"})
 	if err == nil {

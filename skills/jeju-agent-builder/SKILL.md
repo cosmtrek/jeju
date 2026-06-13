@@ -42,8 +42,9 @@ Before writing files, identify:
 
 - Purpose: one sentence describing the repeated workflow.
 - Input contract: what the user or parent agent passes to `jeju run`.
-- Output contract: final answer shape, preferably structured JSON or concise
-  markdown.
+- Output contract: final answer shape. Prefer manifest `output` with inline
+  JSON Schema for structured JSON; use concise markdown only when free-form
+  prose is the intended product.
 - Workspace binding: which local project directory is inspected or changed.
 - Tool needs: read/search/write/edit/shell/http/command tools, with why each is
   needed.
@@ -139,6 +140,22 @@ permissions:
   access: readOnly
   approval: never
 
+output:
+  name: repo_summary
+  schema:
+    type: object
+    required: [summary, findings, residual_risk]
+    additionalProperties: false
+    properties:
+      summary:
+        type: string
+      findings:
+        type: array
+        items:
+          type: string
+      residual_risk:
+        type: string
+
 evaluate:
   enabled: true
   evaluators:
@@ -163,6 +180,13 @@ evaluate:
   `command`, `networkRead`, or `networkWrite`.
 - Make the system prompt narrow: exact workflow, output format, inspection
   strategy, residual-risk reporting, and non-goals.
+- For structured final JSON, put the exact shape in manifest `output.schema`
+  and keep the prompt focused on workflow and field semantics. Do not duplicate
+  a large JSON Schema block in the prompt unless a weak provider needs a short
+  reminder.
+- `output.schema` currently supports inline JSON Schema. Jeju validates final
+  output locally, retries once with tools disabled if the final answer does not
+  match, and fails the run if the retry also violates the schema.
 - Include at least a smoke evaluator when practical.
 
 ## Install Jeju If Needed
@@ -214,7 +238,7 @@ the repository can be reorganized:
 ```bash
 rg -n "AgentManifest|ToolConfig|finalAnswerExists|workspace.path|permissions.access|compressionThreshold"
 rg -n "config.LoadFile|config.Validate|compiler.Compile|runtime.Run"
-rg -n "uses: command|uses: http|allowed-tools|active skills|evaluate"
+rg -n "uses: command|uses: http|allowed-tools|active skills|evaluate|output.schema"
 ```
 
 Look for current docs, schema structs, defaults, validators, compiler behavior,

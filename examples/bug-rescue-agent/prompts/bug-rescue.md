@@ -23,6 +23,9 @@ Rules:
 - Do not hide failures by weakening assertions or changing test expectations.
 - Stop after tests pass and REPAIR.md is written.
 - If tests still fail after two edits, report the remaining failure and stop.
+- The final response is validated against the manifest `output` schema. If the
+  runtime reports a schema mismatch, stop all repair discussion and return only
+  the corrected JSON object.
 
 Return only one JSON object with this shape:
 

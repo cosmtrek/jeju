@@ -11,10 +11,11 @@ Jeju is an experimental local-first agent harness for developers who want agent
 behavior to be explicit, bounded, inspectable, and evaluable.
 
 A Jeju agent is defined by a manifest: model provider, instructions, runtime
-loop, workspace, tools, skills, permissions, context budget, and evaluators.
-Jeju validates and compiles that manifest, runs the agent against a local
-workspace, records every meaningful effect in `trajectory.jsonl`, and can use
-evaluation evidence to improve the agent with `jeju evolve`.
+loop, workspace, tools, skills, permissions, context budget, optional output
+schema, and evaluators. Jeju validates and compiles that manifest, runs the
+agent against a local workspace, records every meaningful effect in
+`trajectory.jsonl`, and can use evaluation evidence to improve the agent with
+`jeju evolve`.
 
 Jeju is not a broad multi-agent platform. It is strongest when a local workflow
 can be packaged as a focused agent with clear tools, permissions, run evidence,
@@ -107,8 +108,9 @@ reference.
 
 ## Key Capabilities
 
-- **Config-defined behavior**: keep the agent contract in one manifest, with
-  prompts and runtime skills as adjacent files.
+- **Config-defined behavior**: keep the agent contract in one manifest,
+  including optional final output schemas, with prompts and runtime skills as
+  adjacent files.
 - **Strict execution boundaries**: constrain work inside explicit workspace,
   tool, skill, permission, sandbox, timeout, and context-window limits.
 - **Effect-level inspection**: record lifecycle, model, context, tool,
@@ -204,6 +206,18 @@ tools:
 permissions:
   access: readOnly
   approval: never
+
+output:
+  name: repo_summary
+  schema:
+    type: object
+    required: [summary, findings]
+    additionalProperties: false
+    properties:
+      summary: { type: string }
+      findings:
+        type: array
+        items: { type: string }
 
 evaluate:
   enabled: true

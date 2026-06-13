@@ -72,6 +72,14 @@ func printManifestExplanation(manifest *config.AgentManifest) {
 	fmt.Printf("  permissions.access -> %s\n", manifest.Permissions.Access)
 	fmt.Printf("  permissions.approval -> %s\n", manifest.Permissions.Approval)
 
+	fmt.Println("Output:")
+	if manifest.Output.Name == "" && manifest.Output.Schema == nil {
+		fmt.Println("  (none)")
+	} else {
+		fmt.Printf("  output.name -> %s\n", manifest.Output.Name)
+		fmt.Println("  output.schema -> inline")
+	}
+
 	fmt.Println("Tools:")
 	if len(manifest.Tools) == 0 {
 		fmt.Println("  (none)")

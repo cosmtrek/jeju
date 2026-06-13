@@ -174,3 +174,91 @@ tools:
 permissions:
   access: readOnly
   approval: never
+
+output:
+  name: commit_plan_result
+  schema:
+    type: object
+    required: [summary, scale, commit_plan, outliers, needs_decision, residual_risk]
+    additionalProperties: false
+    properties:
+      summary:
+        type: string
+      scale:
+        type: object
+        required: [changed_files, staged_files, unstaged_files, untracked_files, large_change]
+        additionalProperties: false
+        properties:
+          changed_files:
+            type: integer
+          staged_files:
+            type: integer
+          unstaged_files:
+            type: integer
+          untracked_files:
+            type: integer
+          large_change:
+            type: boolean
+      commit_plan:
+        type: array
+        items:
+          type: object
+          required: [order, message, theme, files, rationale, split_confidence, independent_verification, depends_on]
+          additionalProperties: false
+          properties:
+            order:
+              type: integer
+            message:
+              type: string
+            theme:
+              type: string
+            files:
+              type: array
+              items:
+                type: string
+            rationale:
+              type: string
+            split_confidence:
+              type: string
+              enum: [high, medium, low]
+            independent_verification:
+              type: array
+              items:
+                type: string
+            depends_on:
+              type: array
+              items:
+                type: integer
+      outliers:
+        type: array
+        items:
+          type: object
+          required: [file, reason, suggested_action]
+          additionalProperties: false
+          properties:
+            file:
+              type: string
+            reason:
+              type: string
+            suggested_action:
+              type: string
+              enum: [separate commit, inspect manually, leave unstaged]
+      needs_decision:
+        type: array
+        items:
+          type: object
+          required: [question, files, options]
+          additionalProperties: false
+          properties:
+            question:
+              type: string
+            files:
+              type: array
+              items:
+                type: string
+            options:
+              type: array
+              items:
+                type: string
+      residual_risk:
+        type: string

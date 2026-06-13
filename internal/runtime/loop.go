@@ -12,6 +12,7 @@ import (
 	"github.com/cosmtrek/jeju/internal/compiler"
 	"github.com/cosmtrek/jeju/internal/contextmgr"
 	"github.com/cosmtrek/jeju/internal/evaluate"
+	"github.com/cosmtrek/jeju/internal/jsonschemautil"
 	"github.com/cosmtrek/jeju/internal/model"
 	"github.com/cosmtrek/jeju/internal/policy"
 	"github.com/cosmtrek/jeju/internal/tools"
@@ -106,15 +107,18 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, modelName string) error {
 	client, cfg, ok := agent.Models.Get(modelName)
 	if !ok {
+		state.FinalValidationRetryPending = false
 		return fmt.Errorf("model %q is not compiled", modelName)
 	}
 	req, err := r.prepareModelRequest(ctx, agent, recorder, state, client, cfg)
 	if err != nil {
+		state.FinalValidationRetryPending = false
 		if contextmgr.IsOverflow(err) {
 			state.Status = StatusFailed
 		}
 		return err
 	}
+	state.FinalValidationRetryPending = false
 	inputData, _ := json.MarshalIndent(req, "", "  ")
 	inputRef := writeArtifact(ctx, recorder, state, "model_input", "", inputData, "model_input", "application/json")
 	modelSpanID := llmSpanID(state.Step, "primary")
@@ -205,12 +209,13 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 	if action.Type == ActionToolCall && action.ToolCallID == "" {
 		action.ToolCallID = fmt.Sprintf("call_%03d_%s", state.Step, sanitizeArtifactSuffix(action.Tool))
 	}
-	emitAction(ctx, recorder, state, action)
+	if action.Type != ActionFinal {
+		emitAction(ctx, recorder, state, action)
+	}
 
 	switch action.Type {
 	case ActionFinal:
-		state.Final = action.Content
-		state.Status = StatusCompleted
+		r.handleFinal(ctx, agent, recorder, state, action.Content, action.Thought)
 	case ActionToolCall:
 		r.handleToolCall(ctx, agent, recorder, state, action)
 	case ActionAskUser:
@@ -224,10 +229,19 @@ func (r *Runtime) buildModelRequest(agent *compiler.CompiledAgent, state *RunSta
 	var requestTools []model.ToolDefinition
 	var responseFormat *model.ResponseFormat
 	toolBudgetExhausted := agent.Config.Runtime.Limits.MaxToolCalls > 0 && state.ToolCalls >= agent.Config.Runtime.Limits.MaxToolCalls
-	if cfg.ToolCalling && !toolBudgetExhausted {
+	if cfg.ToolCalling && !toolBudgetExhausted && !state.FinalValidationRetryPending {
 		requestTools = nativeToolDefinitions(agent.Tools.Specs())
 	}
-	if toolBudgetExhausted && cfg.JSONMode {
+	if agent.Output.CompiledSchema != nil && cfg.JSONSchemaMode {
+		responseFormat = &model.ResponseFormat{
+			Type:   "jsonSchema",
+			Name:   agent.Output.Name,
+			Schema: agent.Output.Schema,
+			Strict: true,
+		}
+	} else if agent.Output.CompiledSchema != nil && cfg.JSONMode && len(requestTools) == 0 {
+		responseFormat = &model.ResponseFormat{Type: "jsonObject"}
+	} else if toolBudgetExhausted && cfg.JSONMode {
 		responseFormat = &model.ResponseFormat{Type: "jsonObject"}
 	}
 	if toolBudgetExhausted && !state.ToolBudgetFinalTried {
@@ -618,10 +632,58 @@ func (r *Runtime) handleNativeModelResponse(ctx context.Context, agent *compiler
 		state.AddObservation("Return a non-empty final response, or call one of the provided function tools.")
 		return nil
 	}
-	emitAction(ctx, recorder, state, Action{Type: ActionFinal, Content: content})
+	r.handleFinal(ctx, agent, recorder, state, content, "")
+	return nil
+}
+
+func (r *Runtime) handleFinal(ctx context.Context, agent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, content string, thought string) {
+	content = strings.TrimSpace(content)
+	if err := validateFinalOutput(agent, content); err != nil {
+		if state.FinalValidationRetries < maxFinalValidationRetries(agent) {
+			state.FinalValidationRetries++
+			state.FinalValidationRetryPending = true
+			state.AddError("final_schema", err)
+			emitFinalValidationFailed(ctx, recorder, state, err)
+			state.AddObservation(fmt.Sprintf(
+				"Final answer did not match output schema %q: %s. Return only a JSON value that matches the schema. Do not call tools.",
+				agent.Output.Name,
+				err.Error(),
+			))
+			return
+		}
+		state.AddError("final_schema", err)
+		emitFinalValidationFailed(ctx, recorder, state, err)
+		state.Final = fmt.Sprintf("Run failed because final answer did not match output schema %q after %d retry.", agent.Output.Name, state.FinalValidationRetries)
+		state.Status = StatusFailed
+		return
+	}
+	emitActionWithFinalMediaType(ctx, recorder, state, Action{Type: ActionFinal, Thought: thought, Content: content}, finalMediaType(agent))
 	state.Final = content
 	state.Status = StatusCompleted
-	return nil
+}
+
+func validateFinalOutput(agent *compiler.CompiledAgent, content string) error {
+	if agent.Output.CompiledSchema == nil {
+		return nil
+	}
+	return jsonschemautil.ValidateJSON(agent.Output.CompiledSchema, content)
+}
+
+func maxFinalValidationRetries(agent *compiler.CompiledAgent) int {
+	if agent.Output.CompiledSchema == nil {
+		return 0
+	}
+	if agent.Output.MaxRetries <= 0 {
+		return 1
+	}
+	return agent.Output.MaxRetries
+}
+
+func finalMediaType(agent *compiler.CompiledAgent) string {
+	if agent.Output.CompiledSchema != nil {
+		return "application/json"
+	}
+	return "text/markdown"
 }
 
 func lastObservation(state *RunState) string {
@@ -969,6 +1031,10 @@ func spanStatusForRun(status RunStatus) trajectory.SpanStatus {
 }
 
 func emitAction(ctx context.Context, recorder *trajectory.Recorder, state *RunState, action Action) {
+	emitActionWithFinalMediaType(ctx, recorder, state, action, "text/markdown")
+}
+
+func emitActionWithFinalMediaType(ctx context.Context, recorder *trajectory.Recorder, state *RunState, action Action, finalMediaType string) {
 	payload := map[string]any{
 		"action_id": fmt.Sprintf("act_%03d_%s", state.Step, sanitizeArtifactSuffix(string(action.Type))),
 		"kind":      string(action.Type),
@@ -985,11 +1051,19 @@ func emitAction(ctx context.Context, recorder *trajectory.Recorder, state *RunSt
 		payload["question"] = action.Question
 	}
 	if action.Content != "" {
-		ref := writeArtifact(ctx, recorder, state, "final", "", []byte(action.Content), "final", "text/markdown")
+		ref := writeArtifact(ctx, recorder, state, "final", "", []byte(action.Content), "final", finalMediaType)
 		state.FinalRef = ref
 		payload["final"] = map[string]any{"content_ref": ref}
 	}
 	recorder.Emit(ctx, trajectory.EventActionCreated, state.RunID, state.Step, "runtime", payload)
+}
+
+func emitFinalValidationFailed(ctx context.Context, recorder *trajectory.Recorder, state *RunState, err error) {
+	recorder.Emit(ctx, trajectory.EventActionCreated, state.RunID, state.Step, "runtime", map[string]any{
+		"action_id": fmt.Sprintf("act_%03d_final_validation_failed_%d", state.Step, state.FinalValidationRetries),
+		"kind":      "final_validation_failed",
+		"error":     map[string]any{"message": err.Error()},
+	})
 }
 
 func emitActionParseFailed(ctx context.Context, recorder *trajectory.Recorder, state *RunState, err error) {
