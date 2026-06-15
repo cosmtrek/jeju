@@ -154,6 +154,36 @@ README.md
 Keep the manifest as the source of truth. Put durable behavior in the manifest
 and adjacent bundle files rather than hardcoding runtime branches.
 
+## Agent Package
+
+Agent Package is the distribution layer for one reusable `kind: Agent`. It wraps
+an existing agent bundle with a small `jeju.package.yaml` manifest so the agent
+can be packed, added to a local content-addressed store, updated from a saved
+source, inspected, removed, and run by a stable reference.
+
+```bash
+jeju package init ./agents/code-review --agent agent.yaml --id coding/code-review --version 0.1.0
+jeju package validate ./agents/code-review
+jeju package pack ./agents/code-review --out dist/
+jeju package add dist/coding-code-review-0.1.0.jpkg
+jeju run package://coding/code-review@0.1.0 "Review current diff."
+```
+
+Package-backed runs still use the normal runtime path:
+
+```text
+config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run
+```
+
+The package layer does not reinterpret tasks or duplicate runtime semantics from
+`agent.yaml`; it provides distribution metadata, source provenance, digest-based
+storage, and stable refs. Package sources can be local artifacts, GitHub or
+generic Git subdirectories, or `jeju:` registry refs backed by
+`JEJU_REGISTRY_INDEX`.
+
+See [Agent Package](docs/agent-package.md) for the manifest fields, source
+reference syntax, local store shape, and command details.
+
 ## How It Works
 
 Jeju treats an agent as a small, explicit harness unit instead of an opaque
@@ -300,6 +330,7 @@ evaluation or evolution where useful.
 - [Agent Manifest](docs/agent-manifest.md)
 - [Trajectory Visualization](docs/trajectory-visualization.md)
 - [Trajectory Format](docs/trajectory-format.md)
+- [Agent Package](docs/agent-package.md)
 - [Agent Team](docs/agent-team.md)
 - [Evolution Manifest](docs/agent-evolution-manifest.md)
 - [Self Evolution](docs/self-evolution.md)
