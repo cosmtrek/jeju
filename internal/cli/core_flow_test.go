@@ -376,7 +376,12 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		}
 	})
 	for _, want := range []string{
-		"Jeju - config-defined local agent runtime",
+		"Jeju - Local-first agent harness",
+		"Define behavior in config, run with boundaries, inspect every effect,",
+		"and improve with evaluation evidence.",
+		"Version:",
+		"jeju dev",
+		"commit:",
 		"jeju init <name> [<dir>] [--dir <dir>]",
 		"Scaffold a local agent bundle",
 		"jeju info",
@@ -395,9 +400,19 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		"Open an HTML run report",
 		"jeju runs",
 		"List local runs",
+		"jeju init research --dir ./research-agent",
+		"jeju validate ./research-agent/agents/research.agent.yaml",
+		`jeju run ./research-agent/agents/research.agent.yaml "Create a short note explaining this agent run lifecycle."`,
+		"jeju inspect <run_id>",
+		"jeju view <run_id>",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q:\n%s", want, output)
+		}
+	}
+	for _, old := range []string{"mkdir -p", "cd ~/jeju-agents"} {
+		if strings.Contains(output, old) {
+			t.Fatalf("help output still contains old setup example %q:\n%s", old, output)
 		}
 	}
 }

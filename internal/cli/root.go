@@ -20,17 +20,14 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 
 	root := &cobra.Command{
 		Use:   "jeju",
-		Short: "config-defined local agent runtime",
-		Example: `  mkdir -p ~/jeju-agents
-  jeju init research --dir ~/jeju-agents/research-agent
-  cd ~/jeju-agents/research-agent
-  jeju info
-  jeju validate agents/research.agent.yaml
-  jeju validate --explain agents/research.agent.yaml
-  jeju run agents/research.agent.yaml "Create a short note explaining this agent run lifecycle and save it to notes.md"
-  jeju run --runs-dir .jeju-dev/runs/code-review --workspace /path/to/project agents/code-review.agent.yaml "Review the current repository changes."
-  jeju evolve --baseline-only experiments/research-evolve.yaml
-  jeju view 20260526-120000-research`,
+		Short: "Local-first agent harness",
+		Long:  rootLongDescription(),
+		Example: `  jeju init research --dir ./research-agent
+  jeju validate ./research-agent/agents/research.agent.yaml
+  jeju run ./research-agent/agents/research.agent.yaml "Create a short note explaining this agent run lifecycle."
+  jeju runs
+  jeju inspect <run_id>
+  jeju view <run_id>`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -52,6 +49,28 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 	root.AddCommand(newRunsCommand())
 	root.AddCommand(newVersionCommand())
 	return root
+}
+
+func rootLongDescription() string {
+	return `Jeju - Local-first agent harness
+
+Define behavior in config, run with boundaries, inspect every effect,
+and improve with evaluation evidence.
+
+Version:
+` + indentLines(formatVersionInfo(), "  ")
+}
+
+func indentLines(text, prefix string) string {
+	text = strings.TrimRight(text, "\n")
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func newInitCommand() *cobra.Command {
@@ -216,7 +235,7 @@ func newVersionCommand() *cobra.Command {
 	}
 }
 
-const rootHelpTemplate = `Jeju - {{.Short}}
+const rootHelpTemplate = `{{if .Long}}{{.Long}}{{else}}Jeju - {{.Short}}{{end}}
 
 Usage:
 {{- if .HasAvailableSubCommands}}

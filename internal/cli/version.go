@@ -13,12 +13,13 @@ var (
 )
 
 func runVersion() error {
-	info := buildVersionInfo()
-	fmt.Printf("jeju %s\n", version)
-	fmt.Printf("commit: %s\n", info.commit)
-	fmt.Printf("branch: %s\n", info.branch)
-	fmt.Printf("built: %s\n", info.date)
+	fmt.Print(formatVersionInfo())
 	return nil
+}
+
+func formatVersionInfo() string {
+	info := buildVersionInfo()
+	return fmt.Sprintf("jeju %s\ncommit: %s\nbranch: %s\nbuilt: %s\n", version, info.commit, info.branch, info.date)
 }
 
 type versionInfo struct {
