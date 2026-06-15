@@ -43,6 +43,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 	root.AddCommand(newInitCommand())
 	root.AddCommand(newInfoCommand())
 	root.AddCommand(newValidateCommand())
+	root.AddCommand(newPackageCommand(ctx))
 	root.AddCommand(newRunCommand(ctx))
 	root.AddCommand(newTeamCommand(ctx))
 	root.AddCommand(newEvolveCommand(ctx))
@@ -103,13 +104,13 @@ func newRunCommand(ctx context.Context) *cobra.Command {
 	var output string
 	var runsDir string
 	cmd := &cobra.Command{
-		Use:          `run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent.yaml> "<task>"`,
+		Use:          `run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent-ref> "<task>"`,
 		Short:        "Run an agent against a task",
 		Args:         cobra.MinimumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if isMisplacedRunFlag(args[1]) {
-				return cmd.FlagErrorFunc()(cmd, fmt.Errorf("run flags must appear before <agent.yaml>; use -- before the task if it starts with flag-like text"))
+				return cmd.FlagErrorFunc()(cmd, fmt.Errorf("run flags must appear before <agent-ref>; use -- before the task if it starts with flag-like text"))
 			}
 			return runAgent(ctx, args[0], strings.Join(args[1:], " "), workspace, runsDir, output)
 		},

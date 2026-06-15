@@ -26,21 +26,22 @@ import (
 )
 
 type CompiledAgent struct {
-	Name           string
-	Description    string
-	Config         config.AgentManifest
-	ConfigSnapshot []byte
-	Instructions   string
-	Models         *model.Registry
-	Tools          *tools.Registry
-	Skills         *skills.Registry
-	Memory         memory.Store
-	Sandbox        sandbox.Sandbox
-	Policy         *policy.Gate
-	Output         OutputSpec
-	Evaluators     []evaluate.Evaluator
-	RunStore       *runs.Store
-	systemPrompt   string
+	Name              string
+	Description       string
+	Config            config.AgentManifest
+	ConfigSnapshot    []byte
+	PackageProvenance map[string]any
+	Instructions      string
+	Models            *model.Registry
+	Tools             *tools.Registry
+	Skills            *skills.Registry
+	Memory            memory.Store
+	Sandbox           sandbox.Sandbox
+	Policy            *policy.Gate
+	Output            OutputSpec
+	Evaluators        []evaluate.Evaluator
+	RunStore          *runs.Store
+	systemPrompt      string
 }
 
 type OutputSpec struct {

@@ -320,7 +320,7 @@ func TestRunRejectsWorkspaceFlagAfterManifest(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected misplaced --workspace error")
 	}
-	if !strings.Contains(err.Error(), "run flags must appear before <agent.yaml>") {
+	if !strings.Contains(err.Error(), "run flags must appear before <agent-ref>") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -342,7 +342,7 @@ func TestRunRejectsOutputFlagAfterManifest(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected misplaced --output error")
 	}
-	if !strings.Contains(err.Error(), "run flags must appear before <agent.yaml>") {
+	if !strings.Contains(err.Error(), "run flags must appear before <agent-ref>") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -364,7 +364,7 @@ func TestRunRejectsRunsDirFlagAfterManifest(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected misplaced --runs-dir error")
 	}
-	if !strings.Contains(err.Error(), "run flags must appear before <agent.yaml>") {
+	if !strings.Contains(err.Error(), "run flags must appear before <agent-ref>") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -383,7 +383,9 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		"List supported providers, tools, evaluators, and trajectory formats",
 		"jeju validate [--explain] <agent.yaml>",
 		"Validate a manifest and optionally explain resolved wiring",
-		"jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent.yaml> \"<task>\"",
+		"jeju package",
+		"Manage distributable agent packages",
+		"jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent-ref> \"<task>\"",
 		"Run an agent against a task",
 		"jeju evolve [--dry-run] [--baseline-only] [--test] [--max-iterations N] [--out <dir>] <experiment.yaml>",
 		"Run an evolution experiment",
@@ -408,7 +410,7 @@ func TestExecuteSubcommandHelpPrintsFlags(t *testing.T) {
 	})
 	for _, want := range []string{
 		"Jeju - Run an agent against a task",
-		`jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent.yaml> "<task>" [flags]`,
+		`jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent-ref> "<task>" [flags]`,
 		"--output string",
 		"--runs-dir string",
 		"--workspace string",

@@ -33,11 +33,19 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 	defer recorder.Close()
 
 	state := NewRunState(runDir.RunID, agent.Name, input)
+	agentPayload := map[string]any{"name": agent.Name}
+	if len(agent.PackageProvenance) > 0 {
+		agentPayload["package"] = agent.PackageProvenance
+	}
 	recorder.Emit(ctx, trajectory.EventTrajectoryHeader, state.RunID, 0, "runtime", map[string]any{
-		"agent": map[string]any{"name": agent.Name},
+		"agent": agentPayload,
 		"input": input,
 	})
 	writeArtifact(ctx, recorder, state, "config_snapshot", "", []byte(agent.ConfigSnapshot), "config_snapshot", "application/x-yaml")
+	if len(agent.PackageProvenance) > 0 {
+		data, _ := json.MarshalIndent(agent.PackageProvenance, "", "  ")
+		writeArtifact(ctx, recorder, state, "package_provenance", "", data, "package_provenance", "application/json")
+	}
 	recorder.EmitSpanStarted(ctx, state.RunID, 0, runSpanID(), "", "runtime", trajectory.SpanRun, agent.Name, nil)
 	r.emitSkillEvents(ctx, recorder, state, agent)
 
