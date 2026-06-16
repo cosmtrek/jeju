@@ -393,6 +393,35 @@ Built-in rules:
 Evaluation results are recorded in `<runs-dir>/<run_id>/trajectory.jsonl` as an
 `evaluator` span plus an `evaluation` artifact.
 
+## Run Input
+
+The task string passed to `jeju run` becomes the user input for
+`runtime.Run(task)`.
+
+```bash
+jeju run agents/research.agent.yaml "Summarize this repository."
+```
+
+For longer input, `jeju run --from <source>` can read the task from an external
+source instead of the trailing task argument:
+
+```bash
+jeju run --from clipboard agents/translator.agent.yaml
+jeju run --from stdin agents/translator.agent.yaml
+jeju run --from notes.md agents/translator.agent.yaml
+```
+
+Supported sources:
+
+- `clipboard`: current system clipboard text.
+- `stdin` or `-`: standard input.
+- any other value: file path, with optional `file:` prefix for compatibility.
+
+When `--from` is set, do not pass a trailing task string. If a file is literally
+named `clipboard` or `stdin`, use `./clipboard` or `./stdin` so it is treated as
+a path. Jeju preserves the source text as read, including trailing newlines. The
+resolved task is recorded in the trajectory like any other run input.
+
 ## Run Output
 
 Every run writes to `<runs-dir>/<run_id>/`. The default run store is `./runs`,

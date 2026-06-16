@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -122,21 +121,24 @@ func newRunCommand(ctx context.Context) *cobra.Command {
 	var workspace string
 	var output string
 	var runsDir string
+	var inputFrom string
 	cmd := &cobra.Command{
-		Use:          `run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent-ref> "<task>"`,
+		Use:          `run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> ["<task>"]`,
 		Short:        "Run an agent against a task",
-		Args:         cobra.MinimumNArgs(2),
+		Args:         cobra.MinimumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if isMisplacedRunFlag(args[1]) {
-				return cmd.FlagErrorFunc()(cmd, fmt.Errorf("run flags must appear before <agent-ref>; use -- before the task if it starts with flag-like text"))
+			agentRef, task, err := resolveRunTask(ctx, args, inputFrom, readRunInputSource)
+			if err != nil {
+				return cmd.FlagErrorFunc()(cmd, err)
 			}
-			return runAgent(ctx, args[0], strings.Join(args[1:], " "), workspace, runsDir, output)
+			return runAgent(ctx, agentRef, task, workspace, runsDir, output)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", "", "override workspace.path for this run")
 	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or ./runs)")
 	cmd.Flags().StringVar(&output, "output", runOutputLive, "console output mode: live or final")
+	cmd.Flags().StringVar(&inputFrom, "from", "", "read task input from source: clipboard, stdin, -, or file path")
 	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
@@ -144,7 +146,8 @@ func newRunCommand(ctx context.Context) *cobra.Command {
 func isMisplacedRunFlag(arg string) bool {
 	return arg == "--workspace" || strings.HasPrefix(arg, "--workspace=") ||
 		arg == "--runs-dir" || strings.HasPrefix(arg, "--runs-dir=") ||
-		arg == "--output" || strings.HasPrefix(arg, "--output=")
+		arg == "--output" || strings.HasPrefix(arg, "--output=") ||
+		arg == "--from" || strings.HasPrefix(arg, "--from=")
 }
 
 func newEvolveCommand(ctx context.Context) *cobra.Command {

@@ -195,6 +195,68 @@ func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
 	)
 }
 
+func TestRunFromFileAndStdin(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	if err := os.WriteFile("input.md", []byte("Reply with file input."), 0o644); err != nil {
+		t.Fatalf("write input file failed: %v", err)
+	}
+	fileOutput := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"run", "--output", "final", "--from", "input.md", "agents/research.agent.yaml"}); err != nil {
+			t.Fatalf("run --from file failed: %v", err)
+		}
+	})
+	if !strings.Contains(fileOutput, "Task: Reply with file input.") {
+		t.Fatalf("run --from file did not use file content:\n%s", fileOutput)
+	}
+
+	var stdinOutput string
+	withStdin(t, "Reply with stdin input.", func() {
+		stdinOutput = captureStdout(t, func() {
+			if err := Execute(ctx, []string{"run", "--output", "final", "--from", "stdin", "agents/research.agent.yaml"}); err != nil {
+				t.Fatalf("run --from stdin failed: %v", err)
+			}
+		})
+	})
+	if !strings.Contains(stdinOutput, "Task: Reply with stdin input.") {
+		t.Fatalf("run --from stdin did not use stdin content:\n%s", stdinOutput)
+	}
+}
+
+func TestResolveRunTaskFromSourceRules(t *testing.T) {
+	reader := func(ctx context.Context, source string) (string, error) {
+		if source != "clipboard" {
+			t.Fatalf("source = %q, want clipboard", source)
+		}
+		return "clipboard task", nil
+	}
+	agentRef, task, err := resolveRunTask(context.Background(), []string{"p:local/translator"}, "clipboard", reader)
+	if err != nil {
+		t.Fatalf("resolveRunTask failed: %v", err)
+	}
+	if agentRef != "p:local/translator" || task != "clipboard task" {
+		t.Fatalf("resolveRunTask = %q %q, want p:local/translator clipboard task", agentRef, task)
+	}
+
+	_, _, err = resolveRunTask(context.Background(), []string{"p:local/translator", "extra task"}, "clipboard", reader)
+	if err == nil || !strings.Contains(err.Error(), "cannot be provided when --from is set") {
+		t.Fatalf("expected extra task with --from error, got %v", err)
+	}
+	_, _, err = resolveRunTask(context.Background(), []string{"p:local/translator"}, "", reader)
+	if err == nil || !strings.Contains(err.Error(), "unless --from is set") {
+		t.Fatalf("expected missing task error, got %v", err)
+	}
+}
+
 func TestRunCommandsUseCustomRunsDir(t *testing.T) {
 	disableReportOpen(t)
 
@@ -390,7 +452,7 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		"Validate a manifest and optionally explain resolved wiring",
 		"jeju package",
 		"Manage distributable agent packages",
-		"jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent-ref> \"<task>\"",
+		"jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> [\"<task>\"]",
 		"Run an agent against a task",
 		"jeju evolve [--dry-run] [--baseline-only] [--test] [--max-iterations N] [--out <dir>] <experiment.yaml>",
 		"Run an evolution experiment",
@@ -425,7 +487,8 @@ func TestExecuteSubcommandHelpPrintsFlags(t *testing.T) {
 	})
 	for _, want := range []string{
 		"Jeju - Run an agent against a task",
-		`jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent-ref> "<task>" [flags]`,
+		`jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> ["<task>"] [flags]`,
+		"--from string",
 		"--output string",
 		"--runs-dir string",
 		"--workspace string",

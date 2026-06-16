@@ -247,7 +247,7 @@ read with bounded timeout and response size.
 `jeju run` accepts an agent reference:
 
 ```bash
-jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] <agent-ref> "<task>"
+jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> ["<task>"]
 ```
 
 Supported agent refs:
@@ -264,6 +264,10 @@ jeju run package://coding/code-review "Review current diff."
 
 # Short local package ref.
 jeju run p:coding/code-review "Review current diff."
+
+# Read task input from a source.
+jeju run --from clipboard p:coding/code-review
+jeju run --from notes.md p:coding/code-review
 
 # Remote package source, materialize then run.
 jeju run github:jeju-ai/agents//coding/code-review?ref=<commit> "Review current diff."
@@ -286,10 +290,11 @@ resolve <agent-ref>
   -> record package provenance when package-backed
 ```
 
-The task string is passed unchanged to `runtime.Run`. Package metadata must not
-render, transform, or reinterpret the task. `--workspace`, `--runs-dir`, and
-`--output` keep the same semantics for local manifests, local package refs, and
-remote package sources.
+The resolved task string is passed unchanged to `runtime.Run`. `--from` only
+changes where the CLI reads that task string from. Package metadata must not
+render, transform, or reinterpret the task. `--workspace`, `--runs-dir`,
+`--output`, and `--from` keep the same semantics for local manifests, local
+package refs, and remote package sources.
 
 A direct remote `jeju run` may materialize content into the local store and
 record provenance, but it must not change the active unversioned package alias
