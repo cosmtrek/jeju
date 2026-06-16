@@ -12,18 +12,17 @@ import (
 )
 
 func runInspect(runID, runsDir string) error {
-	store := runs.NewStore(resolveRunsDir(runsDir))
-	runDir, err := store.LoadRun(runID)
+	loaded, err := loadRunFromCandidateStores(runID, runsDir)
 	if err != nil {
 		return err
 	}
-	events, err := trajectory.ReadFile(filepath.Join(runDir.Path, runs.TrajectoryFile))
+	events, err := trajectory.ReadFile(filepath.Join(loaded.RunDir.Path, runs.TrajectoryFile))
 	if err != nil {
 		return err
 	}
 	record := trajectory.Project(events)
 	if summary, ok := teamrunner.ProjectSummary(record); ok {
-		return printTeamInspect(runDir.Path, record, summary)
+		return printTeamInspect(loaded.RunDir.Path, record, summary)
 	}
 
 	summary := summarizeInspect(events)
@@ -36,11 +35,13 @@ func runInspect(runID, runsDir string) error {
 	fmt.Printf("  agent: %s\n", record.Agent)
 	fmt.Printf("  status: %s\n", record.Status)
 	fmt.Printf("  integrity: %s\n", record.Integrity)
+	fmt.Printf("  store: %s (%s)\n", loaded.StoreLabel, loaded.StorePath)
 	fmt.Printf("  started: %s\n", record.StartedAt.Format("2006-01-02 15:04:05"))
 	if duration > 0 {
 		fmt.Printf("  duration: %s\n", duration.Round(time.Millisecond))
 	}
 	fmt.Printf("  task: %s\n", record.Input)
+	printRunPackage(record.Package)
 
 	fmt.Println("\nSummary")
 	fmt.Printf("  steps: %d\n", summary.Steps)
@@ -64,9 +65,32 @@ func runInspect(runID, runsDir string) error {
 	}
 
 	fmt.Println("\nFiles")
-	fmt.Printf("  trajectory: %s\n", filepath.Join(runDir.Path, runs.TrajectoryFile))
-	fmt.Printf("  report: %s\n", filepath.Join(runDir.Path, runs.ReportFile))
+	fmt.Printf("  trajectory: %s\n", filepath.Join(loaded.RunDir.Path, runs.TrajectoryFile))
+	fmt.Printf("  report: %s\n", filepath.Join(loaded.RunDir.Path, runs.ReportFile))
 	return nil
+}
+
+func printRunPackage(pkg trajectory.PackageProvenance) {
+	if pkg.ID == "" {
+		return
+	}
+	fmt.Println("\nPackage")
+	fmt.Printf("  id: %s\n", pkg.ID)
+	if pkg.Version != "" {
+		fmt.Printf("  version: %s\n", pkg.Version)
+	}
+	if pkg.Digest != "" {
+		fmt.Printf("  digest: %s\n", pkg.Digest)
+	}
+	if pkg.Source != "" {
+		fmt.Printf("  source: %s\n", pkg.Source)
+	}
+	if pkg.StorePath != "" {
+		fmt.Printf("  store_path: %s\n", pkg.StorePath)
+	}
+	if pkg.AgentManifest != "" {
+		fmt.Printf("  agent_manifest: %s\n", pkg.AgentManifest)
+	}
 }
 
 func printTeamInspect(runDir string, record trajectory.RunRecord, summary teamrunner.Summary) error {

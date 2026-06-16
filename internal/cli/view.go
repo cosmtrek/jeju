@@ -41,16 +41,15 @@ func renderMarkdown(src string) template.HTML {
 }
 
 func runView(runID, out, runsDir string) error {
-	store := runs.NewStore(resolveRunsDir(runsDir))
-	runDir, err := store.LoadRun(runID)
+	loaded, err := loadRunFromCandidateStores(runID, runsDir)
 	if err != nil {
 		return err
 	}
 
 	if out == "" {
-		out = defaultRunReportPath(runDir)
+		out = defaultRunReportPath(loaded.RunDir)
 	}
-	generated, err := ensureRunReport(store, runDir, out)
+	generated, err := ensureRunReport(loaded.Store, loaded.RunDir, out)
 	if err != nil {
 		return err
 	}
@@ -519,6 +518,12 @@ func buildRunReport(store *runs.Store, runDir *runs.RunDir) (runReport, error) {
 		EndedAt:   record.EndedAt,
 		Input:     record.Input,
 	}
+	meta.PackageID = record.Package.ID
+	meta.PackageVersion = record.Package.Version
+	meta.PackageDigest = record.Package.Digest
+	meta.PackageSource = record.Package.Source
+	meta.PackageStorePath = record.Package.StorePath
+	meta.PackageAgentManifest = record.Package.AgentManifest
 	final := record.ArtifactContent(record.FinalRef)
 	configSnapshot := record.ArtifactContent(record.ConfigRef)
 	evaluation, evaluationExists := evaluationFromRecord(record)
@@ -1857,6 +1862,21 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
         </div>
         <div class="run-id">{{.Metadata.RunID}}</div>
         <dl class="kv">
+          {{if .Metadata.PackageID}}<div class="kv-row">
+            <dt>package</dt>
+            <dd class="mono">{{.Metadata.PackageID}}{{if .Metadata.PackageVersion}}@{{.Metadata.PackageVersion}}{{end}}</dd>
+          </div>{{end}}
+          {{if .Metadata.PackageDigest}}<div class="kv-row">
+            <dt>package digest</dt>
+            <dd class="mono">{{.Metadata.PackageDigest}}</dd>
+          </div>{{end}}
+          {{if .Metadata.PackageSource}}<div class="kv-row">
+            <dt>package source</dt>
+            <dd class="mono">{{.Metadata.PackageSource}}</dd>
+          </div>{{else if .Metadata.PackageStorePath}}<div class="kv-row">
+            <dt>package store</dt>
+            <dd class="mono">{{.Metadata.PackageStorePath}}</dd>
+          </div>{{end}}
           {{if .Metrics.ModelID}}<div class="kv-row">
             <dt>model</dt>
             <dd class="mono">{{if .Metrics.Provider}}{{.Metrics.Provider}}<span class="model-slash">/</span>{{end}}{{.Metrics.ModelID}}</dd>

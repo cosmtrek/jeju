@@ -292,9 +292,16 @@ resolve <agent-ref>
 
 The resolved task string is passed unchanged to `runtime.Run`. `--from` only
 changes where the CLI reads that task string from. Package metadata must not
-render, transform, or reinterpret the task. `--workspace`, `--runs-dir`,
-`--output`, and `--from` keep the same semantics for local manifests, local
-package refs, and remote package sources.
+render, transform, or reinterpret the task. `--workspace`, `--output`, and
+`--from` keep the same semantics for local manifests, local package refs, and
+remote package sources.
+
+Package-backed runs default to `~/.jeju/runs` when neither `--runs-dir` nor
+`JEJU_RUNS_DIR` is set, so invoking a package from an arbitrary working
+directory does not create `./runs` there. Local manifest runs keep the generated
+project convention of defaulting to `./runs`. `jeju runs`, `jeju inspect`, and
+`jeju view` search both the local and global default stores when no explicit run
+store is configured.
 
 A direct remote `jeju run` may materialize content into the local store and
 record provenance, but it must not change the active unversioned package alias

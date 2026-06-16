@@ -14,6 +14,7 @@ type RunRecord struct {
 	TrajectoryID    string
 	SessionID       string
 	Agent           string
+	Package         PackageProvenance
 	Input           string
 	Status          string
 	Integrity       string
@@ -43,6 +44,16 @@ type RunStats struct {
 	PromptCacheHitTokens int
 	CompletionTokens     int
 	TotalTokens          int
+}
+
+type PackageProvenance struct {
+	ID            string
+	Version       string
+	Digest        string
+	Source        string
+	StorePath     string
+	AgentManifest string
+	Resolved      map[string]any
 }
 
 const (
@@ -163,7 +174,9 @@ func Project(events []Event) RunRecord {
 			record.RunID = event.RunID
 			record.TrajectoryID = event.TrajectoryID
 			record.SessionID = event.SessionID
-			record.Agent = nestedString(event.Payload, "agent", "name")
+			agentPayload := mapPayload(event.Payload, "agent")
+			record.Agent = stringPayload(agentPayload, "name")
+			record.Package = packageProvenanceFromPayload(mapPayload(agentPayload, "package"))
 			record.Input = stringPayload(event.Payload, "input")
 			record.StartedAt = event.TS
 		case EventSpanStarted:
@@ -246,6 +259,10 @@ func Project(events []Event) RunRecord {
 				record.FinalRef = artifact.ID
 			case "evaluation":
 				record.EvaluationRef = artifact.ID
+			case "package_provenance":
+				if record.Package.ID == "" {
+					record.Package = packageProvenanceFromContent(artifact.Content())
+				}
 			}
 			if step != nil {
 				step.Artifacts = append(step.Artifacts, artifact)
@@ -407,6 +424,32 @@ func artifactFromPayload(payload map[string]any) Artifact {
 		Value:     payload["value"],
 		Chunked:   boolPayload(payload, "chunked"),
 	}
+}
+
+func packageProvenanceFromPayload(payload map[string]any) PackageProvenance {
+	if len(payload) == 0 {
+		return PackageProvenance{}
+	}
+	return PackageProvenance{
+		ID:            stringPayload(payload, "id"),
+		Version:       stringPayload(payload, "version"),
+		Digest:        stringPayload(payload, "digest"),
+		Source:        stringPayload(payload, "source"),
+		StorePath:     stringPayload(payload, "store_path"),
+		AgentManifest: stringPayload(payload, "agent_manifest"),
+		Resolved:      mapPayload(payload, "resolved"),
+	}
+}
+
+func packageProvenanceFromContent(content string) PackageProvenance {
+	if content == "" {
+		return PackageProvenance{}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return PackageProvenance{}
+	}
+	return packageProvenanceFromPayload(payload)
 }
 
 func applySpanStats(stats *RunStats, span SpanRecord) {

@@ -136,7 +136,7 @@ func newRunCommand(ctx context.Context) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", "", "override workspace.path for this run")
-	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or ./runs)")
+	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR, ~/.jeju/runs for package refs, or ./runs for local manifests)")
 	cmd.Flags().StringVar(&output, "output", runOutputLive, "console output mode: live or final")
 	cmd.Flags().StringVar(&inputFrom, "from", "", "read task input from source: clipboard, stdin, -, or file path")
 	cmd.Flags().SetInterspersed(false)
@@ -190,7 +190,7 @@ func newInspectCommand() *cobra.Command {
 			return runInspect(args[0], runsDir)
 		},
 	}
-	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or ./runs)")
+	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or local/global run stores)")
 	return cmd
 }
 
@@ -207,7 +207,7 @@ func newViewCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&out, "out", "", "output HTML path")
-	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or ./runs)")
+	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or local/global run stores)")
 	return cmd
 }
 
@@ -222,7 +222,7 @@ func newRunsCommand() *cobra.Command {
 			return runRuns(runsDir)
 		},
 	}
-	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or ./runs)")
+	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or local/global run stores)")
 	return cmd
 }
 

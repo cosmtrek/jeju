@@ -235,6 +235,10 @@ GitHub or generic Git subdirectories, or `jeju:` registry refs. See
 [Agent Package](docs/agent-package.md) for the manifest fields, source syntax,
 and full command set.
 
+Package-backed runs default to `~/.jeju/runs` unless `--runs-dir` or
+`JEJU_RUNS_DIR` is set, so invoking `p:...` from an arbitrary directory does not
+create a local `./runs` folder.
+
 ### Agent Team
 
 For work that needs several bounded perspectives but should stay inspectable,
@@ -324,7 +328,7 @@ For source-checkout development, keep generated runs out of repo-root `runs/` by
 pointing at `.jeju-dev/`, for example
 `jeju run --runs-dir .jeju-dev/runs/<scenario> <agent.yaml> "<task>"`. Inside a
 generated user agent project, the default `./runs` store remains the normal
-local run history.
+local run history for manifest-based runs.
 
 ## License
 

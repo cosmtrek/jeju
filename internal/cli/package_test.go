@@ -92,6 +92,102 @@ func TestPackageLifecycleAndRunRef(t *testing.T) {
 	}
 }
 
+func TestPackageRunDefaultsToGlobalRunsStore(t *testing.T) {
+	disableReportOpen(t)
+
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+	home := filepath.Join(tmp, "home")
+	t.Setenv("HOME", home)
+	t.Setenv(runsDirEnv, "")
+	t.Setenv(agentpkg.StoreEnv, filepath.Join(tmp, "package-store"))
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+	pkgRoot := filepath.Join(tmp, "jeju-work")
+	if err := Execute(ctx, []string{
+		"package", "init", pkgRoot,
+		"--agent", "agents/research.agent.yaml",
+		"--id", "research/research",
+		"--version", "0.1.0",
+	}); err != nil {
+		t.Fatalf("package init failed: %v", err)
+	}
+	if err := Execute(ctx, []string{"package", "add", pkgRoot}); err != nil {
+		t.Fatalf("package add failed: %v", err)
+	}
+	if err := os.WriteFile("task.txt", []byte("Save a short note to notes.md"), 0o644); err != nil {
+		t.Fatalf("write task failed: %v", err)
+	}
+	targetWorkspace := filepath.Join(tmp, "target-workspace")
+	if err := os.MkdirAll(targetWorkspace, 0o755); err != nil {
+		t.Fatalf("create target workspace failed: %v", err)
+	}
+
+	if err := Execute(ctx, []string{
+		"run",
+		"--output", "final",
+		"--from", "task.txt",
+		"--workspace", targetWorkspace,
+		"p:research/research@0.1.0",
+	}); err != nil {
+		t.Fatalf("run package ref with default runs dir failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "runs")); !os.IsNotExist(err) {
+		t.Fatalf("package-backed run unexpectedly wrote to cwd ./runs")
+	}
+
+	globalRunsDir := filepath.Join(home, ".jeju", "runs")
+	items, err := runs.NewStore(globalRunsDir).ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns global store failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 global package run, got %d", len(items))
+	}
+	runID := items[0].RunID
+	if items[0].PackageID != "research/research" || items[0].PackageVersion != "0.1.0" {
+		t.Fatalf("metadata missing package provenance: %#v", items[0])
+	}
+
+	runsOutput := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"runs"}); err != nil {
+			t.Fatalf("runs failed: %v", err)
+		}
+	})
+	for _, want := range []string{"research/research@0.1.0", "global"} {
+		if !strings.Contains(runsOutput, want) {
+			t.Fatalf("runs output missing %q:\n%s", want, runsOutput)
+		}
+	}
+
+	inspectOutput := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"inspect", runID}); err != nil {
+			t.Fatalf("inspect package run failed: %v", err)
+		}
+	})
+	for _, want := range []string{"Package", "id: research/research", "version: 0.1.0", "store: global"} {
+		if !strings.Contains(inspectOutput, want) {
+			t.Fatalf("inspect output missing %q:\n%s", want, inspectOutput)
+		}
+	}
+
+	reportPath := filepath.Join(tmp, "package-report.html")
+	if err := Execute(ctx, []string{"view", runID, "--out", reportPath}); err != nil {
+		t.Fatalf("view package run failed: %v", err)
+	}
+	report, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("read package report failed: %v", err)
+	}
+	if !strings.Contains(string(report), "research/research@0.1.0") {
+		t.Fatalf("report missing package label:\n%s", report)
+	}
+}
+
 func TestRunDirectGenericGitPackageSource(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

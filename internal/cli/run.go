@@ -34,7 +34,11 @@ func runAgent(ctx context.Context, agentRef, task, workspace, runsDir, output st
 		}
 	}
 
-	opts := compiler.Options{RunStore: runs.NewStore(resolveRunsDir(runsDir))}
+	runStoreDir, err := resolveRunWriteDir(runsDir, agentRef)
+	if err != nil {
+		return err
+	}
+	opts := compiler.Options{RunStore: runs.NewStore(runStoreDir)}
 	if workspace != "" {
 		absWorkspace, err := filepath.Abs(workspace)
 		if err != nil {

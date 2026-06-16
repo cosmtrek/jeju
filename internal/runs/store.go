@@ -50,6 +50,12 @@ func (s *Store) ReadMetadata(runID string) (Metadata, error) {
 	}
 	metadata.RunID = record.RunID
 	metadata.Agent = record.Agent
+	metadata.PackageID = record.Package.ID
+	metadata.PackageVersion = record.Package.Version
+	metadata.PackageDigest = record.Package.Digest
+	metadata.PackageSource = record.Package.Source
+	metadata.PackageStorePath = record.Package.StorePath
+	metadata.PackageAgentManifest = record.Package.AgentManifest
 	metadata.Status = record.Status
 	metadata.Integrity = record.Integrity
 	metadata.StartedAt = record.StartedAt

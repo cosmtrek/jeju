@@ -36,6 +36,36 @@ func TestProjectSummaryDoesNotOverrideEventStats(t *testing.T) {
 	}
 }
 
+func TestProjectPackageProvenance(t *testing.T) {
+	events := []Event{
+		{Seq: 1, Type: EventTrajectoryHeader, RunID: "run", TS: time.Now(), Payload: map[string]any{
+			"agent": map[string]any{
+				"name": "translator",
+				"package": map[string]any{
+					"id":             "local/translator",
+					"version":        "0.1.0",
+					"digest":         "sha256:abc",
+					"source":         "package://local/translator@0.1.0",
+					"store_path":     "/tmp/store",
+					"agent_manifest": "/tmp/store/agent.yaml",
+				},
+			},
+			"input": "task",
+		}},
+		{Seq: 2, Type: EventRunSummary, RunID: "run", TS: time.Now(), Payload: map[string]any{"status": "completed"}},
+	}
+
+	record := Project(events)
+	if record.Package.ID != "local/translator" ||
+		record.Package.Version != "0.1.0" ||
+		record.Package.Digest != "sha256:abc" ||
+		record.Package.Source != "package://local/translator@0.1.0" ||
+		record.Package.StorePath != "/tmp/store" ||
+		record.Package.AgentManifest != "/tmp/store/agent.yaml" {
+		t.Fatalf("unexpected package provenance: %#v", record.Package)
+	}
+}
+
 func TestProjectLaterSummaryDoesNotClearRunSnapshotFields(t *testing.T) {
 	started := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
 	ended := started.Add(5 * time.Second)
