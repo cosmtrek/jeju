@@ -70,7 +70,7 @@ func TestPackageLifecycleAndRunRef(t *testing.T) {
 		"run",
 		"--workspace", targetWorkspace,
 		"--runs-dir", runsDir,
-		"package://research/research@0.1.0",
+		"p:research/research@0.1.0",
 		"Save a short note to notes.md",
 	}); err != nil {
 		t.Fatalf("run package ref failed: %v", err)

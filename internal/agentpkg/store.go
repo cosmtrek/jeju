@@ -15,6 +15,11 @@ import (
 
 const StoreEnv = "JEJU_PACKAGES_DIR"
 
+const (
+	packageScheme      = "package://"
+	packageShortScheme = "p:"
+)
+
 type Store struct {
 	Root string
 }
@@ -91,10 +96,15 @@ func DefaultStore() (*Store, error) {
 }
 
 func IsPackageBackedRef(ref string) bool {
-	return strings.HasPrefix(ref, "package://") ||
+	return isInstalledPackageRef(ref) ||
 		strings.HasPrefix(ref, "github:") ||
 		strings.HasPrefix(ref, "git+") ||
 		strings.HasPrefix(ref, "jeju:")
+}
+
+func isInstalledPackageRef(ref string) bool {
+	return strings.HasPrefix(ref, packageScheme) ||
+		strings.HasPrefix(ref, packageShortScheme)
 }
 
 func (s *Store) Add(ctx context.Context, source string, activate bool, jejuVersion string) (AddResult, error) {
@@ -165,7 +175,7 @@ func (s *Store) AddDir(root string, opts AddOptions) (AddResult, error) {
 }
 
 func (s *Store) ResolveRunRef(ctx context.Context, ref string, jejuVersion string) (RunRef, error) {
-	if strings.HasPrefix(ref, "package://") {
+	if isInstalledPackageRef(ref) {
 		result, err := s.resolveInstalledRunRef(ref, jejuVersion)
 		if err != nil {
 			return RunRef{}, err
@@ -566,9 +576,17 @@ func (s *Store) writeRef(id, version, storePath string) {
 }
 
 func parsePackageURL(ref string) (string, string, error) {
-	value := strings.TrimPrefix(ref, "package://")
-	if value == ref || value == "" {
-		return "", "", fmt.Errorf("package ref must start with package://")
+	value := ""
+	switch {
+	case strings.HasPrefix(ref, packageScheme):
+		value = strings.TrimPrefix(ref, packageScheme)
+	case strings.HasPrefix(ref, packageShortScheme):
+		value = strings.TrimPrefix(ref, packageShortScheme)
+	default:
+		return "", "", fmt.Errorf("package ref must start with package:// or p:")
+	}
+	if value == "" {
+		return "", "", fmt.Errorf("package ref must include namespace/name")
 	}
 	return parsePackageSelector(value)
 }

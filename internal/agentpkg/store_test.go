@@ -145,6 +145,33 @@ func TestResolveInstalledRunRefUsesStoredPackageMetadata(t *testing.T) {
 	}
 }
 
+func TestResolveInstalledRunRefSupportsShortPackageRef(t *testing.T) {
+	tmp := t.TempDir()
+	packageRoot := filepath.Join(tmp, "package")
+	writeValidPackageAt(t, packageRoot)
+	store := NewStore(filepath.Join(tmp, "store"))
+	result, err := store.Add(context.Background(), packageRoot, true, "dev")
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	for _, ref := range []string{"p:test/review@0.1.0", "p:test/review"} {
+		resolved, err := store.ResolveRunRef(context.Background(), ref, "dev")
+		if err != nil {
+			t.Fatalf("ResolveRunRef(%q) failed: %v", ref, err)
+		}
+		if resolved.Package == nil {
+			t.Fatalf("ResolveRunRef(%q) missing package provenance", ref)
+		}
+		if resolved.Package.ID != "test/review" || resolved.Package.Version != "0.1.0" {
+			t.Fatalf("ResolveRunRef(%q) package = %s@%s, want test/review@0.1.0", ref, resolved.Package.ID, resolved.Package.Version)
+		}
+		if !strings.HasPrefix(resolved.AgentManifestPath, result.StorePath) {
+			t.Fatalf("ResolveRunRef(%q) manifest %q is not inside store path %q", ref, resolved.AgentManifestPath, result.StorePath)
+		}
+	}
+}
+
 func runCommand(t *testing.T, dir string, name string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(name, args...)

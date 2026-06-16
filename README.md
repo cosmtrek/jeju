@@ -167,6 +167,7 @@ jeju package validate ./agents/code-review
 jeju package pack ./agents/code-review --out dist/
 jeju package add dist/coding-code-review-0.1.0.jpkg
 jeju run package://coding/code-review@0.1.0 "Review current diff."
+jeju run p:coding/code-review "Review current diff."
 ```
 
 Package-backed runs still use the normal runtime path:

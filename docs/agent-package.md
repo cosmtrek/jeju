@@ -150,8 +150,8 @@ jeju package init ./coding/code-review \
 ## Source References
 
 `jeju package add` accepts package sources. Package-backed `jeju run` accepts
-remote package sources plus installed `package://` refs; local directories and
-`.jpkg` artifacts should be added first.
+remote package sources plus installed `package://` refs or the short `p:`
+alias; local directories and `.jpkg` artifacts should be added first.
 
 ```bash
 jeju package add ./coding/code-review
@@ -171,6 +171,8 @@ Reference rules:
 - `git+https://...//subdir?ref=<ref>` uses the same subdir rule.
 - `jeju:namespace/agent-name@version` resolves through the configured registry
   index.
+- `p:namespace/agent-name[@version]` is a shorthand for the installed local
+  package ref `package://namespace/agent-name[@version]`.
 - Local directories and `.jpkg` artifacts are accepted by `jeju package add`.
 - Tags and commits are preferred. Mutable refs such as `main` are allowed for
   experimentation but must be marked unstable in local metadata.
@@ -260,6 +262,9 @@ jeju run package://coding/code-review@0.1.0 "Review current diff."
 # Active local version.
 jeju run package://coding/code-review "Review current diff."
 
+# Short local package ref.
+jeju run p:coding/code-review "Review current diff."
+
 # Remote package source, materialize then run.
 jeju run github:jeju-ai/agents//coding/code-review?ref=<commit> "Review current diff."
 
@@ -273,7 +278,7 @@ Run behavior:
 resolve <agent-ref>
   -> find or fetch package when the ref is package-backed
   -> validate package content when fetching from a source
-  -> lightly resolve metadata when using an installed package:// ref
+  -> lightly resolve metadata when using an installed package:// or p: ref
   -> use or store package content by digest
   -> resolve agent.manifest
   -> compile with normal run flags
