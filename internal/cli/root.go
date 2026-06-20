@@ -105,7 +105,7 @@ func newInfoCommand() *cobra.Command {
 func newValidateCommand() *cobra.Command {
 	var explain bool
 	cmd := &cobra.Command{
-		Use:          "validate [--explain] <agent.yaml>",
+		Use:          "validate [--explain] <manifest.yaml>",
 		Short:        "Validate a manifest and optionally explain resolved wiring",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,

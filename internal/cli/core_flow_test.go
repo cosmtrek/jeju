@@ -448,7 +448,7 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		"Scaffold a local agent bundle",
 		"jeju info",
 		"List supported providers, tools, evaluators, and trajectory formats",
-		"jeju validate [--explain] <agent.yaml>",
+		"jeju validate [--explain] <manifest.yaml>",
 		"Validate a manifest and optionally explain resolved wiring",
 		"jeju package",
 		"Manage distributable agent packages",

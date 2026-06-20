@@ -2,13 +2,49 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/cosmtrek/jeju/internal/config"
+	teamrunner "github.com/cosmtrek/jeju/internal/team"
+
+	"gopkg.in/yaml.v3"
 )
 
+type manifestHeader struct {
+	APIVersion string `yaml:"apiVersion"`
+	Kind       string `yaml:"kind"`
+}
+
 func runValidate(manifestPath string, explain bool) error {
+	header, err := readManifestHeader(manifestPath)
+	if err != nil {
+		return err
+	}
+	switch header.Kind {
+	case "Agent":
+		return runValidateAgent(manifestPath, explain)
+	case teamrunner.KindAgentTeam:
+		return runValidateAgentTeam(manifestPath, explain)
+	default:
+		return fmt.Errorf("unsupported kind %q", header.Kind)
+	}
+}
+
+func readManifestHeader(manifestPath string) (manifestHeader, error) {
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return manifestHeader{}, err
+	}
+	var header manifestHeader
+	if err := yaml.Unmarshal(data, &header); err != nil {
+		return manifestHeader{}, err
+	}
+	return header, nil
+}
+
+func runValidateAgent(manifestPath string, explain bool) error {
 	manifest, _, err := config.LoadFile(manifestPath)
 	if err != nil {
 		return err
@@ -19,6 +55,49 @@ func runValidate(manifestPath string, explain bool) error {
 	fmt.Printf("valid: %s\n", manifestPath)
 	if explain {
 		printManifestExplanation(manifest)
+	}
+	return nil
+}
+
+func runValidateAgentTeam(manifestPath string, explain bool) error {
+	manifest, _, err := teamrunner.LoadFile(manifestPath)
+	if err != nil {
+		return err
+	}
+	if err := validateTeamAgentRefs(manifest); err != nil {
+		return err
+	}
+	fmt.Printf("valid: %s\n", manifestPath)
+	if explain {
+		printTeamManifestExplanation(manifest)
+	}
+	return nil
+}
+
+func validateTeamAgentRefs(manifest *teamrunner.AgentTeamManifest) error {
+	if err := validateAgentRef("lead.agent", manifest.Lead.Agent); err != nil {
+		return err
+	}
+	if manifest.Lead.SynthesisAgent != "" {
+		if err := validateAgentRef("lead.synthesisAgent", manifest.Lead.SynthesisAgent); err != nil {
+			return err
+		}
+	}
+	for _, name := range sortedWorkerNames(manifest.Workers) {
+		if err := validateAgentRef("workers."+name+".agent", manifest.Workers[name].Agent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAgentRef(label, path string) error {
+	manifest, _, err := config.LoadFile(path)
+	if err != nil {
+		return fmt.Errorf("%s %q: %w", label, path, err)
+	}
+	if err := config.Validate(manifest); err != nil {
+		return fmt.Errorf("%s %q: %w", label, path, err)
 	}
 	return nil
 }
@@ -138,9 +217,67 @@ func printManifestExplanation(manifest *config.AgentManifest) {
 	}
 }
 
+func printTeamManifestExplanation(manifest *teamrunner.AgentTeamManifest) {
+	fmt.Println()
+	fmt.Printf("Manifest: %s (%s %s)\n", manifest.Metadata.Name, manifest.Kind, manifest.APIVersion)
+	if manifest.Metadata.Description != "" {
+		fmt.Printf("Description: %s\n", manifest.Metadata.Description)
+	}
+
+	fmt.Println("Lead:")
+	fmt.Printf("  lead.agent -> %s\n", manifest.Lead.Agent)
+	if manifest.Lead.SynthesisAgent != "" {
+		fmt.Printf("  lead.synthesisAgent -> %s\n", manifest.Lead.SynthesisAgent)
+	}
+
+	fmt.Println("Workers:")
+	for _, name := range sortedWorkerNames(manifest.Workers) {
+		worker := manifest.Workers[name]
+		details := []string{"agent=" + worker.Agent}
+		if worker.MaxTasks > 0 {
+			details = append(details, fmt.Sprintf("maxTasks=%d", worker.MaxTasks))
+		}
+		if worker.Description != "" {
+			details = append(details, "description="+worker.Description)
+		}
+		fmt.Printf("  workers.%s -> %s\n", name, strings.Join(details, ", "))
+	}
+
+	fmt.Println("Runtime:")
+	fmt.Printf("  runtime.topology -> %s\n", manifest.Runtime.Topology)
+	fmt.Printf("  runtime.limits -> maxRounds=%d, maxTasks=%d, maxParallel=%d, maxRetriesPerTask=%d, maxConsecutiveEmptyRounds=%d\n",
+		manifest.Runtime.MaxRounds,
+		manifest.Runtime.MaxTasks,
+		manifest.Runtime.MaxParallel,
+		manifest.Runtime.MaxRetriesPerTask,
+		manifest.Runtime.MaxConsecutiveEmptyRounds,
+	)
+
+	fmt.Println("Verification:")
+	fmt.Printf("  verification.requireStructuredTaskOutput -> %t\n", manifest.Verification.RequireStructuredTaskOutput)
+	fmt.Printf("  verification.requireVerifier -> %t\n", manifest.Verification.RequireVerifier)
+	if len(manifest.Verification.RequiredTaskFields) == 0 {
+		fmt.Println("  verification.requiredTaskFields -> []")
+	} else {
+		fmt.Printf("  verification.requiredTaskFields -> [%s]\n", strings.Join(manifest.Verification.RequiredTaskFields, ", "))
+	}
+
+	fmt.Println("Output:")
+	fmt.Printf("  output.dir -> %s\n", manifest.Output.Dir)
+}
+
 func sortedProviderNames(providers map[string]config.ModelConfig) []string {
 	names := make([]string, 0, len(providers))
 	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedWorkerNames(workers map[string]teamrunner.Worker) []string {
+	names := make([]string, 0, len(workers))
+	for name := range workers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
