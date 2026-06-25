@@ -36,7 +36,7 @@ produce output.
 ## Output
 
 Return only JSON with fields: summary, findings, evidence, gaps,
-residual_risk, ready_for_synthesis. Keep the final JSON under 2000 words.
+residual_risk, ready_for_final. Keep the final JSON under 2000 words.
 
 The `findings` array (at most 8 records) contains verified findings plus any
 rejected or downgraded high-severity candidates worth surfacing. Each record:
@@ -62,4 +62,4 @@ Put aggregate counts in `evidence`: `candidates`, `after_dedup`, `checked`,
 `dropped_below_threshold`. Summarize dropped low-confidence candidates in
 `gaps` or `residual_risk` instead of listing them one by one.
 
-Set `ready_for_synthesis: true` when every reviewer output has been judged.
+Set `ready_for_final: true` when every reviewer output has been judged.

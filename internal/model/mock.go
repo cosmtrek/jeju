@@ -29,11 +29,21 @@ func (c *MockClient) Generate(ctx context.Context, req Request) (Response, error
 	taskLower := strings.ToLower(task)
 
 	var payload map[string]any
-	if strings.Contains(taskLower, "jeju team lead decision") {
+	if strings.Contains(taskLower, "teamdecision") || strings.Contains(taskLower, "team run bootstrap") || strings.Contains(taskLower, "team state update") {
 		payload = map[string]any{
 			"type":    "final",
 			"thought": "The mock lead returns a deterministic team decision.",
 			"content": mockTeamDecision(taskLower),
+		}
+	} else if strings.Contains(taskLower, "jeju team worker task") && strings.Contains(taskLower, "worker: writer") && shouldMockWrite(taskLower, observations) {
+		payload = map[string]any{
+			"type":    "tool_call",
+			"thought": "The worker task asks for a saved file, so I will write the requested report into the workspace.",
+			"tool":    "write",
+			"input": map[string]any{
+				"path":    mockWritePath(taskLower),
+				"content": mockReport(task),
+			},
 		}
 	} else if strings.Contains(taskLower, "jeju team worker task") {
 		payload = map[string]any{
@@ -97,7 +107,8 @@ func mockReport(task string) string {
 	if strings.TrimSpace(task) == "" {
 		task = "local agent task"
 	}
-	if strings.Contains(strings.ToLower(task), "jeju team synthesis") {
+	taskLower := strings.ToLower(task)
+	if strings.Contains(taskLower, "jeju team synthesis") || strings.Contains(taskLower, "agent-team-mechanism.md") {
 		return `# Agent Team Mechanism Recommendation
 
 ## Executive Summary
@@ -110,7 +121,7 @@ Keep AgentTeam as an outer controller. Each worker remains a normal compiled Jej
 
 ## Round Evidence
 
-The team ran lead planning, worker task execution, verification, and synthesis.
+The team ran lead planning, worker task execution, verification, and final writing.
 
 ## Worker Findings
 
@@ -118,7 +129,7 @@ Worker outputs are structured JSON with findings, evidence, gaps, and residual r
 
 ## Verification Result
 
-Verified task outputs are safe for synthesis.
+Verified task outputs are safe for final output.
 
 ## Risks and Deferred Work
 
@@ -144,10 +155,11 @@ This is a deterministic mock response. It demonstrates the full Jeju run lifecyc
 func mockTeamDecision(taskLower string) string {
 	if strings.Contains(taskLower, "blocked decision") {
 		return `{
-  "decision": "blocked",
-  "round_summary": "",
+  "decision": "abort",
+  "round_summary": "The lead cannot complete this mock task.",
   "tasks": [],
-  "finish": null
+  "finish": null,
+  "abort": {"reason": "Team aborted by lead without a final explanation."}
 }`
 	}
 	round := mockTeamRound(taskLower)
@@ -179,41 +191,63 @@ func mockTeamDecision(taskLower string) string {
         "required_fields": ["summary", "findings", "evidence", "gaps", "residual_risk"]
       }
     }
-  ],
-  "finish": null
-}`
+	  ],
+	  "finish": null,
+	  "abort": null
+	}`
 	case 2:
 		return `{
   "decision": "continue",
   "round_summary": "Add a verifier task after initial worker outputs.",
   "tasks": [
     {
-      "id": "synthesis-readiness-check",
+      "id": "final-readiness-check",
       "worker": "verifier",
-      "objective": "Check whether the worker findings are complete enough for synthesis.",
+      "objective": "Check whether the worker findings are complete enough for final output.",
       "context_refs": ["task:framework-summary", "task:jeju-fit-analysis"],
       "depends_on": ["framework-summary", "jeju-fit-analysis"],
       "output_contract": {
         "format": "json",
-        "required_fields": ["summary", "findings", "evidence", "gaps", "residual_risk", "ready_for_synthesis"]
+        "required_fields": ["summary", "findings", "evidence", "gaps", "residual_risk", "ready_for_final"]
+      }
+    }
+	  ],
+	  "finish": null,
+	  "abort": null
+	}`
+	case 3:
+		return `{
+  "decision": "continue",
+  "round_summary": "Add a normal writer task for the final report.",
+  "tasks": [
+    {
+      "id": "final-report",
+      "worker": "writer",
+      "objective": "Write final report to reports/agent-team-mechanism.md from verified framework, Jeju-fit, and verifier outputs.",
+      "context_refs": ["framework-summary", "jeju-fit-analysis", "final-readiness-check"],
+      "depends_on": ["framework-summary", "jeju-fit-analysis", "final-readiness-check"],
+      "output_contract": {
+        "format": "markdown"
       }
     }
   ],
-  "finish": null
+  "finish": null,
+  "abort": null
 }`
 	default:
 		return `{
-  "decision": "synthesize",
-  "round_summary": "The verifier task is complete; synthesize the final recommendation.",
+  "decision": "finish",
+  "round_summary": "The final report task is verified; use it as the team final answer.",
   "tasks": [],
-  "finish": null
+  "finish": {"task_id": "final-report"},
+  "abort": null
 }`
 	}
 }
 
 func mockTeamRound(taskLower string) int {
-	for _, marker := range []string{"round: 1", "round: 2", "round: 3"} {
-		if strings.Contains(taskLower, marker) {
+	for _, marker := range []string{"round: 1", "round: 2", "round: 3", "round: 4"} {
+		if strings.Contains(taskLower, "\n"+marker+"\n") {
 			switch marker {
 			case "round: 1":
 				return 1
@@ -221,10 +255,12 @@ func mockTeamRound(taskLower string) int {
 				return 2
 			case "round: 3":
 				return 3
+			case "round: 4":
+				return 4
 			}
 		}
 	}
-	return 3
+	return 4
 }
 
 func mockTeamTaskOutput(task string) string {
@@ -236,15 +272,18 @@ func mockTeamTaskOutput(task string) string {
 	if strings.Contains(lower, "jeju_architect") {
 		worker = "jeju_architect"
 	}
+	if strings.Contains(lower, "worker: writer") {
+		return mockReport(task)
+	}
 	if strings.Contains(lower, "verifier") {
 		return `{
-  "summary": "The worker outputs support lead-worker synthesis.",
+  "summary": "The worker outputs support lead-worker finalization.",
   "findings": ["lead_worker topology is represented", "verification is present", "peer chat is deferred"],
   "evidence": ["framework-summary", "jeju-fit-analysis"],
   "gaps": [],
   "residual_risk": "Mock verification does not judge factual quality.",
-  "ready_for_synthesis": true
-}`
+	  "ready_for_final": true
+	}`
 	}
 	return fmt.Sprintf(`{
   "summary": "Structured mock output from %s.",

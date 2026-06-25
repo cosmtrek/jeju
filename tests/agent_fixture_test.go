@@ -276,17 +276,20 @@ func TestAgentFixtures(t *testing.T) {
 		for _, worker := range summary.DeclaredWorkers {
 			workers[worker] = true
 		}
-		for _, want := range []string{"framework_researcher", "jeju_architect", "verifier"} {
+		for _, want := range []string{"framework_researcher", "jeju_architect", "verifier", "writer"} {
 			if !workers[want] {
 				t.Fatalf("declared worker %s missing from summary", want)
 			}
 		}
-		verifierTask, ok := summary.Tasks["synthesis-readiness-check"]
+		verifierTask, ok := summary.Tasks["final-readiness-check"]
 		if !ok {
 			t.Fatal("verifier task missing")
 		}
 		if verifierTask.RoundCreated <= 1 {
 			t.Fatalf("verifier task round = %d, want after round 1", verifierTask.RoundCreated)
+		}
+		if _, ok := summary.Tasks["final-report"]; !ok {
+			t.Fatal("final report writer task missing")
 		}
 		for id, task := range summary.Tasks {
 			if !workers[task.Worker] {
@@ -388,9 +391,6 @@ func TestCodeReviewTeamExampleCompiles(t *testing.T) {
 	}
 
 	agentPaths := []string{manifest.Lead.Agent}
-	if manifest.Lead.SynthesisAgent != "" {
-		agentPaths = append(agentPaths, manifest.Lead.SynthesisAgent)
-	}
 	for _, worker := range manifest.Workers {
 		agentPaths = append(agentPaths, worker.Agent)
 	}

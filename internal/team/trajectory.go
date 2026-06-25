@@ -90,25 +90,30 @@ func (c *controller) emitArtifact(id, role, mediaType, encoding, text string, va
 }
 
 func (c *controller) emitTeamAction(step int, operation string, fields map[string]any) {
-	if c.recorder == nil {
-		return
-	}
+	c.actionMu.Lock()
+	c.actionID++
 	payload := map[string]any{
-		"action_id": c.nextTeamActionID(),
+		"action_id": fmt.Sprintf("team_act_%06d", c.actionID),
 		"kind":      "orchestration",
 		"operation": operation,
 	}
 	for key, value := range fields {
 		payload[key] = value
 	}
+	c.actions = append(c.actions, cloneActionPayload(payload))
+	c.actionMu.Unlock()
+	if c.recorder == nil {
+		return
+	}
 	c.recorder.Emit(context.Background(), trajectory.EventActionCreated, c.id, step, teamActor, payload)
 }
 
-func (c *controller) nextTeamActionID() string {
-	c.actionMu.Lock()
-	defer c.actionMu.Unlock()
-	c.actionID++
-	return fmt.Sprintf("team_act_%06d", c.actionID)
+func cloneActionPayload(payload map[string]any) map[string]any {
+	clone := make(map[string]any, len(payload))
+	for key, value := range payload {
+		clone[key] = value
+	}
+	return clone
 }
 
 func (c *controller) startRound(round int) {

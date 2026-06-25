@@ -244,9 +244,10 @@ create a local `./runs` folder.
 For work that needs several bounded perspectives but should stay inspectable,
 `kind: AgentTeam` runs a lead-worker collaboration from a single goal. One lead
 agent plans tasks across rounds; workers run as ordinary, isolated `kind: Agent`
-runs; the controller records task state, child run references, and a final
-synthesis. Workers never chat peer-to-peer — this is a bounded outer controller,
-not a multi-agent platform.
+runs; the lead keeps message history across rounds; and the controller records
+task state, child run references, verifier gates, and the selected final answer.
+Workers never chat peer-to-peer — this is a bounded outer controller, not a
+multi-agent platform.
 
 ```bash
 jeju team run examples/code-review-team/teams/code-review.team.yaml "Review the current diff."

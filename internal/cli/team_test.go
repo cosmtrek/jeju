@@ -81,7 +81,6 @@ func TestValidateAcceptsAgentTeamAndExplainsResolvedWiring(t *testing.T) {
 	root := t.TempDir()
 	leadPath := writeValidAgentManifest(t, root, "lead")
 	workerPath := writeValidAgentManifest(t, root, "worker")
-	synthesisPath := writeValidAgentManifest(t, root, "synthesis")
 	teamPath := filepath.Join(root, "team.yaml")
 	if err := os.WriteFile(teamPath, []byte(`apiVersion: jeju/v1alpha1
 kind: AgentTeam
@@ -90,7 +89,6 @@ metadata:
   description: "Research team."
 lead:
   agent: lead.agent.yaml
-  synthesisAgent: synthesis.agent.yaml
 workers:
   reviewer:
     agent: worker.agent.yaml
@@ -116,7 +114,6 @@ output:
 		"valid: " + teamPath,
 		"Manifest: research-team (AgentTeam jeju/v1alpha1)",
 		"lead.agent -> " + leadPath,
-		"lead.synthesisAgent -> " + synthesisPath,
 		"workers.reviewer -> agent=" + workerPath + ", maxTasks=2",
 		"runtime.topology -> lead_worker",
 		"verification.requiredTaskFields -> [summary]",

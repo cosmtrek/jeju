@@ -3,7 +3,7 @@ kind: Agent
 
 metadata:
   name: review-lead
-  description: "Lead agent for the code review team: plans review focuses and gates synthesis."
+  description: "Lead agent for the code review team: plans review focuses and decides when to finish."
 
 models:
   providers:

@@ -78,11 +78,6 @@ func validateTeamAgentRefs(manifest *teamrunner.AgentTeamManifest) error {
 	if err := validateAgentRef("lead.agent", manifest.Lead.Agent); err != nil {
 		return err
 	}
-	if manifest.Lead.SynthesisAgent != "" {
-		if err := validateAgentRef("lead.synthesisAgent", manifest.Lead.SynthesisAgent); err != nil {
-			return err
-		}
-	}
 	for _, name := range sortedWorkerNames(manifest.Workers) {
 		if err := validateAgentRef("workers."+name+".agent", manifest.Workers[name].Agent); err != nil {
 			return err
@@ -226,9 +221,6 @@ func printTeamManifestExplanation(manifest *teamrunner.AgentTeamManifest) {
 
 	fmt.Println("Lead:")
 	fmt.Printf("  lead.agent -> %s\n", manifest.Lead.Agent)
-	if manifest.Lead.SynthesisAgent != "" {
-		fmt.Printf("  lead.synthesisAgent -> %s\n", manifest.Lead.SynthesisAgent)
-	}
 
 	fmt.Println("Workers:")
 	for _, name := range sortedWorkerNames(manifest.Workers) {

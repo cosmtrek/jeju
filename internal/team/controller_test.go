@@ -83,10 +83,10 @@ evaluate:
 	}
 
 	lead := writeAgent("research-lead", "  - read\n")
-	synthesisLead := writeAgent("research-synthesis", "  - write\n")
 	framework := writeAgent("framework-researcher", "  []\n")
 	architect := writeAgent("jeju-architect", "  []\n")
 	verifier := writeAgent("verifier", "  []\n")
+	writer := writeAgent("writer", "  - write\n")
 
 	teamDir := filepath.Join(root, "teams")
 	if err := os.MkdirAll(teamDir, 0o755); err != nil {
@@ -102,7 +102,6 @@ metadata:
 
 lead:
   agent: ` + lead + `
-  synthesisAgent: ` + synthesisLead + `
 
 workers:
   framework_researcher:
@@ -114,11 +113,14 @@ workers:
   verifier:
     agent: ` + verifier + `
     maxTasks: 2
+  writer:
+    agent: ` + writer + `
+    maxTasks: 1
 
 runtime:
   topology: lead_worker
-  maxRounds: 3
-  maxTasks: 6
+  maxRounds: 4
+  maxTasks: 7
   maxParallel: 2
   maxRetriesPerTask: 1
 
@@ -148,10 +150,10 @@ output:
 	if result.Summary.RoundCount < 3 {
 		t.Fatalf("round_count = %d, want at least 3", result.Summary.RoundCount)
 	}
-	if len(result.Summary.Tasks) != 3 {
-		t.Fatalf("task count = %d, want 3", len(result.Summary.Tasks))
+	if len(result.Summary.Tasks) != 4 {
+		t.Fatalf("task count = %d, want 4", len(result.Summary.Tasks))
 	}
-	for _, worker := range []string{"framework_researcher", "jeju_architect", "verifier"} {
+	for _, worker := range []string{"framework_researcher", "jeju_architect", "verifier", "writer"} {
 		found := false
 		for _, task := range result.Summary.Tasks {
 			if task.Worker == worker && task.Status == TaskVerified {
@@ -162,11 +164,18 @@ output:
 			t.Fatalf("missing verified task for worker %s", worker)
 		}
 	}
-	verifierTask := result.Summary.Tasks["synthesis-readiness-check"]
+	verifierTask := result.Summary.Tasks["final-readiness-check"]
 	if verifierTask.RoundCreated <= 1 {
 		t.Fatalf("verifier task round = %d, want after round 1", verifierTask.RoundCreated)
 	}
-	if result.Summary.Stats.ChildRuns < 6 {
+	finalTask := result.Summary.Tasks["final-report"]
+	if finalTask.Worker != "writer" || finalTask.Status != TaskVerified {
+		t.Fatalf("final-report task = %+v, want verified writer task", finalTask)
+	}
+	if !strings.Contains(result.Final, "# Agent Team Mechanism Recommendation") {
+		t.Fatalf("final = %q, want writer task report", result.Final)
+	}
+	if result.Summary.Stats.ChildRuns < 8 {
 		t.Fatalf("child_runs = %d, want at least 6", result.Summary.Stats.ChildRuns)
 	}
 	if _, err := os.Stat(filepath.Join(result.OutputDir, runs.TrajectoryFile)); err != nil {
@@ -208,10 +217,25 @@ output:
 	if strings.Contains(planningSnapshot, "name: write") {
 		t.Fatalf("planning lead should not expose write tool, snapshot:\n%s", planningSnapshot)
 	}
-	leadSynthesis := findChildRun(t, result.Summary.ChildRuns, "lead-synthesis")
-	synthesisSnapshot := readConfigSnapshot(t, resolveRunDir(result.OutputDir, leadSynthesis.RunDir))
-	if !strings.Contains(synthesisSnapshot, "name: write") {
-		t.Fatalf("synthesis lead should retain write tool, snapshot:\n%s", synthesisSnapshot)
+	leadCounts := []int{}
+	for _, child := range result.Summary.ChildRuns {
+		if child.Role != "lead" {
+			continue
+		}
+		leadCounts = append(leadCounts, readContextMessageCount(t, resolveRunDir(result.OutputDir, child.RunDir)))
+	}
+	if len(leadCounts) < 3 {
+		t.Fatalf("lead child runs = %d, want at least 3", len(leadCounts))
+	}
+	for i := 1; i < len(leadCounts); i++ {
+		if leadCounts[i] <= leadCounts[i-1] {
+			t.Fatalf("lead message counts should grow across rounds, got %v", leadCounts)
+		}
+	}
+	writerRun := findChildRun(t, result.Summary.ChildRuns, "task-final-report")
+	writerSnapshot := readConfigSnapshot(t, resolveRunDir(result.OutputDir, writerRun.RunDir))
+	if !strings.Contains(writerSnapshot, "name: write") {
+		t.Fatalf("writer worker should retain write tool, snapshot:\n%s", writerSnapshot)
 	}
 }
 
@@ -294,6 +318,49 @@ func TestAddTasksRejectsInvalidTaskSpecAndKeepsValidTasks(t *testing.T) {
 	}
 }
 
+func TestAddTasksDefaultsContextRefsToDependsOnAndNormalizesRefs(t *testing.T) {
+	c := &controller{
+		manifest: &AgentTeamManifest{
+			Metadata: config.Metadata{Name: "context-team"},
+			Workers: map[string]Worker{
+				"worker": {MaxTasks: 3},
+			},
+			Runtime: RuntimeConfig{MaxTasks: 3},
+		},
+	}
+	c.initSummary()
+	c.summary.Tasks["source"] = TaskState{ID: "source", Worker: "worker", Status: TaskVerified}
+
+	added := c.addTasks([]TaskSpec{
+		{
+			ID:        "default-context",
+			Worker:    "worker",
+			Objective: "Use source output.",
+			DependsOn: []string{"task:source"},
+		},
+		{
+			ID:             "explicit-empty-context",
+			Worker:         "worker",
+			Objective:      "Wait for source but do not inject it.",
+			DependsOn:      []string{"source"},
+			ContextRefs:    []string{},
+			contextRefsSet: true,
+		},
+	}, 2)
+	if added != 2 {
+		t.Fatalf("added = %d, want 2", added)
+	}
+	if got := c.summary.Tasks["default-context"].DependsOn; len(got) != 1 || got[0] != "source" {
+		t.Fatalf("default-context depends_on = %#v, want [source]", got)
+	}
+	if got := c.summary.Tasks["default-context"].ContextRefs; len(got) != 1 || got[0] != "source" {
+		t.Fatalf("default-context context_refs = %#v, want [source]", got)
+	}
+	if got := c.summary.Tasks["explicit-empty-context"].ContextRefs; len(got) != 0 {
+		t.Fatalf("explicit-empty-context context_refs = %#v, want []", got)
+	}
+}
+
 func TestReadyTasksBlocksRejectedDependencies(t *testing.T) {
 	c := &controller{
 		manifest: &AgentTeamManifest{
@@ -333,7 +400,7 @@ func TestReadyTasksBlocksRejectedDependencies(t *testing.T) {
 	}
 }
 
-func TestSynthesisBlockedWhenTasksRemainUnresolved(t *testing.T) {
+func TestFinishBlockedWhenTasksRemainUnresolved(t *testing.T) {
 	c := &controller{
 		manifest: &AgentTeamManifest{
 			Metadata: config.Metadata{Name: "pending-team"},
@@ -350,13 +417,35 @@ func TestSynthesisBlockedWhenTasksRemainUnresolved(t *testing.T) {
 		Status: TaskPlanned,
 	}
 
-	reason := c.synthesisBlockedReason()
+	reason := c.finishBlockedReason()
 	if !strings.Contains(reason, "unresolved tasks remain") {
-		t.Fatalf("synthesisBlockedReason() = %q, want unresolved task reason", reason)
+		t.Fatalf("finishBlockedReason() = %q, want unresolved task reason", reason)
 	}
 }
 
-func TestLeadDecisionInputUsesCompactState(t *testing.T) {
+func TestResolveFinishValidatesTaskID(t *testing.T) {
+	c := &controller{manifest: &AgentTeamManifest{}}
+	c.initSummary()
+	c.summary.Tasks["completed"] = TaskState{ID: "completed", Worker: "writer", Status: TaskCompleted, Final: "draft"}
+	c.summary.Tasks["empty"] = TaskState{ID: "empty", Worker: "writer", Status: TaskVerified}
+	c.summary.Tasks["final"] = TaskState{ID: "final", Worker: "writer", Status: TaskVerified, Final: "done"}
+
+	if _, reason := c.resolveFinish(&Finish{Content: "manual", TaskID: "final"}); !strings.Contains(reason, "mutually exclusive") {
+		t.Fatalf("resolveFinish content+task_id reason = %q, want mutual exclusion", reason)
+	}
+	if _, reason := c.resolveFinish(&Finish{TaskID: "completed"}); !strings.Contains(reason, "want verified") {
+		t.Fatalf("resolveFinish completed reason = %q, want verified status check", reason)
+	}
+	if _, reason := c.resolveFinish(&Finish{TaskID: "empty"}); !strings.Contains(reason, "empty final output") {
+		t.Fatalf("resolveFinish empty reason = %q, want empty final check", reason)
+	}
+	final, reason := c.resolveFinish(&Finish{TaskID: "task:final"})
+	if reason != "" || final != "done" {
+		t.Fatalf("resolveFinish task:final = final %q reason %q, want done/no reason", final, reason)
+	}
+}
+
+func TestLeadTurnInputUsesCompactState(t *testing.T) {
 	c := &controller{
 		manifest: &AgentTeamManifest{
 			Metadata: config.Metadata{Name: "compact-team"},
@@ -379,7 +468,7 @@ func TestLeadDecisionInputUsesCompactState(t *testing.T) {
 		Final:  largeFinal,
 	}
 
-	input := c.leadDecisionInput(2)
+	input := c.leadTurnInput(2)
 	if strings.Contains(input, largeFinal) {
 		t.Fatal("lead decision input should not include the full task final")
 	}
@@ -388,9 +477,6 @@ func TestLeadDecisionInputUsesCompactState(t *testing.T) {
 	}
 	if strings.Contains(input, "child-run") {
 		t.Fatalf("lead decision input should omit child run list:\n%s", input)
-	}
-	if !strings.Contains(c.synthesisInput(), largeFinal) {
-		t.Fatal("synthesis input should retain full final state")
 	}
 }
 
@@ -432,14 +518,13 @@ func TestRunTaskClearsPreviousRunOutputOnChildError(t *testing.T) {
 	}
 }
 
-func TestRunDoesNotSynthesizeAfterEmptyBlockedDecision(t *testing.T) {
+func TestRunFailsAfterAbortDecision(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	lead := writeMockAgent(t, root, "research-lead", "  - write\n")
-	synthesisLead := writeMockAgent(t, root, "research-synthesis", "  - write\n")
 	worker := writeMockAgent(t, root, "worker", "  []\n")
 
 	teamDir := filepath.Join(root, "teams")
@@ -454,7 +539,6 @@ metadata:
   name: blocked-team
 lead:
   agent: ` + lead + `
-  synthesisAgent: ` + synthesisLead + `
 workers:
   worker:
     agent: ` + worker + `
@@ -478,20 +562,15 @@ output:
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result.Status != StatusPartialCompleted {
-		t.Fatalf("status = %q, want %q", result.Status, StatusPartialCompleted)
+	if result.Status != StatusFailed {
+		t.Fatalf("status = %q, want %q", result.Status, StatusFailed)
 	}
-	if result.Final != "Team blocked by lead without a final explanation." {
+	if result.Final != "Team aborted by lead without a final explanation." {
 		t.Fatalf("final = %q", result.Final)
-	}
-	for _, child := range result.Summary.ChildRuns {
-		if child.Label == "lead-synthesis" {
-			t.Fatalf("lead synthesis should not run after blocked decision: %+v", child)
-		}
 	}
 }
 
-func TestRunSkipsSynthesisWhenRequiredVerifierMissing(t *testing.T) {
+func TestRunSkipsFinishWhenRequiredVerifierMissing(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -552,11 +631,6 @@ output:
 	}
 	if !strings.Contains(result.Final, "no verifier worker task is verified") {
 		t.Fatalf("final = %q, want verifier gate message", result.Final)
-	}
-	for _, child := range result.Summary.ChildRuns {
-		if child.Label == "lead-synthesis" {
-			t.Fatalf("lead synthesis should not run when required verifier is missing: %+v", child)
-		}
 	}
 }
 
@@ -659,6 +733,28 @@ func readConfigSnapshot(t *testing.T, runDir string) string {
 	}
 	t.Fatalf("missing config snapshot in %s", runDir)
 	return ""
+}
+
+func readContextMessageCount(t *testing.T, runDir string) int {
+	t.Helper()
+	events, err := trajectory.ReadFile(filepath.Join(runDir, runs.TrajectoryFile))
+	if err != nil {
+		t.Fatalf("read child trajectory failed: %v", err)
+	}
+	for _, event := range events {
+		if event.Type != trajectory.EventArtifactCreated {
+			continue
+		}
+		role, _ := event.Payload["role"].(string)
+		if role != "context_report" {
+			continue
+		}
+		value, _ := event.Payload["value"].(map[string]any)
+		count, _ := value["message_count_before"].(float64)
+		return int(count)
+	}
+	t.Fatalf("missing context report in %s", runDir)
+	return 0
 }
 
 func requireTeamEventTypes(t *testing.T, events []trajectory.Event, types ...trajectory.EventType) {

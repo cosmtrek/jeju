@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cosmtrek/jeju/internal/compiler"
+	"github.com/cosmtrek/jeju/internal/model"
 	"github.com/cosmtrek/jeju/internal/runs"
 	"github.com/cosmtrek/jeju/internal/runtime"
 	"github.com/cosmtrek/jeju/internal/trajectory"
@@ -24,6 +25,10 @@ const (
 	StatusFailed           = "failed"
 
 	VerifierWorkerName = "verifier"
+
+	DecisionContinue = "continue"
+	DecisionFinish   = "finish"
+	DecisionAbort    = "abort"
 
 	TaskPlanned        = "planned"
 	TaskReady          = "ready"
@@ -122,6 +127,7 @@ type TeamDecision struct {
 	RoundSummary string     `json:"round_summary,omitempty"`
 	Tasks        []TaskSpec `json:"tasks,omitempty"`
 	Finish       *Finish    `json:"finish,omitempty"`
+	Abort        *Abort     `json:"abort,omitempty"`
 }
 
 func (d *TeamDecision) UnmarshalJSON(data []byte) error {
@@ -130,6 +136,7 @@ func (d *TeamDecision) UnmarshalJSON(data []byte) error {
 		RoundSummary string          `json:"round_summary,omitempty"`
 		Tasks        json.RawMessage `json:"tasks,omitempty"`
 		Finish       *Finish         `json:"finish,omitempty"`
+		Abort        *Abort          `json:"abort,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -137,6 +144,7 @@ func (d *TeamDecision) UnmarshalJSON(data []byte) error {
 	d.Decision = raw.Decision
 	d.RoundSummary = raw.RoundSummary
 	d.Finish = raw.Finish
+	d.Abort = raw.Abort
 	if len(raw.Tasks) == 0 || strings.TrimSpace(string(raw.Tasks)) == "null" {
 		return nil
 	}
@@ -166,6 +174,7 @@ func (d *TeamDecision) UnmarshalJSON(data []byte) error {
 
 type Finish struct {
 	Content string `json:"content,omitempty"`
+	TaskID  string `json:"task_id,omitempty"`
 }
 
 func (f *Finish) UnmarshalJSON(data []byte) error {
@@ -177,9 +186,11 @@ func (f *Finish) UnmarshalJSON(data []byte) error {
 	}
 	var object struct {
 		Content string `json:"content,omitempty"`
+		TaskID  string `json:"task_id,omitempty"`
 	}
 	if err := json.Unmarshal(data, &object); err == nil {
 		f.Content = object.Content
+		f.TaskID = object.TaskID
 		return nil
 	}
 	var text string
@@ -190,6 +201,10 @@ func (f *Finish) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type Abort struct {
+	Reason string `json:"reason,omitempty"`
+}
+
 type TaskSpec struct {
 	ID             string         `json:"id"`
 	Worker         string         `json:"worker"`
@@ -197,6 +212,34 @@ type TaskSpec struct {
 	ContextRefs    []string       `json:"context_refs,omitempty"`
 	DependsOn      []string       `json:"depends_on,omitempty"`
 	OutputContract OutputContract `json:"output_contract,omitempty"`
+
+	contextRefsSet bool
+}
+
+func (s *TaskSpec) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID             string          `json:"id"`
+		Worker         string          `json:"worker"`
+		Objective      string          `json:"objective"`
+		ContextRefs    json.RawMessage `json:"context_refs,omitempty"`
+		DependsOn      []string        `json:"depends_on,omitempty"`
+		OutputContract OutputContract  `json:"output_contract,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	s.ID = raw.ID
+	s.Worker = raw.Worker
+	s.Objective = raw.Objective
+	s.DependsOn = raw.DependsOn
+	s.OutputContract = raw.OutputContract
+	if len(raw.ContextRefs) > 0 && strings.TrimSpace(string(raw.ContextRefs)) != "null" {
+		s.contextRefsSet = true
+		if err := json.Unmarshal(raw.ContextRefs, &s.ContextRefs); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type OutputContract struct {
@@ -249,9 +292,15 @@ type controller struct {
 	startedAt time.Time
 	summary   Summary
 
+	leadMessages     []model.Message
+	leadEventCursor  int
+	leadTaskSnapshot map[string]TaskState
+	leadRepairState  bool
+
 	taskMu   sync.Mutex
 	actionMu sync.Mutex
 	actionID int
+	actions  []map[string]any
 }
 
 func Run(ctx context.Context, specPath string, goal string, opts Options) (*Result, error) {
@@ -293,26 +342,23 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 			c.endRound(round, trajectory.SpanStatusError, added, dispatched, err.Error())
 			return c.finalize()
 		}
-		if decision.Decision == "blocked" {
-			c.summary.Status = StatusPartialCompleted
-			c.summary.Final = strings.TrimSpace(decision.RoundSummary)
-			if decision.Finish != nil && strings.TrimSpace(decision.Finish.Content) != "" {
-				c.summary.Final = strings.TrimSpace(decision.Finish.Content)
-			}
-			if c.summary.Final == "" {
-				c.summary.Final = "Team blocked by lead without a final explanation."
-			}
-			c.emitTeamAction(round, "lead.blocked", map[string]any{"round": round, "reason": c.summary.Final})
+		if decision.Decision == DecisionAbort {
+			c.summary.Status = StatusFailed
+			c.summary.Final = strings.TrimSpace(decision.Abort.Reason)
+			c.emitTeamAction(round, "lead.abort", map[string]any{"round": round, "reason": c.summary.Final})
 			c.endRound(round, trajectory.SpanStatusOK, added, dispatched, "")
 			break
 		}
-		if decision.Decision == "synthesize" {
-			if c.manifest.Verification.RequireVerifier && !c.hasVerifiedWorker(VerifierWorkerName) {
-				c.emitTeamAction(round, "synthesis.rejected", map[string]any{"round": round, "reason": "verification.requireVerifier is true and no verifier task is verified"})
-			} else if reason := c.pendingTaskReason(); reason != "" {
-				c.emitTeamAction(round, "synthesis.rejected", map[string]any{"round": round, "reason": reason})
+		if decision.Decision == DecisionFinish {
+			final, reason := c.resolveFinish(decision.Finish)
+			if reason != "" {
+				c.emitTeamAction(round, "finish.rejected", map[string]any{"round": round, "reason": reason})
+				c.leadRepairState = true
+				// Non-continue decisions cannot carry tasks, so falling through
+				// lets the rejected finish count as an empty repair round.
 			} else {
-				c.emitTeamAction(round, "synthesis.accepted", map[string]any{"round": round})
+				c.summary.Final = final
+				c.emitTeamAction(round, "finish.accepted", map[string]any{"round": round})
 				c.endRound(round, trajectory.SpanStatusOK, added, dispatched, "")
 				break
 			}
@@ -343,18 +389,14 @@ func (c *controller) run(ctx context.Context) (*Result, error) {
 
 	if c.summary.Final == "" {
 		c.blockTasksWithFailedDependencies()
-		if reason := c.synthesisBlockedReason(); reason != "" {
+		if reason := c.finishBlockedReason(); reason != "" {
 			c.summary.Status = StatusPartialCompleted
 			c.summary.Final = reason
-			c.emitTeamAction(0, "synthesis.skipped", map[string]any{"reason": reason})
+			c.emitTeamAction(0, "finish.skipped", map[string]any{"reason": reason})
 		} else {
-			final, err := c.runLeadSynthesis(ctx)
-			if err != nil {
-				c.summary.Status = StatusPartialCompleted
-				c.summary.Final = fmt.Sprintf("Team synthesis failed: %s", err.Error())
-			} else {
-				c.summary.Final = final
-			}
+			c.summary.Status = StatusPartialCompleted
+			c.summary.Final = "Team finished without a lead final decision."
+			c.emitTeamAction(0, "finish.skipped", map[string]any{"reason": c.summary.Final})
 		}
 	}
 	if c.summary.Status == "" {
@@ -384,11 +426,6 @@ func (c *controller) validateAgents() error {
 	if _, err := c.compileAgent(c.manifest.Lead.Agent, "compile-lead"); err != nil {
 		return fmt.Errorf("compile lead agent: %w", err)
 	}
-	if c.manifest.Lead.SynthesisAgent != "" {
-		if _, err := c.compileAgent(c.manifest.Lead.SynthesisAgent, "compile-lead-synthesis"); err != nil {
-			return fmt.Errorf("compile lead synthesis agent: %w", err)
-		}
-	}
 	for name, worker := range c.manifest.Workers {
 		if _, err := c.compileAgent(worker.Agent, "compile-worker-"+name); err != nil {
 			return fmt.Errorf("compile worker %s: %w", name, err)
@@ -409,9 +446,14 @@ func (c *controller) compileAgent(agentPath string, label string) (*compiler.Com
 
 func (c *controller) runLeadDecision(ctx context.Context, round int) (TeamDecision, error) {
 	label := fmt.Sprintf("lead-round-%03d", round)
-	input := c.leadDecisionInput(round)
+	input := c.leadTurnInput(round)
 	spanID := c.startChildSpan(round, label, "lead", "", 0)
-	child, err := c.runChild(ctx, c.manifest.Lead.Agent, label, "lead", "", input)
+	agent, err := c.compileAgent(c.manifest.Lead.Agent, label)
+	if err != nil {
+		c.endChildSpanError(round, spanID, label, "lead", "", 0, err)
+		return TeamDecision{}, err
+	}
+	child, err := c.runLeadChild(ctx, agent, label, input)
 	if err != nil {
 		c.endChildSpanError(round, spanID, label, "lead", "", 0, err)
 		return TeamDecision{}, err
@@ -436,27 +478,36 @@ func (c *controller) runLeadDecision(ctx context.Context, round int) (TeamDecisi
 	if err := c.validateDecision(decision); err != nil {
 		return TeamDecision{}, err
 	}
+	c.leadMessages = append(c.leadMessages, model.Message{Role: "assistant", Content: strings.TrimSpace(child.Final)})
 	return decision, nil
 }
 
-func (c *controller) runLeadSynthesis(ctx context.Context) (string, error) {
-	spanID := c.startChildSpan(0, "lead-synthesis", "lead", "", 0)
-	child, err := c.runChild(ctx, c.leadSynthesisAgent(), "lead-synthesis", "lead", "", c.synthesisInput())
+func (c *controller) runLeadChild(ctx context.Context, agent *compiler.CompiledAgent, label, input string) (childRunResult, error) {
+	c.leadMessages = append(c.leadMessages, model.Message{Role: "user", Content: input})
+	autoUserInput := "Return exactly one TeamDecision JSON object for the current AgentTeam turn. Do not ask the user during an AgentTeam lead run."
+	rt := runtime.NewWithOptions(runtime.Options{
+		AutoUserInput:             &autoUserInput,
+		SuppressConsoleTrajectory: true,
+	})
+	result, err := rt.RunWithMessages(ctx, agent, input, c.leadPrefixMessages(agent), c.leadMessages)
 	if err != nil {
-		c.endChildSpanError(0, spanID, "lead-synthesis", "lead", "", 0, err)
-		return "", err
+		return childRunResult{}, err
 	}
-	c.recordChildRun(child)
-	c.endChildSpan(0, spanID, child)
-	c.emitTeamAction(0, "synthesis.completed", map[string]any{"child_run_id": child.RunID})
-	return strings.TrimSpace(child.Final), nil
-}
-
-func (c *controller) leadSynthesisAgent() string {
-	if c.manifest.Lead.SynthesisAgent != "" {
-		return c.manifest.Lead.SynthesisAgent
+	record, err := agent.RunStore.ReadRunRecord(result.RunID)
+	if err != nil {
+		return childRunResult{}, err
 	}
-	return c.manifest.Lead.Agent
+	runDir := filepath.Join(agent.RunStore.BasePath, result.RunID)
+	return childRunResult{
+		Label:  label,
+		Role:   "lead",
+		RunID:  result.RunID,
+		RunDir: runDir,
+		Agent:  record.Agent,
+		Status: resultStatus(result.Status),
+		Final:  result.Final,
+		Stats:  statsFromRecord(record),
+	}, nil
 }
 
 func (c *controller) runChild(ctx context.Context, agentPath, label, role, taskID, input string) (childRunResult, error) {
@@ -495,14 +546,45 @@ func (c *controller) runCompiledChild(ctx context.Context, agent *compiler.Compi
 	}, nil
 }
 
-func (c *controller) synthesisBlockedReason() string {
+func (c *controller) finishBlockedReason() string {
 	if c.manifest.Verification.RequireVerifier && !c.hasVerifiedWorker(VerifierWorkerName) {
-		return "Team synthesis skipped: verification.requireVerifier is true and no verifier worker task is verified."
+		return "Team finish skipped: verification.requireVerifier is true and no verifier worker task is verified."
 	}
 	if reason := c.pendingTaskReason(); reason != "" {
-		return "Team synthesis skipped: " + reason
+		return "Team finish skipped: " + reason
 	}
 	return ""
+}
+
+func (c *controller) resolveFinish(finish *Finish) (string, string) {
+	if reason := c.finishBlockedReason(); reason != "" {
+		return "", reason
+	}
+	if finish == nil {
+		return "", "finish is required"
+	}
+	content := strings.TrimSpace(finish.Content)
+	taskID := normalizeTaskRef(finish.TaskID)
+	if content != "" && taskID != "" {
+		return "", "finish.content and finish.task_id are mutually exclusive"
+	}
+	if content != "" {
+		return content, ""
+	}
+	if taskID == "" {
+		return "", "finish.content or finish.task_id is required"
+	}
+	task, ok := c.summary.Tasks[taskID]
+	if !ok {
+		return "", fmt.Sprintf("finish.task_id %q is unknown", taskID)
+	}
+	if task.Status != TaskVerified {
+		return "", fmt.Sprintf("finish.task_id %q is %s, want %s", taskID, task.Status, TaskVerified)
+	}
+	if strings.TrimSpace(task.Final) == "" {
+		return "", fmt.Sprintf("finish.task_id %q has empty final output", taskID)
+	}
+	return strings.TrimSpace(task.Final), ""
 }
 
 func (c *controller) recordChildRun(child childRunResult) {
@@ -523,12 +605,17 @@ func (c *controller) recordChildRun(child childRunResult) {
 
 func (c *controller) validateDecision(decision TeamDecision) error {
 	switch decision.Decision {
-	case "continue", "synthesize", "blocked":
+	case DecisionContinue, DecisionFinish, DecisionAbort:
 	default:
 		return fmt.Errorf("lead decision %q is not supported", decision.Decision)
 	}
-	if decision.Decision != "continue" && len(decision.Tasks) > 0 {
+	if decision.Decision != DecisionContinue && len(decision.Tasks) > 0 {
 		return fmt.Errorf("lead decision %q must not include new tasks", decision.Decision)
+	}
+	if decision.Decision == DecisionAbort {
+		if decision.Abort == nil || strings.TrimSpace(decision.Abort.Reason) == "" {
+			return fmt.Errorf("lead decision abort requires abort.reason")
+		}
 	}
 	return nil
 }
@@ -536,6 +623,7 @@ func (c *controller) validateDecision(decision TeamDecision) error {
 func (c *controller) addTasks(specs []TaskSpec, round int) int {
 	added := 0
 	for index, spec := range specs {
+		spec = normalizeTaskSpec(spec)
 		if validTeamNameRe.MatchString(spec.ID) {
 			if _, exists := c.summary.Tasks[spec.ID]; exists {
 				c.emitTeamAction(round, "task.skipped", map[string]any{"round": round, "task_id": spec.ID, "reason": "duplicate task id"})
@@ -573,6 +661,27 @@ func (c *controller) addTasks(specs []TaskSpec, round int) int {
 		added++
 	}
 	return added
+}
+
+func normalizeTaskSpec(spec TaskSpec) TaskSpec {
+	if len(spec.DependsOn) > 0 {
+		dependsOn := make([]string, len(spec.DependsOn))
+		for i, dep := range spec.DependsOn {
+			dependsOn[i] = normalizeTaskRef(dep)
+		}
+		spec.DependsOn = dependsOn
+	}
+	if spec.contextRefsSet || len(spec.ContextRefs) > 0 {
+		contextRefs := make([]string, len(spec.ContextRefs))
+		for i, ref := range spec.ContextRefs {
+			contextRefs[i] = normalizeTaskRef(ref)
+		}
+		spec.ContextRefs = contextRefs
+	} else if len(spec.DependsOn) > 0 {
+		spec.ContextRefs = append([]string(nil), spec.DependsOn...)
+	}
+	spec.OutputContract.Format = normalizeOutputFormat(spec.OutputContract.Format)
+	return spec
 }
 
 func (c *controller) recordRejectedTaskSpec(spec TaskSpec, round int, index int, cause error) {
@@ -643,11 +752,12 @@ func (c *controller) validateTaskSpec(spec TaskSpec) error {
 		}
 	}
 	for _, ref := range spec.ContextRefs {
-		if strings.HasPrefix(ref, "task:") {
-			taskID := strings.TrimPrefix(ref, "task:")
-			if _, ok := c.summary.Tasks[taskID]; !ok {
-				return fmt.Errorf("task %q references unknown context task %q", spec.ID, taskID)
-			}
+		taskID := normalizeTaskRef(ref)
+		if taskID == "" {
+			continue
+		}
+		if _, ok := c.summary.Tasks[taskID]; !ok {
+			return fmt.Errorf("task %q references unknown context task %q", spec.ID, taskID)
 		}
 	}
 	if c.workerTaskCount(spec.Worker)+1 > c.workerMaxTasks(spec.Worker) {
@@ -836,11 +946,9 @@ func (c *controller) verifyTask(task TaskState, child childRunResult) Verificati
 	if strings.TrimSpace(task.Final) == "" {
 		reasons = append(reasons, "task final answer is empty")
 	}
-	if c.manifest.Verification.RequireStructuredTaskOutput {
-		fields := task.OutputContract.RequiredFields
-		if len(fields) == 0 {
-			fields = c.manifest.Verification.RequiredTaskFields
-		}
+	contract := c.activeOutputContract(task)
+	if c.manifest.Verification.RequireStructuredTaskOutput && contract.Format == "json" {
+		fields := contract.RequiredFields
 		var output map[string]any
 		if err := json.Unmarshal([]byte(extractJSONObject(task.Final)), &output); err != nil {
 			reasons = append(reasons, "task final answer is not valid JSON")
@@ -888,30 +996,98 @@ func (c *controller) finalize() (*Result, error) {
 	}, nil
 }
 
-func (c *controller) leadDecisionInput(round int) string {
+func (c *controller) leadPrefixMessages(agent *compiler.CompiledAgent) []model.Message {
 	var b strings.Builder
-	b.WriteString("# Jeju Team Lead Decision\n\n")
-	b.WriteString(fmt.Sprintf("round: %d\n", round))
-	b.WriteString(fmt.Sprintf("max_rounds: %d\n", c.manifest.Runtime.MaxRounds))
-	b.WriteString(fmt.Sprintf("max_tasks: %d\n", c.manifest.Runtime.MaxTasks))
-	b.WriteString(fmt.Sprintf("require_verifier: %t\n", c.manifest.Verification.RequireVerifier))
-	if c.manifest.Verification.RequireVerifier && !c.hasVerifiedWorker(VerifierWorkerName) {
-		b.WriteString("verifier_status: missing_verified_verifier_task\n")
-		b.WriteString("synthesis_rule: do not return decision=synthesize until a verifier worker task is verified\n")
+	b.WriteString("# Jeju AgentTeam Protocol\n\n")
+	b.WriteString("You are the lead agent in a Jeju AgentTeam lead_worker controller.\n")
+	b.WriteString("You must return exactly one TeamDecision JSON object and no other text.\n")
+	b.WriteString("The controller is the source of truth for task state. If your memory conflicts with controller state updates, trust the controller state.\n\n")
+	b.WriteString("TeamDecision schema:\n")
+	b.WriteString(`{
+  "decision": "continue | finish | abort",
+  "round_summary": "...",
+  "tasks": [],
+  "finish": {"content": "..."} | {"task_id": "..."} | null,
+  "abort": {"reason": "..."} | null
+}`)
+	b.WriteString("\n\nController rules:\n")
+	b.WriteString("- Use continue only to propose new worker tasks.\n")
+	b.WriteString("- Use finish only when controller state says finish is allowed.\n")
+	b.WriteString("- Use abort only when the team cannot complete the goal.\n")
+	b.WriteString("- Do not create replacement tasks for retry_scheduled tasks; the controller will retry them automatically.\n")
+	b.WriteString("- Do not repeat existing task ids; repeated ids are ignored.\n")
+	b.WriteString("- depends_on controls scheduling.\n")
+	b.WriteString("- context_refs controls injected task outputs.\n")
+	b.WriteString("- If context_refs is omitted, it defaults to depends_on.\n")
+	b.WriteString("- finish.task_id must reference a verified task.\n")
+	b.WriteString("- If verification.requireVerifier is true, finish is blocked until a verifier task is verified.\n\n")
+	b.WriteString("Task schema:\n")
+	b.WriteString(`{
+  "id": "...",
+  "worker": "...",
+  "objective": "...",
+  "depends_on": [],
+  "context_refs": [],
+  "output_contract": {"format": "...", "required_fields": []}
+}`)
+	b.WriteString("\n\n# Lead Agent System Prompt\n\n")
+	b.WriteString(agent.Instructions)
+	if !strings.HasSuffix(agent.Instructions, "\n") {
+		b.WriteString("\n")
 	}
-	b.WriteString("\n# Team Goal\n")
-	b.WriteString(c.goal)
-	b.WriteString("\n\n# Worker Catalog\n")
-	for _, name := range c.workerNames() {
-		worker := c.manifest.Workers[name]
-		b.WriteString(fmt.Sprintf("- %s: %s (maxTasks=%d)\n", name, worker.Description, c.workerMaxTasks(name)))
+	b.WriteString("\n# Workspace\n")
+	b.WriteString(agent.Sandbox.Workdir())
+	b.WriteString("\n")
+	return []model.Message{{Role: "system", Content: b.String()}}
+}
+
+func (c *controller) leadTurnInput(round int) string {
+	events := c.leadEventsSinceCursor()
+	changedTasks := c.changedTasksForLead()
+	includeSnapshot := round == 1 || c.leadRepairState || round%4 == 0
+	c.leadRepairState = false
+
+	var b strings.Builder
+	if round == 1 {
+		b.WriteString("# Team Run Bootstrap\n\n")
+		b.WriteString(fmt.Sprintf("round: %d\n", round))
+		b.WriteString("\nteam_goal:\n")
+		b.WriteString(c.goal)
+		b.WriteString("\n\nlimits:\n")
+		b.WriteString(fmt.Sprintf("- max_rounds: %d\n", c.manifest.Runtime.MaxRounds))
+		b.WriteString(fmt.Sprintf("- max_tasks: %d\n", c.manifest.Runtime.MaxTasks))
+		b.WriteString(fmt.Sprintf("- max_parallel: %d\n", c.manifest.Runtime.MaxParallel))
+		b.WriteString(fmt.Sprintf("- max_consecutive_empty_rounds: %d\n", c.manifest.Runtime.MaxConsecutiveEmptyRounds))
+		b.WriteString(fmt.Sprintf("- require_verifier: %t\n", c.manifest.Verification.RequireVerifier))
+		b.WriteString("\nworker_catalog:\n")
+		for _, name := range c.workerNames() {
+			worker := c.manifest.Workers[name]
+			b.WriteString(fmt.Sprintf("- %s: %s (maxTasks=%d)\n", name, worker.Description, c.workerMaxTasks(name)))
+		}
+	} else {
+		b.WriteString("# Team State Update\n\n")
+		b.WriteString(fmt.Sprintf("round: %d\n", round))
 	}
-	b.WriteString("\n# Current Team State\n")
-	b.WriteString(c.stateJSONForLead())
-	b.WriteString("\n\n# Required Output\n")
-	b.WriteString("Return only a JSON object with fields: decision, round_summary, tasks, finish.\n")
-	b.WriteString("Use decision=continue to create tasks, synthesize to stop dispatching, or blocked when the team cannot proceed.\n")
-	b.WriteString("Every task must choose one declared worker and include id, worker, objective, context_refs, depends_on, and output_contract.\n")
+
+	b.WriteString("\ncontroller_events:\n")
+	b.WriteString(mustMarshalLeadJSON(events))
+	b.WriteString("\n\ncontroller_directives:\n")
+	for _, directive := range c.leadDirectives() {
+		b.WriteString("- ")
+		b.WriteString(directive)
+		b.WriteString("\n")
+	}
+	b.WriteString("\nchanged_tasks:\n")
+	b.WriteString(mustMarshalLeadJSON(changedTasks))
+	b.WriteString("\n\nfinish_blockers:\n")
+	b.WriteString(mustMarshalLeadJSON(c.finishBlockers()))
+	b.WriteString("\n\nworker_budget:\n")
+	b.WriteString(mustMarshalLeadJSON(c.workerBudgetForLead()))
+	if includeSnapshot {
+		b.WriteString("\n\nauthoritative_snapshot:\n")
+		b.WriteString(c.stateJSONForLead())
+	}
+	b.WriteString("\n\nrequired_response:\nReturn one TeamDecision JSON object.\n")
 	return b.String()
 }
 
@@ -924,21 +1100,30 @@ func (c *controller) workerInput(task TaskState) string {
 	b.WriteString("\n\n# Assigned Task\n")
 	b.WriteString(task.Objective)
 	b.WriteString("\n\n# Output Contract\n")
-	fields := task.OutputContract.RequiredFields
-	if len(fields) == 0 {
-		fields = c.manifest.Verification.RequiredTaskFields
-	}
-	if len(fields) > 0 {
+	contract := c.activeOutputContract(task)
+	fields := contract.RequiredFields
+	if contract.Format == "json" && len(fields) > 0 {
 		b.WriteString("Return only JSON with required fields: ")
 		b.WriteString(strings.Join(fields, ", "))
 		b.WriteString(".\n")
+	} else if contract.Format != "" {
+		b.WriteString("Return ")
+		b.WriteString(contract.Format)
+		b.WriteString(" output.\n")
+	} else {
+		b.WriteString("Return a clear final answer for this task.\n")
 	}
 	if len(task.ContextRefs) > 0 {
 		b.WriteString("\n# Context Refs\n")
 		for _, ref := range task.ContextRefs {
+			taskID := normalizeTaskRef(ref)
+			if taskID == "" {
+				continue
+			}
 			b.WriteString("- ")
-			b.WriteString(ref)
-			if text := c.contextRefText(ref); text != "" {
+			b.WriteString("task:")
+			b.WriteString(taskID)
+			if text := c.contextRefText(taskID); text != "" {
 				b.WriteString("\n")
 				b.WriteString(indent(text, "  "))
 			}
@@ -946,17 +1131,6 @@ func (c *controller) workerInput(task TaskState) string {
 		}
 	}
 	b.WriteString("\n# Boundaries\nUse your configured Jeju tools and permissions. Do not inspect unrelated areas unless needed for this assigned task.\n")
-	return b.String()
-}
-
-func (c *controller) synthesisInput() string {
-	var b strings.Builder
-	b.WriteString("# Jeju Team Synthesis\n\n")
-	b.WriteString("# Team Goal\n")
-	b.WriteString(c.goal)
-	b.WriteString("\n\n# Final Team State\n")
-	b.WriteString(c.stateJSON())
-	b.WriteString("\n\nProduce the final answer from verified worker outputs. Identify unresolved gaps and residual risk.\n")
 	return b.String()
 }
 
@@ -986,6 +1160,160 @@ func (c *controller) stateJSONForLead() string {
 	return string(data)
 }
 
+type leadTaskView struct {
+	ID             string             `json:"id"`
+	Worker         string             `json:"worker"`
+	Status         string             `json:"status"`
+	Attempts       int                `json:"attempts"`
+	DependsOn      []string           `json:"depends_on,omitempty"`
+	ContextRefs    []string           `json:"context_refs,omitempty"`
+	OutputContract OutputContract     `json:"output_contract,omitempty"`
+	Verification   VerificationResult `json:"verification,omitempty"`
+	Error          string             `json:"error,omitempty"`
+	FinalSummary   string             `json:"final_summary,omitempty"`
+}
+
+func (c *controller) leadEventsSinceCursor() []map[string]any {
+	c.actionMu.Lock()
+	defer c.actionMu.Unlock()
+	if c.leadEventCursor > len(c.actions) {
+		c.leadEventCursor = len(c.actions)
+	}
+	events := make([]map[string]any, 0, len(c.actions)-c.leadEventCursor)
+	for _, event := range c.actions[c.leadEventCursor:] {
+		events = append(events, compactLeadEvent(event))
+	}
+	c.leadEventCursor = len(c.actions)
+	return events
+}
+
+func compactLeadEvent(event map[string]any) map[string]any {
+	keys := []string{"operation", "round", "task_id", "worker", "status", "reason", "reasons", "retry", "dependency", "dependency_status", "decision", "task_count"}
+	compact := map[string]any{}
+	for _, key := range keys {
+		if value, ok := event[key]; ok {
+			compact[key] = value
+		}
+	}
+	return compact
+}
+
+func (c *controller) changedTasksForLead() []leadTaskView {
+	if c.leadTaskSnapshot == nil {
+		c.leadTaskSnapshot = map[string]TaskState{}
+	}
+	ids := make([]string, 0, len(c.summary.Tasks))
+	for id := range c.summary.Tasks {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	changed := []leadTaskView{}
+	next := make(map[string]TaskState, len(c.summary.Tasks))
+	for _, id := range ids {
+		task := c.summary.Tasks[id]
+		next[id] = task
+		if previous, ok := c.leadTaskSnapshot[id]; ok && !leadTaskChanged(previous, task) {
+			continue
+		}
+		changed = append(changed, leadTaskViewFromState(task))
+	}
+	c.leadTaskSnapshot = next
+	return changed
+}
+
+func leadTaskChanged(previous, current TaskState) bool {
+	return previous.Status != current.Status ||
+		previous.Attempts != current.Attempts ||
+		previous.RunID != current.RunID ||
+		previous.Final != current.Final ||
+		previous.Error != current.Error ||
+		previous.Verification.Passed != current.Verification.Passed ||
+		strings.Join(previous.Verification.Reasons, "\n") != strings.Join(current.Verification.Reasons, "\n")
+}
+
+func leadTaskViewFromState(task TaskState) leadTaskView {
+	return leadTaskView{
+		ID:             task.ID,
+		Worker:         task.Worker,
+		Status:         task.Status,
+		Attempts:       task.Attempts,
+		DependsOn:      task.DependsOn,
+		ContextRefs:    task.ContextRefs,
+		OutputContract: task.OutputContract,
+		Verification:   task.Verification,
+		Error:          truncateTeamStateText(task.Error, leadStateTaskErrorLimit),
+		FinalSummary:   truncateTeamStateText(task.Final, leadStateTaskFinalLimit),
+	}
+}
+
+func (c *controller) leadDirectives() []string {
+	directives := []string{
+		"The controller is the source of truth for task state.",
+		"Do not repeat existing task ids; repeated ids are ignored.",
+	}
+	for _, task := range c.sortedTaskStates() {
+		switch task.Status {
+		case TaskRetryScheduled:
+			directives = append(directives, fmt.Sprintf("%s is retry_scheduled; do not create a replacement task. The controller will retry it automatically.", task.ID))
+		case TaskRunning, TaskReady:
+			directives = append(directives, fmt.Sprintf("%s is %s; wait for the controller result before creating dependent work.", task.ID, task.Status))
+		}
+	}
+	for _, blocker := range c.finishBlockers() {
+		directives = append(directives, "finish is blocked: "+blocker)
+	}
+	if len(c.finishBlockers()) == 0 {
+		directives = append(directives, "finish is allowed only if you can select finish.content or a verified finish.task_id.")
+	}
+	return directives
+}
+
+func (c *controller) finishBlockers() []string {
+	blockers := []string{}
+	if c.manifest.Verification.RequireVerifier && !c.hasVerifiedWorker(VerifierWorkerName) {
+		blockers = append(blockers, "verification.requireVerifier is true and no verifier worker task is verified")
+	}
+	for _, task := range c.sortedTaskStates() {
+		switch task.Status {
+		case TaskPlanned, TaskReady, TaskRunning, TaskRetryScheduled:
+			blockers = append(blockers, fmt.Sprintf("%s is %s", task.ID, task.Status))
+		}
+	}
+	return blockers
+}
+
+func (c *controller) workerBudgetForLead() map[string]map[string]int {
+	budget := map[string]map[string]int{}
+	for _, name := range c.workerNames() {
+		budget[name] = map[string]int{
+			"used": c.workerTaskCount(name),
+			"max":  c.workerMaxTasks(name),
+		}
+	}
+	return budget
+}
+
+func (c *controller) sortedTaskStates() []TaskState {
+	ids := make([]string, 0, len(c.summary.Tasks))
+	for id := range c.summary.Tasks {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	tasks := make([]TaskState, 0, len(ids))
+	for _, id := range ids {
+		tasks = append(tasks, c.summary.Tasks[id])
+	}
+	return tasks
+}
+
+func mustMarshalLeadJSON(value any) string {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return "null"
+	}
+	return string(data)
+}
+
 func truncateTeamStateText(text string, maxChars int) string {
 	if maxChars <= 0 {
 		return ""
@@ -998,15 +1326,40 @@ func truncateTeamStateText(text string, maxChars int) string {
 }
 
 func (c *controller) contextRefText(ref string) string {
-	if !strings.HasPrefix(ref, "task:") {
+	taskID := normalizeTaskRef(ref)
+	if taskID == "" {
 		return ""
 	}
-	taskID := strings.TrimPrefix(ref, "task:")
 	task, ok := c.summary.Tasks[taskID]
 	if !ok {
 		return ""
 	}
 	return task.Final
+}
+
+func (c *controller) activeOutputContract(task TaskState) OutputContract {
+	contract := task.OutputContract
+	contract.Format = normalizeOutputFormat(contract.Format)
+	if contract.Format != "" || len(contract.RequiredFields) > 0 {
+		if contract.Format == "" && len(contract.RequiredFields) > 0 {
+			contract.Format = "json"
+		}
+		return contract
+	}
+	if len(c.manifest.Verification.RequiredTaskFields) > 0 {
+		return OutputContract{Format: "json", RequiredFields: c.manifest.Verification.RequiredTaskFields}
+	}
+	return OutputContract{}
+}
+
+func normalizeTaskRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	ref = strings.TrimPrefix(ref, "task:")
+	return strings.TrimSpace(ref)
+}
+
+func normalizeOutputFormat(format string) string {
+	return strings.ToLower(strings.TrimSpace(format))
 }
 
 func (c *controller) workerNames() []string {

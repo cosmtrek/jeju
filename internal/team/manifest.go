@@ -140,7 +140,6 @@ func (m *AgentTeamManifest) applyDefaults() {
 
 func (m *AgentTeamManifest) resolveRelativePaths() {
 	m.Lead.Agent = resolveManifestPath(m.baseDir, m.Lead.Agent)
-	m.Lead.SynthesisAgent = resolveManifestPath(m.baseDir, m.Lead.SynthesisAgent)
 	for name, worker := range m.Workers {
 		worker.Agent = resolveManifestPath(m.baseDir, worker.Agent)
 		m.Workers[name] = worker
@@ -165,9 +164,7 @@ func (m *AgentTeamManifest) validate() error {
 		return fmt.Errorf("lead.agent %q: %w", m.Lead.Agent, err)
 	}
 	if m.Lead.SynthesisAgent != "" {
-		if err := ensureFile(m.Lead.SynthesisAgent); err != nil {
-			return fmt.Errorf("lead.synthesisAgent %q: %w", m.Lead.SynthesisAgent, err)
-		}
+		return fmt.Errorf("lead.synthesisAgent is no longer supported; declare a normal worker and finish with finish.task_id, or let the lead return finish.content")
 	}
 	if len(m.Workers) == 0 {
 		return fmt.Errorf("workers is required")

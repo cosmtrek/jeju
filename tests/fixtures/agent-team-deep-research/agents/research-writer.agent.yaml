@@ -2,8 +2,8 @@ apiVersion: jeju/v1alpha1
 kind: Agent
 
 metadata:
-  name: research-synthesis
-  description: "Synthesis lead agent for the AgentTeam deep research fixture"
+  name: research-writer
+  description: "Writer worker for the AgentTeam deep research fixture"
 
 models:
   providers:
@@ -12,7 +12,7 @@ models:
       model: mock
 
 instructions:
-  system: ../prompts/research-synthesis.md
+  system: ../prompts/research-writer.md
 
 runtime:
   model: primary

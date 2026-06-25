@@ -27,12 +27,13 @@ type RunState struct {
 	StartedAt time.Time
 	EndedAt   *time.Time
 
-	Messages     []model.Message
-	Summary      string
-	Observations []string
-	Errors       []RunError
-	Final        string
-	FinalRef     string
+	Messages       []model.Message
+	PrefixMessages []model.Message
+	Summary        string
+	Observations   []string
+	Errors         []RunError
+	Final          string
+	FinalRef       string
 
 	ModelCalls                  int
 	ToolCalls                   int
@@ -69,6 +70,19 @@ func NewRunState(runID, agent, input string) *RunState {
 		Messages: []model.Message{
 			{Role: "user", Content: input},
 		},
+		TokenCorrectionFactor: 1,
+	}
+}
+
+func NewRunStateWithMessages(runID, agent, input string, prefixMessages []model.Message, messages []model.Message) *RunState {
+	return &RunState{
+		RunID:                 runID,
+		Agent:                 agent,
+		Input:                 input,
+		Status:                StatusRunning,
+		StartedAt:             time.Now(),
+		PrefixMessages:        append([]model.Message(nil), prefixMessages...),
+		Messages:              append([]model.Message(nil), messages...),
 		TokenCorrectionFactor: 1,
 	}
 }

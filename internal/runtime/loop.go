@@ -15,6 +15,7 @@ import (
 	"github.com/cosmtrek/jeju/internal/jsonschemautil"
 	"github.com/cosmtrek/jeju/internal/model"
 	"github.com/cosmtrek/jeju/internal/policy"
+	"github.com/cosmtrek/jeju/internal/runs"
 	"github.com/cosmtrek/jeju/internal/tools"
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
@@ -24,6 +25,20 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 	if err != nil {
 		return nil, err
 	}
+	state := NewRunState(runDir.RunID, agent.Name, input)
+	return r.runWithInitialState(ctx, agent, runDir, state, input)
+}
+
+func (r *Runtime) RunWithMessages(ctx context.Context, agent *compiler.CompiledAgent, input string, prefixMessages []model.Message, messages []model.Message) (*RunResult, error) {
+	runDir, err := agent.RunStore.CreateRun(agent.Name, input)
+	if err != nil {
+		return nil, err
+	}
+	state := NewRunStateWithMessages(runDir.RunID, agent.Name, input, prefixMessages, messages)
+	return r.runWithInitialState(ctx, agent, runDir, state, input)
+}
+
+func (r *Runtime) runWithInitialState(ctx context.Context, agent *compiler.CompiledAgent, runDir *runs.RunDir, state *RunState, input string) (*RunResult, error) {
 	recorder, err := trajectory.NewRecorderWithOptions(runDir.Path, trajectory.RecorderOptions{
 		Console: !r.suppressConsoleTrajectory,
 	})
@@ -32,7 +47,6 @@ func (r *Runtime) Run(ctx context.Context, agent *compiler.CompiledAgent, input 
 	}
 	defer recorder.Close()
 
-	state := NewRunState(runDir.RunID, agent.Name, input)
 	agentPayload := map[string]any{"name": agent.Name}
 	if len(agent.PackageProvenance) > 0 {
 		agentPayload["package"] = agent.PackageProvenance
@@ -234,6 +248,9 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 
 func (r *Runtime) buildModelRequest(agent *compiler.CompiledAgent, state *RunState, cfg model.ProviderConfig) model.Request {
 	messages := agent.PromptMessages(cfg.ToolCalling)
+	if state.PrefixMessages != nil {
+		messages = append([]model.Message(nil), state.PrefixMessages...)
+	}
 	var requestTools []model.ToolDefinition
 	var responseFormat *model.ResponseFormat
 	toolBudgetExhausted := agent.Config.Runtime.Limits.MaxToolCalls > 0 && state.ToolCalls >= agent.Config.Runtime.Limits.MaxToolCalls

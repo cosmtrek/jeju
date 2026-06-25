@@ -1,7 +1,7 @@
 You are the verifier worker.
 
-Check whether framework and Jeju worker outputs are ready for final synthesis.
-Return structured JSON and include ready_for_synthesis.
+Check whether framework and Jeju worker outputs are ready for final output.
+Return structured JSON and include ready_for_final.
 
 Use the task context supplied by the team controller first. If you need local
 background, use the task context instead of tools. This fixture intentionally

@@ -1,10 +1,10 @@
 # Code Review Team
 
 This is a reusable `kind: AgentTeam` bundle for reviewing a repository's
-current Git working tree changes. It uses one lead and three workers: a packet
+current Git working tree changes. It uses one lead and four workers: a packet
 builder, a generalist reviewer that the lead dispatches 1-3 times with
-different focuses, and a judge verifier. The final answer is a synthesized
-Markdown code review with verified findings first.
+different focuses, a judge verifier, and a final writer. The final answer is a
+Markdown code review selected from the verified writer task.
 
 The design follows the converged shape of current AI code review systems:
 a small pool of generalist finders with dynamically assigned focuses, one
@@ -17,14 +17,17 @@ hard output caps with an explicit "clean diff" outcome.
 - Python 3 for the bundled packet tool.
 - A Git repository as the target workspace.
 - `DEEPSEEK_API_KEY` set, unless you edit the manifests to use another
-  OpenAI-compatible provider. The lead, reviewer, verifier, and synthesis
-  agents default to `deepseek-v4-pro`; the packet builder uses
-  `deepseek-v4-flash`.
+  OpenAI-compatible provider. The lead, reviewer, verifier, and writer agents
+  default to `deepseek-v4-pro`; the packet builder uses `deepseek-v4-flash`.
 
 This team may call the configured model many times. It is intended for
 substantive code review, not as a cheap pre-commit hook.
 
 ## Execution Model
+
+The lead keeps its own message history across rounds. Round 1 receives the goal,
+worker catalog, and initial task state; later rounds receive compact controller
+updates instead of a full rewritten prompt.
 
 1. Round 1: the lead creates one `build-review-packets` task. The
    `packet_builder` worker runs the bundled `tools/cr-packet.py build`
@@ -55,12 +58,12 @@ substantive code review, not as a cheap pre-commit hook.
    evidence and expanded context, scores every candidate on a 0-100 rubric,
    drops everything below 80, and caps output at 8 findings. Zero verified
    findings is a valid result.
-5. The lead synthesizes when the verifier output is clean. If the verifier
-   marked a P0/P1 finding `uncertain`, the lead may run one escalation round:
-   a follow-up reviewer task gathers the missing evidence, and a second
-   verifier task re-checks. At most one escalation round.
-6. The synthesis agent writes the final Markdown answer from verified team
-   state.
+5. If the verifier marked a P0/P1 finding `uncertain`, the lead may run one
+   escalation round: a follow-up reviewer task gathers the missing evidence,
+   and a second verifier task re-checks. At most one escalation round.
+6. Once verifier output is clean, the lead creates a normal `writer` worker
+   task that depends on the verified review state, then finishes with
+   `finish.task_id` pointing at that writer task.
 
 ## Run From This Repository
 
@@ -154,7 +157,7 @@ and projected team summary as standard trajectory events and artifacts.
 - The verifier gates on content, not metadata: candidates scoring below 80 on
   the confidence rubric are dropped, output is capped at 8 findings, and an
   empty findings list is a legitimate outcome.
-- Worker names (`packet_builder`, `reviewer`, `verifier`) are referenced by
+- Worker names (`packet_builder`, `reviewer`, `verifier`, `writer`) are referenced by
   the lead prompt; keep the team manifest and `prompts/review-lead.md` in
   sync if you rename them.
 

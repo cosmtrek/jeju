@@ -2,8 +2,8 @@ apiVersion: jeju/v1alpha1
 kind: Agent
 
 metadata:
-  name: review-synthesis
-  description: "Synthesis agent for the code review team."
+  name: review-writer
+  description: "Writer worker for the code review team."
 
 models:
   providers:
@@ -20,7 +20,7 @@ models:
       timeoutSec: 120
 
 instructions:
-  system: ../prompts/review-synthesis.md
+  system: ../prompts/review-writer.md
 
 runtime:
   model: primary

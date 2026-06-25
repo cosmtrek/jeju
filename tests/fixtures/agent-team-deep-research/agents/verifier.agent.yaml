@@ -3,7 +3,7 @@ kind: Agent
 
 metadata:
   name: verifier
-  description: "Worker agent for checking synthesis readiness"
+  description: "Worker agent for checking final output readiness"
 
 models:
   providers:

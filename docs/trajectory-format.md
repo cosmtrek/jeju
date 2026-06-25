@@ -118,23 +118,23 @@ Span kinds:
 | `context` | Context estimation, compression, summarization, or truncation. |
 | `evaluator` | One evaluation pass. |
 | `skill` | Skill disclosure or loading work when modeled as an operation. |
-| `subagent` | Nested agent run, such as a team lead, worker, or synthesis child run. |
+| `subagent` | Nested agent run, such as a team lead or worker. |
 | `shell` | Shell command execution inside a tool, when the command needs a nested span. |
 
 ### Agent Team Profile
 
 Agent Team uses the same trajectory format rather than a separate team event
 file. A team run sets `trajectory.header.payload.agent.kind` to `agent_team`.
-The team controller records each round as a `step` span and records lead,
-worker, and synthesis child runs as `subagent` spans. Subagent spans should
+The team controller records each round as a `step` span and records lead and
+worker child runs as `subagent` spans. Subagent spans should
 store child run references in `payload.attrs.child_run_id` and
 `payload.attrs.child_run_path`; they should not inline child trajectories.
 
 Team task state is represented with `action.created` events where
 `payload.kind` is `orchestration` and `payload.operation` identifies the
 transition, for example `task.created`, `task.completed`, `task.verified`,
-`task.rejected`, `task.blocked`, `synthesis.accepted`, or
-`synthesis.skipped`. Large structured team data, such as the manifest snapshot,
+`task.rejected`, `task.blocked`, `finish.accepted`, or
+`finish.skipped`. Large structured team data, such as the manifest snapshot,
 lead decision JSON, final answer, and projected team summary, should be stored
 as trajectory artifacts.
 

@@ -7,8 +7,7 @@ metadata:
 
 lead:
   agent: ../agents/review-lead.agent.yaml
-  synthesisAgent: ../agents/review-synthesis.agent.yaml
-  description: "Plan packet build, choose 1-3 review focuses for the diff, gate synthesis on the verifier."
+  description: "Plan packet build, choose 1-3 review focuses for the diff, and select the final answer."
 
 workers:
   packet_builder:
@@ -23,13 +22,18 @@ workers:
 
   verifier:
     agent: ../agents/verifier.agent.yaml
-    description: "Judge: dedup findings across reviewer tasks, verify claims against evidence, score confidence, gate synthesis."
+    description: "Judge: dedup findings across reviewer tasks, verify claims against evidence, score confidence, gate final output."
     maxTasks: 2
+
+  writer:
+    agent: ../agents/review-writer.agent.yaml
+    description: "Write the final Markdown review from verified verifier output."
+    maxTasks: 1
 
 runtime:
   topology: lead_worker
   maxRounds: 8
-  maxTasks: 10
+  maxTasks: 11
   maxParallel: 3
   maxRetriesPerTask: 1
   maxConsecutiveEmptyRounds: 1
