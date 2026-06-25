@@ -110,14 +110,7 @@ func (r *Runtime) runWithInitialState(ctx context.Context, agent *compiler.Compi
 		"ended_at":    now.Format(time.RFC3339Nano),
 		"duration_ms": now.Sub(state.StartedAt).Milliseconds(),
 		"final":       map[string]any{"content_ref": finalRef},
-		"stats": map[string]any{
-			"steps":             state.Step,
-			"model_calls":       state.ModelCalls,
-			"tool_calls":        state.ToolCalls,
-			"permission_denied": state.PermissionDenied,
-			"model_errors":      state.ModelErrors,
-			"tool_errors":       state.ToolErrors,
-		},
+		"stats":       runStatsPayload(state),
 	}
 	if evalResult != nil {
 		summary["evaluation"] = map[string]any{"passed": evalResult.Passed, "score": evalResult.Score}
@@ -163,6 +156,7 @@ func (r *Runtime) runStep(ctx context.Context, agent *compiler.CompiledAgent, re
 		return err
 	}
 	state.TokenCorrectionFactor = contextmgr.UpdateCorrectionFactor(state.TokenCorrectionFactor, state.LastRawTokenEstimate, resp.Usage.InputTokens)
+	state.RecordUsage(resp.Usage)
 	state.ResetErrors()
 	reasoningRef := ""
 	if resp.ReasoningContent != "" {
@@ -498,6 +492,7 @@ func (r *Runtime) summarizeContext(ctx context.Context, agent *compiler.Compiled
 		})
 		return "", err
 	}
+	state.RecordUsage(resp.Usage)
 	recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, contextSpanID(state.Step, "compression"), "model:"+cfg.Name, trajectory.SpanLLM, trajectory.SpanStatusOK, map[string]any{
 		"input":  map[string]any{"content_ref": inputRef},
 		"output": map[string]any{"content_ref": outputRef},
@@ -1052,6 +1047,21 @@ func spanStatusForRun(status RunStatus) trajectory.SpanStatus {
 		return trajectory.SpanStatusCancelled
 	default:
 		return trajectory.SpanStatusError
+	}
+}
+
+func runStatsPayload(state *RunState) map[string]any {
+	return map[string]any{
+		"steps":                   state.Step,
+		"model_calls":             state.ModelCalls,
+		"tool_calls":              state.ToolCalls,
+		"permission_denied":       state.PermissionDenied,
+		"model_errors":            state.ModelErrors,
+		"tool_errors":             state.ToolErrors,
+		"prompt_tokens":           state.PromptTokens,
+		"prompt_cache_hit_tokens": state.PromptCacheHitTokens,
+		"completion_tokens":       state.CompletionTokens,
+		"total_tokens":            state.TotalTokens,
 	}
 }
 

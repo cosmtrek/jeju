@@ -34,6 +34,7 @@ func (c *nativeFakeClient) Generate(ctx context.Context, req model.Request) (mod
 			Model:            "fake-native",
 			Text:             "I will write the requested note before finishing.",
 			ReasoningContent: "I should write the requested note.",
+			Usage:            model.Usage{InputTokens: 10, CacheHitTokens: 4, OutputTokens: 3, TotalTokens: 13},
 			ToolCalls: []model.ToolCall{{
 				ID:        "call_1",
 				Name:      "write",
@@ -45,6 +46,7 @@ func (c *nativeFakeClient) Generate(ctx context.Context, req model.Request) (mod
 		Provider: "openaiCompatible",
 		Model:    "fake-native",
 		Text:     "done",
+		Usage:    model.Usage{InputTokens: 7, CacheHitTokens: 2, OutputTokens: 5, TotalTokens: 12},
 	}, nil
 }
 
@@ -260,6 +262,29 @@ func TestRuntimeUsesNativeToolCalls(t *testing.T) {
 	}
 	if second[len(second)-2].Content != "I will write the requested note before finishing." {
 		t.Fatalf("second request did not replay assistant content from tool-call turn: %+v", second[len(second)-2])
+	}
+	events, err := trajectory.ReadFile(filepath.Join(tmp, "runs", result.RunID, runs.TrajectoryFile))
+	if err != nil {
+		t.Fatalf("ReadFile trajectory failed: %v", err)
+	}
+	summaryStats := map[string]any{}
+	for _, event := range events {
+		if event.Type == trajectory.EventRunSummary {
+			summaryStats, _ = event.Payload["stats"].(map[string]any)
+		}
+	}
+	if len(summaryStats) == 0 {
+		t.Fatal("missing run.summary stats")
+	}
+	for key, want := range map[string]int{
+		"prompt_tokens":           17,
+		"prompt_cache_hit_tokens": 6,
+		"completion_tokens":       8,
+		"total_tokens":            25,
+	} {
+		if got := numericPayload(summaryStats, key); got != want {
+			t.Fatalf("run.summary stats[%q] = %d, want %d", key, got, want)
+		}
 	}
 }
 
@@ -848,4 +873,17 @@ func hasToolDefinition(defs []model.ToolDefinition, name string) bool {
 		}
 	}
 	return false
+}
+
+func numericPayload(payload map[string]any, key string) int {
+	switch value := payload[key].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
 }

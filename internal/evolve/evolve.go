@@ -195,16 +195,17 @@ type TrialResult struct {
 }
 
 type RunStats struct {
-	Steps            int     `json:"steps"`
-	ModelCalls       int     `json:"model_calls"`
-	ToolCalls        int     `json:"tool_calls"`
-	ModelErrors      int     `json:"model_errors"`
-	ToolErrors       int     `json:"tool_errors"`
-	PermissionDenied int     `json:"permission_denied"`
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
-	TotalTokens      int     `json:"total_tokens"`
-	DurationSec      float64 `json:"duration_sec"`
+	Steps                int     `json:"steps"`
+	ModelCalls           int     `json:"model_calls"`
+	ToolCalls            int     `json:"tool_calls"`
+	ModelErrors          int     `json:"model_errors"`
+	ToolErrors           int     `json:"tool_errors"`
+	PermissionDenied     int     `json:"permission_denied"`
+	PromptTokens         int     `json:"prompt_tokens"`
+	PromptCacheHitTokens int     `json:"prompt_cache_hit_tokens"`
+	CompletionTokens     int     `json:"completion_tokens"`
+	TotalTokens          int     `json:"total_tokens"`
+	DurationSec          float64 `json:"duration_sec"`
 }
 
 const editableDirMaxFiles = 64
@@ -1386,13 +1387,16 @@ func (c *controller) effectiveEvaluation(ctx context.Context, agent *compiler.Co
 				"duration_ms": record.DurationMS,
 				"final":       map[string]any{"content_ref": record.FinalRef},
 				"stats": map[string]any{
-					"steps":             stats.Steps,
-					"model_calls":       stats.ModelCalls,
-					"tool_calls":        stats.ToolCalls,
-					"permission_denied": stats.PermissionDenied,
-					"model_errors":      stats.ModelErrors,
-					"tool_errors":       stats.ToolErrors,
-					"total_tokens":      stats.TotalTokens,
+					"steps":                   stats.Steps,
+					"model_calls":             stats.ModelCalls,
+					"tool_calls":              stats.ToolCalls,
+					"permission_denied":       stats.PermissionDenied,
+					"model_errors":            stats.ModelErrors,
+					"tool_errors":             stats.ToolErrors,
+					"prompt_tokens":           stats.PromptTokens,
+					"prompt_cache_hit_tokens": stats.PromptCacheHitTokens,
+					"completion_tokens":       stats.CompletionTokens,
+					"total_tokens":            stats.TotalTokens,
 				},
 				"evaluation": map[string]any{"passed": result.Passed, "score": result.Score},
 			},
@@ -2008,6 +2012,7 @@ func statsFromEvents(events []trajectory.Event) RunStats {
 	stats.Steps = record.Stats.Steps
 	stats.ModelCalls = record.Stats.ModelCalls
 	stats.PromptTokens = record.Stats.PromptTokens
+	stats.PromptCacheHitTokens = record.Stats.PromptCacheHitTokens
 	stats.CompletionTokens = record.Stats.CompletionTokens
 	stats.TotalTokens = record.Stats.TotalTokens
 	stats.ModelErrors = record.Stats.ModelErrors

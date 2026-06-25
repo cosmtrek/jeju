@@ -40,6 +40,10 @@ type RunState struct {
 	ModelErrors                 int
 	ToolErrors                  int
 	PermissionDenied            int
+	PromptTokens                int
+	PromptCacheHitTokens        int
+	CompletionTokens            int
+	TotalTokens                 int
 	ConsecutiveErrors           int
 	LastTokenEstimate           int
 	LastRawTokenEstimate        int
@@ -85,6 +89,13 @@ func NewRunStateWithMessages(runID, agent, input string, prefixMessages []model.
 		Messages:              append([]model.Message(nil), messages...),
 		TokenCorrectionFactor: 1,
 	}
+}
+
+func (s *RunState) RecordUsage(usage model.Usage) {
+	s.PromptTokens += usage.InputTokens
+	s.PromptCacheHitTokens += usage.CacheHitTokens
+	s.CompletionTokens += usage.OutputTokens
+	s.TotalTokens += usage.TotalTokens
 }
 
 func (s *RunState) AddObservation(text string) {
