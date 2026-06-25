@@ -16,6 +16,7 @@ func Execute(ctx context.Context, args []string) error {
 func newRootCommand(ctx context.Context) *cobra.Command {
 	// Keep help output in onboarding order instead of alphabetical order.
 	cobra.EnableCommandSorting = false
+	cobra.AddTemplateFunc("commandUsage", commandUsage)
 
 	root := &cobra.Command{
 		Use:   "jeju",
@@ -70,6 +71,18 @@ func indentLines(text, prefix string) string {
 		lines[i] = prefix + line
 	}
 	return strings.Join(lines, "\n")
+}
+
+func commandUsage(cmd *cobra.Command) string {
+	use := strings.TrimSpace(cmd.Use)
+	if use == "" {
+		return cmd.CommandPath()
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(use, cmd.Name()))
+	if rest == "" {
+		return cmd.CommandPath()
+	}
+	return cmd.CommandPath() + " " + rest
 }
 
 func newInitCommand() *cobra.Command {
@@ -243,7 +256,7 @@ const rootHelpTemplate = `{{if .Long}}{{.Long}}{{else}}Jeju - {{.Short}}{{end}}
 Usage:
 {{- if .HasAvailableSubCommands}}
 {{- range .Commands}}{{if .IsAvailableCommand}}
-  {{printf "%-88s" (printf "jeju %s" .Use)}} {{.Short}}{{end}}{{end}}
+  {{printf "%-88s" (commandUsage .)}} {{.Short}}{{end}}{{end}}
 {{- else}}
   {{.UseLine}}
 {{- end}}

@@ -40,6 +40,43 @@ func TestTeamRunReturnsErrorForFailedStatus(t *testing.T) {
 	}
 }
 
+func TestTeamHelpPrintsRunSubcommandPath(t *testing.T) {
+	output := captureStdout(t, func() {
+		if err := Execute(context.Background(), []string{"team", "--help"}); err != nil {
+			t.Fatalf("team help failed: %v", err)
+		}
+	})
+	want := `jeju team run [--workspace <dir>] [--out <dir>] [--output live|final] <team.yaml> "<goal>"`
+	if !strings.Contains(output, want) {
+		t.Fatalf("team help output missing %q:\n%s", want, output)
+	}
+	if strings.Contains(output, `jeju run [--workspace <dir>] [--out <dir>]`) {
+		t.Fatalf("team help output points at jeju run:\n%s", output)
+	}
+}
+
+func TestTeamRejectsRunFlagsOnParentCommand(t *testing.T) {
+	err := Execute(context.Background(), []string{"team", "--workspace", "/tmp/project", "team.yaml", "review"})
+	if err == nil {
+		t.Fatal("expected team parent flag error")
+	}
+	want := `team flags must appear on the run subcommand; use: jeju team run [--workspace <dir>]`
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestTeamRunRejectsRunFlagAfterManifest(t *testing.T) {
+	err := Execute(context.Background(), []string{"team", "run", "team.yaml", "--output", "final", "review"})
+	if err == nil {
+		t.Fatal("expected misplaced team run flag error")
+	}
+	want := "team run flags must appear before <team.yaml>"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}
+
 func TestValidateAcceptsAgentTeamAndExplainsResolvedWiring(t *testing.T) {
 	root := t.TempDir()
 	leadPath := writeValidAgentManifest(t, root, "lead")

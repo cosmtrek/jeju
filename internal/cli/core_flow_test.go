@@ -499,6 +499,25 @@ func TestExecuteSubcommandHelpPrintsFlags(t *testing.T) {
 	}
 }
 
+func TestPackageHelpPrintsNestedSubcommandPaths(t *testing.T) {
+	output := captureStdout(t, func() {
+		if err := Execute(context.Background(), []string{"package", "--help"}); err != nil {
+			t.Fatalf("package help failed: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"jeju package init <package-root> --agent <agent.yaml> --id <namespace/name> --version <semver>",
+		"jeju package pack <package-root> --out <dir>",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("package help output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "jeju pack <package-root> --out <dir>") {
+		t.Fatalf("package help output drops package path:\n%s", output)
+	}
+}
+
 func TestEvolveHelpPrintsFlags(t *testing.T) {
 	output := captureStdout(t, func() {
 		if err := Execute(context.Background(), []string{"evolve", "--help"}); err != nil {

@@ -21,6 +21,12 @@ func newTeamCommand(ctx context.Context) *cobra.Command {
 			return cmd.Help()
 		},
 	}
+	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		if isTeamRunFlagError(err) {
+			return fmt.Errorf("team flags must appear on the run subcommand; use: %s", teamRunUsage())
+		}
+		return err
+	})
 	cmd.AddCommand(newTeamRunCommand(ctx))
 	return cmd
 }
@@ -35,6 +41,9 @@ func newTeamRunCommand(ctx context.Context) *cobra.Command {
 		Args:         cobra.MinimumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if isMisplacedTeamRunFlag(args[1]) {
+				return cmd.FlagErrorFunc()(cmd, fmt.Errorf("team run flags must appear before <team.yaml>; use -- before the goal if it starts with flag-like text"))
+			}
 			return runTeam(ctx, args[0], strings.Join(args[1:], " "), workspace, outDir, output)
 		},
 	}
@@ -43,6 +52,26 @@ func newTeamRunCommand(ctx context.Context) *cobra.Command {
 	cmd.Flags().StringVar(&output, "output", runOutputLive, "console output mode: live or final")
 	cmd.Flags().SetInterspersed(false)
 	return cmd
+}
+
+func isTeamRunFlagError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "unknown flag: --workspace") ||
+		strings.Contains(msg, "unknown flag: --out") ||
+		strings.Contains(msg, "unknown flag: --output")
+}
+
+func isMisplacedTeamRunFlag(arg string) bool {
+	return arg == "--workspace" || strings.HasPrefix(arg, "--workspace=") ||
+		arg == "--out" || strings.HasPrefix(arg, "--out=") ||
+		arg == "--output" || strings.HasPrefix(arg, "--output=")
+}
+
+func teamRunUsage() string {
+	return `jeju team run [--workspace <dir>] [--out <dir>] [--output live|final] <team.yaml> "<goal>"`
 }
 
 func runTeam(ctx context.Context, teamPath, goal, workspace, outDir, output string) error {
