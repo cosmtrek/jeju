@@ -1,0 +1,116 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: code-review-with-agent-tools
+  description: "Single code review agent that calls specialist child agents as tools"
+  labels:
+    scenario: agent-tools
+    example: code-review
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-pro
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.1
+      thinking:
+        type: disabled
+      maxOutputTokens: 4096
+      contextWindow: 128000
+      timeoutSec: 120
+
+instructions:
+  system: ../prompts/code-review-with-agent-tools.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  recentTokenBudget: 24000
+  limits:
+    maxSteps: 8
+    maxDurationSec: 900
+    maxToolCalls: 4
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace
+
+tools:
+  - name: build_review_packet
+    uses: agent
+    description: "Run the packet-builder child agent to collect a deterministic diff packet for the target workspace."
+    agent:
+      manifest: packet-builder.agent.yaml
+    input:
+      schema:
+        type: object
+        required: [task]
+        additionalProperties: false
+        properties:
+          task:
+            type: string
+            description: "Bounded task for the packet-builder child agent."
+          context:
+            type: string
+            description: "Relevant parent context."
+          expected_output:
+            type: string
+            description: "Expected child output shape."
+
+  - name: ask_reviewer
+    uses: agent
+    description: "Run the reviewer child agent for one assigned lightweight code review focus."
+    agent:
+      manifest: reviewer.agent.yaml
+    input:
+      schema:
+        type: object
+        required: [task, context]
+        additionalProperties: false
+        properties:
+          task:
+            type: string
+            description: "Review focus and packet run_id for the reviewer child agent."
+          context:
+            type: string
+            description: "Packet-builder output, focus rationale, and any parent constraints."
+          expected_output:
+            type: string
+            description: "Expected reviewer output shape."
+
+  - name: verify_findings
+    uses: agent
+    description: "Run the verifier child agent to judge and confidence-gate reviewer candidates."
+    agent:
+      manifest: verifier.agent.yaml
+    input:
+      schema:
+        type: object
+        required: [task, context]
+        additionalProperties: false
+        properties:
+          task:
+            type: string
+            description: "Verification task with packet run_id and candidate review outputs."
+          context:
+            type: string
+            description: "Reviewer outputs and packet metadata for verification."
+          expected_output:
+            type: string
+            description: "Expected verifier output shape."
+
+permissions:
+  access: readOnly
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules: [finalAnswerExists, runCompleted]

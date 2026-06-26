@@ -58,6 +58,7 @@ var validCapabilities = map[string]bool{
 	"command":        true,
 	"networkRead":    true,
 	"networkWrite":   true,
+	"agentRun":       true,
 }
 
 var supportedToolUses = []string{
@@ -68,6 +69,7 @@ var supportedToolUses = []string{
 	"builtin:shell",
 	"command",
 	"http",
+	"agent",
 }
 
 var validToolUses = boolSet(supportedToolUses...)
@@ -198,6 +200,11 @@ func validateTools(tools []ToolConfig) error {
 				return err
 			}
 		}
+		if tool.Uses == "agent" {
+			if err := validateAgentTool(tool); err != nil {
+				return err
+			}
+		}
 		for _, capability := range tool.Capabilities {
 			if !validCapabilities[capability] {
 				return fmt.Errorf("tool %q capability %q is invalid", tool.Name, capability)
@@ -206,6 +213,19 @@ func validateTools(tools []ToolConfig) error {
 		if err := validateSchema(tool.Name, tool.Input.Schema); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateAgentTool(tool ToolConfig) error {
+	if tool.Agent.Manifest == "" {
+		return fmt.Errorf("tool %q agent.manifest is required", tool.Name)
+	}
+	if tool.Command.Run != "" {
+		return fmt.Errorf("tool %q uses agent and must not configure command.run", tool.Name)
+	}
+	if tool.HTTP.Method != "" || tool.HTTP.URL != "" {
+		return fmt.Errorf("tool %q uses agent and must not configure http", tool.Name)
 	}
 	return nil
 }

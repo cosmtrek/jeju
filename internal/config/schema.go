@@ -84,6 +84,7 @@ type ToolConfig struct {
 	Capabilities []string          `yaml:"capabilities,omitempty"`
 	Command      CommandConfig     `yaml:"command,omitempty"`
 	HTTP         HTTPConfig        `yaml:"http,omitempty"`
+	Agent        AgentToolConfig   `yaml:"agent,omitempty"`
 	Input        ToolInputConfig   `yaml:"input,omitempty"`
 	Env          map[string]string `yaml:"env,omitempty"`
 }
@@ -129,6 +130,10 @@ type HTTPConfig struct {
 type HTTPBodyConfig struct {
 	JSON any    `yaml:"json,omitempty"`
 	Text string `yaml:"text,omitempty"`
+}
+
+type AgentToolConfig struct {
+	Manifest string `yaml:"manifest,omitempty"`
 }
 
 type ToolInputConfig struct {

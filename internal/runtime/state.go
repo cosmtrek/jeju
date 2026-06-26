@@ -20,6 +20,7 @@ const (
 
 type RunState struct {
 	RunID     string
+	RunDir    string
 	Agent     string
 	Input     string
 	Status    RunStatus
@@ -40,6 +41,17 @@ type RunState struct {
 	ModelErrors                 int
 	ToolErrors                  int
 	PermissionDenied            int
+	ChildRuns                   int
+	ChildRunErrors              int
+	ChildModelCalls             int
+	ChildToolCalls              int
+	ChildModelErrors            int
+	ChildToolErrors             int
+	ChildPermissionDenied       int
+	ChildPromptTokens           int
+	ChildPromptCacheHitTokens   int
+	ChildCompletionTokens       int
+	ChildTotalTokens            int
 	PromptTokens                int
 	PromptCacheHitTokens        int
 	CompletionTokens            int

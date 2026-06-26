@@ -175,6 +175,31 @@ func TestBuildStepViewsMultipleToolCalls(t *testing.T) {
 	}
 }
 
+func TestBuildStepViewsAgentToolSubagent(t *testing.T) {
+	runID := "run-agent-tool"
+	events := []trajectory.Event{
+		{Type: trajectory.EventSpanStarted, RunID: runID, StepID: 1, SpanID: "span_step_001", Actor: "runtime", Payload: map[string]any{"kind": "step"}},
+		{Type: trajectory.EventActionCreated, RunID: runID, StepID: 1, Actor: "runtime", Payload: map[string]any{"kind": "tool_call", "tool_call_id": "call_agent", "function_name": "ask_retriever", "arguments": map[string]any{"task": "summarize"}}},
+		{Type: trajectory.EventSpanStarted, RunID: runID, StepID: 1, SpanID: "span_tool_001", Actor: "tool:ask_retriever", Payload: map[string]any{"kind": "tool", "tool_call_id": "call_agent"}},
+		{Type: trajectory.EventSpanStarted, RunID: runID, StepID: 1, SpanID: "span_subagent_001", ParentSpanID: "span_tool_001", Actor: "subagent:ask_retriever", Payload: map[string]any{"kind": "subagent", "tool_call_id": "call_agent", "attrs": map[string]any{"tool": "ask_retriever"}}},
+		{Type: trajectory.EventSpanEnded, RunID: runID, StepID: 1, SpanID: "span_subagent_001", ParentSpanID: "span_tool_001", Actor: "subagent:ask_retriever", Payload: map[string]any{"kind": "subagent", "status": "ok", "tool_call_id": "call_agent", "attrs": map[string]any{"tool": "ask_retriever", "agent": "retriever", "child_run_id": "child-1", "child_run_path": "child-runs/ask_retriever/call_agent/child-1", "status": "completed"}, "metrics": map[string]any{"model_calls": 1, "tool_calls": 2, "total_tokens": 42}}},
+		{Type: trajectory.EventSpanEnded, RunID: runID, StepID: 1, SpanID: "span_tool_001", Actor: "tool:ask_retriever", Payload: map[string]any{"kind": "tool", "status": "ok", "tool_call_id": "call_agent"}},
+		{Type: trajectory.EventSpanEnded, RunID: runID, StepID: 1, SpanID: "span_step_001", Actor: "runtime", Payload: map[string]any{"kind": "step", "status": "ok"}},
+	}
+
+	steps := buildStepViews(trajectory.Project(events), "")
+	if len(steps) != 1 || len(steps[0].ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %+v", steps)
+	}
+	tc := steps[0].ToolCalls[0]
+	if tc.Kind != "agent" || !tc.AgentTool {
+		t.Fatalf("expected agent tool view, got %+v", tc)
+	}
+	if tc.AgentName != "retriever" || tc.AgentRunID != "child-1" || tc.AgentTotalTokens != 42 {
+		t.Fatalf("agent tool details not projected: %+v", tc)
+	}
+}
+
 func TestBuildStepViewsContextCompression(t *testing.T) {
 	runID := "run-compress"
 	events := []trajectory.Event{

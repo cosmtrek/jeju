@@ -42,6 +42,7 @@ func resolveRelativePaths(m *AgentManifest, baseDir string) {
 		if m.Tools[i].Command.Run != "" && looksLikePath(m.Tools[i].Command.Run) {
 			m.Tools[i].Command.Run = resolvePath(baseDir, m.Tools[i].Command.Run)
 		}
+		m.Tools[i].Agent.Manifest = resolvePath(baseDir, m.Tools[i].Agent.Manifest)
 		resolveCommandArgs(baseDir, m.Tools[i].Command.Args)
 	}
 	for i := range m.Evaluate.Evaluators {

@@ -16,6 +16,7 @@ import (
 	"github.com/cosmtrek/jeju/internal/sandbox"
 	"github.com/cosmtrek/jeju/internal/skills"
 	"github.com/cosmtrek/jeju/internal/tools"
+	toolagent "github.com/cosmtrek/jeju/internal/tools/agent"
 	"github.com/cosmtrek/jeju/internal/tools/builtin"
 	toolcli "github.com/cosmtrek/jeju/internal/tools/cli"
 	"github.com/cosmtrek/jeju/internal/tools/command"
@@ -34,6 +35,7 @@ type CompiledAgent struct {
 	Instructions      string
 	Models            *model.Registry
 	Tools             *tools.Registry
+	AgentTools        map[string]AgentToolSpec
 	Skills            *skills.Registry
 	Memory            memory.Store
 	Sandbox           sandbox.Sandbox
@@ -42,6 +44,11 @@ type CompiledAgent struct {
 	Evaluators        []evaluate.Evaluator
 	RunStore          *runs.Store
 	systemPrompt      string
+}
+
+type AgentToolSpec struct {
+	Name     string
+	Manifest string
 }
 
 type OutputSpec struct {
@@ -84,8 +91,11 @@ func CompileWithOptions(manifestPath string, opts Options) (*CompiledAgent, erro
 	if err != nil {
 		return nil, err
 	}
-	toolRegistry, err := compileTools(manifest.Tools, box)
+	toolRegistry, agentTools, err := compileTools(manifest.Tools, box)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateAgentTools(agentTools, manifest.Workspace.Path); err != nil {
 		return nil, err
 	}
 	skillRegistry, err := skills.LoadRegistry(manifest.Skills, toolRegistry.Names())
@@ -113,6 +123,7 @@ func CompileWithOptions(manifestPath string, opts Options) (*CompiledAgent, erro
 		Instructions:   string(instructions),
 		Models:         modelRegistry,
 		Tools:          toolRegistry,
+		AgentTools:     agentTools,
 		Skills:         skillRegistry,
 		Memory:         memory.Noop{},
 		Sandbox:        box,
@@ -167,43 +178,44 @@ func compileModels(cfg config.ModelsConfig) (*model.Registry, error) {
 	return registry, nil
 }
 
-func compileTools(configs []config.ToolConfig, box sandbox.Sandbox) (*tools.Registry, error) {
+func compileTools(configs []config.ToolConfig, box sandbox.Sandbox) (*tools.Registry, map[string]AgentToolSpec, error) {
 	registry := tools.NewRegistry()
+	agentTools := map[string]AgentToolSpec{}
 	for _, cfg := range configs {
 		spec, err := compileToolSpec(cfg)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		switch cfg.Uses {
 		case "builtin:read":
 			if err := registry.Register(builtin.NewFileRead(spec, box)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		case "builtin:write":
 			if err := registry.Register(builtin.NewFileWrite(spec, box)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		case "builtin:edit":
 			if err := registry.Register(builtin.NewEdit(spec, box)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		case "builtin:search":
 			if err := registry.Register(builtin.NewSearch(spec, box)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		case "builtin:shell":
 			if spec.TimeoutSec == 0 {
 				spec.TimeoutSec = 30
 			}
 			if err := registry.Register(toolcli.NewShell(spec, box, cfg.Env)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		case "command":
 			if spec.TimeoutSec == 0 {
 				spec.TimeoutSec = 60
 			}
 			if err := registry.Register(command.New(cfg.Name, cfg.Command.Run, box.Workdir(), spec, cfg.Env)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		case "http":
 			if spec.TimeoutSec == 0 {
@@ -219,13 +231,42 @@ func compileTools(configs []config.ToolConfig, box sandbox.Sandbox) (*tools.Regi
 				Body:       cfg.HTTP.Body.JSON,
 				TimeoutSec: cfg.HTTP.TimeoutSec,
 			})); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
+		case "agent":
+			if err := registry.Register(toolagent.New(spec)); err != nil {
+				return nil, nil, err
+			}
+			agentTools[cfg.Name] = AgentToolSpec{Name: cfg.Name, Manifest: cfg.Agent.Manifest}
 		default:
-			return nil, fmt.Errorf("unsupported tool uses %q", cfg.Uses)
+			return nil, nil, fmt.Errorf("unsupported tool uses %q", cfg.Uses)
 		}
 	}
-	return registry, nil
+	return registry, agentTools, nil
+}
+
+func validateAgentTools(agentTools map[string]AgentToolSpec, workspaceOverride string) error {
+	for _, spec := range agentTools {
+		child, _, err := config.LoadFile(spec.Manifest)
+		if err != nil {
+			return fmt.Errorf("agent tool %q load child manifest %q: %w", spec.Name, spec.Manifest, err)
+		}
+		if child.Kind != "Agent" {
+			return fmt.Errorf("agent tool %q child manifest %q must be kind Agent, got %q", spec.Name, spec.Manifest, child.Kind)
+		}
+		if err := config.Validate(child); err != nil {
+			return fmt.Errorf("agent tool %q validate child manifest %q: %w", spec.Name, spec.Manifest, err)
+		}
+		for _, tool := range child.Tools {
+			if tool.Uses == "agent" {
+				return fmt.Errorf("agent tool %q child manifest %q must not declare nested agent tool %q", spec.Name, spec.Manifest, tool.Name)
+			}
+		}
+		if _, err := CompileWithOptions(spec.Manifest, Options{WorkspaceOverride: workspaceOverride}); err != nil {
+			return fmt.Errorf("agent tool %q compile child manifest %q: %w", spec.Name, spec.Manifest, err)
+		}
+	}
+	return nil
 }
 
 func compileToolSpec(cfg config.ToolConfig) (tools.Spec, error) {
@@ -283,6 +324,8 @@ func defaultToolDescription(uses string) string {
 		return "Edit a workspace file by replacing one exact text match with new text. The oldText value must appear exactly once."
 	case "builtin:search":
 		return "Search workspace file contents. This is similar to grep or rg: provide a pattern, optional path, optional glob, match mode, context lines, and result limit."
+	case "agent":
+		return "Run a statically declared child Jeju agent for one scoped subtask and return its final answer as the tool result."
 	default:
 		return ""
 	}
@@ -320,6 +363,12 @@ func defaultInputSchema(uses string) any {
 		return objectSchema(map[string]any{
 			"command": map[string]any{"type": "string", "description": "Shell command to run in the workspace."},
 		}, []string{"command"})
+	case "agent":
+		return objectSchema(map[string]any{
+			"task":            map[string]any{"type": "string", "description": "Bounded subtask for the child agent."},
+			"context":         map[string]any{"type": "string", "description": "Relevant parent context for the child agent."},
+			"expected_output": map[string]any{"type": "string", "description": "Expected output shape or evidence requirements."},
+		}, []string{"task"})
 	default:
 		return nil
 	}
@@ -335,6 +384,9 @@ func objectSchema(properties map[string]any, required []string) map[string]any {
 }
 
 func toolCapabilities(cfg config.ToolConfig) []string {
+	if cfg.Uses == "agent" {
+		return []string{"agentRun"}
+	}
 	if len(cfg.Capabilities) > 0 {
 		return cfg.Capabilities
 	}

@@ -45,6 +45,13 @@ but should remain inspectable:
 Use a normal `kind: Agent` when one agent can complete the task without
 specialist delegation.
 
+For inline delegation inside one ordinary agent loop, use the `uses: agent` tool
+surface instead of modeling the whole task as an `AgentTeam`. Agent tools let a
+parent agent call one statically declared child
+agent as a tool and consume its final answer inline. AgentTeam remains the
+bounded lead-worker controller for tasks that need explicit rounds, task state,
+worker scheduling, verification, and final selection.
+
 ## Manifest Shape
 
 A team manifest describes coordination. The lead and every worker still point
@@ -468,6 +475,7 @@ Agent Team intentionally stays small:
 
 - no peer-to-peer worker chat,
 - no dynamic undeclared worker creation,
+- no in-loop agent-as-tool behavior hidden inside the team controller,
 - no hidden controller model,
 - no implicit synthesis agent,
 - no shared mutable long-term memory,

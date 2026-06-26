@@ -47,11 +47,11 @@ func (g *Gate) deniedByAccess(spec tools.Spec) string {
 }
 
 func requiresApproval(capabilities []string) bool {
-	return hasAnyCapability(capabilities, "workspaceWrite", "command", "networkRead", "networkWrite")
+	return hasAnyCapability(capabilities, "workspaceWrite", "command", "networkRead", "networkWrite", "agentRun")
 }
 
 func hasSideEffect(capabilities []string) bool {
-	return hasAnyCapability(capabilities, "workspaceWrite", "command", "networkWrite")
+	return hasAnyCapability(capabilities, "workspaceWrite", "command", "networkWrite", "agentRun")
 }
 
 func hasAnyCapability(capabilities []string, wants ...string) bool {

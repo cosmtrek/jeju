@@ -11,6 +11,7 @@ func TestSupportedCapabilities(t *testing.T) {
 	requireNotContains(t, caps.ModelPresets, "")
 	requireContains(t, caps.ToolUses, "builtin:search")
 	requireContains(t, caps.ToolUses, "command")
+	requireContains(t, caps.ToolUses, "agent")
 	requireContains(t, caps.EvaluatorUses, "rules")
 	requireContains(t, caps.EvaluatorUses, "llm")
 	requireContains(t, caps.TrajectoryFormats, "jeju-jsonl")

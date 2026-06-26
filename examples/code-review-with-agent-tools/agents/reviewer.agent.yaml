@@ -1,0 +1,114 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: code-reviewer
+  description: "Generalist code reviewer; the review focus is assigned by the parent agent tool call."
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-pro
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.1
+      thinking:
+        type: disabled
+      maxOutputTokens: 4096
+      contextWindow: 128000
+      timeoutSec: 120
+
+instructions:
+  system: ../prompts/reviewer.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  recentTokenBudget: 24000
+  limits:
+    maxSteps: 8
+    maxDurationSec: 240
+    maxToolCalls: 8
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace/review
+
+tools:
+  - name: get_review_packet
+    uses: command
+    description: "Return the single review packet for this workspace."
+    capabilities: [workspaceRead]
+    command:
+      run: ../tools/cr-packet.py
+      args: ["packet", "--run-id", "{{run_id}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          run_id:
+            type: string
+            default: current
+            description: "Packet run_id from the build-review-packets task."
+
+  - name: expand_evidence
+    uses: command
+    description: "Return a bounded, line-numbered excerpt of one repository file for targeted context beyond the packet."
+    capabilities: [workspaceRead]
+    command:
+      run: ../tools/cr-packet.py
+      args: ["expand", "--run-id", "{{run_id}}", "--path", "{{path}}", "--start", "{{start}}", "--end", "{{end}}"]
+      timeoutSec: 20
+    input:
+      schema:
+        type: object
+        properties:
+          run_id:
+            type: string
+            default: current
+            description: "Packet run_id from the build-review-packets task."
+          path:
+            type: string
+            description: "Repository-relative file path to excerpt."
+          start:
+            type: integer
+            default: 1
+            description: "First line of the excerpt (1-based)."
+          end:
+            type: integer
+            default: 0
+            description: "Last line of the excerpt; 0 means a default-size window from start."
+        required: [path]
+
+  - name: run_static_check
+    uses: command
+    description: "Run the detected deterministic checks (tests, vet) for this workspace and return their results."
+    capabilities: [workspaceRead]
+    command:
+      run: ../tools/cr-packet.py
+      args: ["check", "--name", "{{name}}"]
+      timeoutSec: 580
+    input:
+      schema:
+        type: object
+        properties:
+          name:
+            type: string
+            enum: [all, go_vet, go_test, npm_test, pytest]
+            default: all
+            description: "Which detected check to run; `all` runs every detected check."
+
+permissions:
+  access: readOnly
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules: [finalAnswerExists, runCompleted]

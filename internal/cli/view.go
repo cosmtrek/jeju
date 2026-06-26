@@ -475,6 +475,17 @@ type toolCallView struct {
 	Input      string
 	ToolOutput string
 	OutputRef  string
+
+	// agent tool
+	AgentTool        bool
+	AgentName        string
+	AgentStatus      string
+	AgentRunID       string
+	AgentRunPath     string
+	AgentModelCalls  int
+	AgentToolCalls   int
+	AgentTotalTokens int
+	AgentDurationMS  int
 }
 
 type artifactRefView struct {
@@ -831,6 +842,21 @@ func buildStepViews(record trajectory.RunRecord, workspaceRoot string) []stepVie
 				tc.Kind = "other"
 			}
 		}
+		for _, span := range projected.SubagentSpans {
+			callID := span.ToolCallID
+			if callID == "" {
+				callID = stringPayload(span.Attrs, "tool_call_id")
+			}
+			index, ok := toolCallIndex[callID]
+			if !ok {
+				step.ToolCalls = append(step.ToolCalls, toolCallView{Tool: stringPayload(span.Attrs, "tool")})
+				index = len(step.ToolCalls) - 1
+				if callID != "" {
+					toolCallIndex[callID] = index
+				}
+			}
+			applySubagentSpan(&step.ToolCalls[index], span)
+		}
 		if len(step.ToolCalls) > 0 && step.Kind == "tool_call" {
 			step.Kind = "tool"
 		}
@@ -961,6 +987,25 @@ func applyToolOutput(tc *toolCallView, artifact artifactView) {
 	}
 }
 
+func applySubagentSpan(tc *toolCallView, span trajectory.SpanRecord) {
+	tc.Kind = "agent"
+	tc.AgentTool = true
+	if tool := stringPayload(span.Attrs, "tool"); tool != "" {
+		tc.Tool = tool
+	}
+	tc.AgentName = stringPayload(span.Attrs, "agent")
+	tc.AgentStatus = stringPayload(span.Attrs, "status")
+	tc.AgentRunID = stringPayload(span.Attrs, "child_run_id")
+	tc.AgentRunPath = stringPayload(span.Attrs, "child_run_path")
+	tc.AgentModelCalls = intPayload(span.Metrics, "model_calls")
+	tc.AgentToolCalls = intPayload(span.Metrics, "tool_calls")
+	tc.AgentTotalTokens = intPayload(span.Metrics, "total_tokens")
+	tc.AgentDurationMS = intPayload(span.Metrics, "duration_ms")
+	if span.Error != "" && tc.Error == "" {
+		tc.Error = span.Error
+	}
+}
+
 func formatBytes(n int64) string {
 	switch {
 	case n < 1024:
@@ -1074,6 +1119,14 @@ func multiToolTitle(calls []toolCallView) string {
 
 func toolCallTitle(tc *toolCallView) string {
 	switch tc.Kind {
+	case "agent":
+		if tc.Tool != "" && tc.AgentName != "" {
+			return fmt.Sprintf("%s -> %s", tc.Tool, tc.AgentName)
+		}
+		if tc.Tool != "" {
+			return tc.Tool
+		}
+		return "agent tool"
 	case "write":
 		if tc.FilePath != "" && tc.FileBytesLabel != "" {
 			return fmt.Sprintf("wrote %s · %s", tc.FilePath, tc.FileBytesLabel)
@@ -2159,13 +2212,27 @@ var runReportTemplate = template.Must(template.New("run-report").Parse(`<!doctyp
     {{if .ShellStderr}}<div><h3>stderr</h3><pre>{{.ShellStderr}}</pre></div>{{end}}
   {{end}}
 
-  {{if eq .Kind "shell_failed"}}
-    {{if .Command}}<pre class="cmd">$ {{.Command}}</pre>{{end}}
-    {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
-  {{end}}
+	  {{if eq .Kind "shell_failed"}}
+	    {{if .Command}}<pre class="cmd">$ {{.Command}}</pre>{{end}}
+	    {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
+	  {{end}}
 
-  {{if eq .Kind "other"}}
-    {{if .Tool}}<div class="subtle">tool: {{.Tool}}</div>{{end}}
+	  {{if eq .Kind "agent"}}
+	    <div class="subtle">agent: {{if .AgentName}}{{.AgentName}}{{else}}{{.Tool}}{{end}}{{if .AgentStatus}} · {{.AgentStatus}}{{end}}</div>
+	    {{if .AgentRunID}}<div class="subtle">child run: <code>{{.AgentRunID}}</code>{{if .AgentRunPath}} · <code>{{.AgentRunPath}}</code>{{end}}</div>{{end}}
+	    <div class="subtle">
+	      {{if .AgentModelCalls}}model calls {{.AgentModelCalls}}{{end}}
+	      {{if .AgentToolCalls}} · tool calls {{.AgentToolCalls}}{{end}}
+	      {{if .AgentTotalTokens}} · tokens {{.AgentTotalTokens}}{{end}}
+	      {{if .AgentDurationMS}} · {{.AgentDurationMS}} ms{{end}}
+	    </div>
+	    {{if .Input}}<details class="collapsible"><summary>Input</summary><pre class="light">{{.Input}}</pre></details>{{end}}
+	    {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
+	    {{if .ToolOutput}}<details class="collapsible" open><summary>Child final</summary><pre class="light">{{.ToolOutput}}</pre></details>{{end}}
+	  {{end}}
+
+	  {{if eq .Kind "other"}}
+	    {{if .Tool}}<div class="subtle">tool: {{.Tool}}</div>{{end}}
     {{if .Input}}<details class="collapsible" open><summary>Input</summary><pre class="light">{{.Input}}</pre></details>{{end}}
     {{if .Error}}<div class="err-line">{{.Error}}</div>{{end}}
     {{if .ToolOutput}}<details class="collapsible"><summary>Tool output</summary><pre class="light">{{.ToolOutput}}</pre></details>{{end}}

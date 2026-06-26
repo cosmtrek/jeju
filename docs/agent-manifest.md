@@ -283,7 +283,83 @@ tools:
 
 HTTP scheme and host must be static. Template values use `{{field}}` and are intended for query, path-like values, headers, and body fields.
 
-Known capabilities are `workspaceRead`, `workspaceWrite`, `command`, `networkRead`, and `networkWrite`. Built-in tools infer capabilities automatically; custom tools can declare them for permission decisions.
+Known capabilities are `workspaceRead`, `workspaceWrite`, `command`, `networkRead`, `networkWrite`, and `agentRun`. Built-in tools infer capabilities automatically; custom tools can declare them for permission decisions. Agent tools infer `agentRun`.
+
+### Agent Tools
+
+Jeju supports a single-agent delegation primitive where an ordinary
+`kind: Agent` calls a statically declared child agent during its own runtime
+loop and consumes the child final answer as a tool result. This is different from
+`kind: AgentTeam`: agent tools are inline, one-call delegation from a parent
+agent, not a lead-worker controller or a new team topology.
+
+Manifest shape:
+
+```yaml
+tools:
+  - name: ask_retriever
+    uses: agent
+    description: Run the retriever child agent for one scoped subtask.
+    agent:
+      manifest: ../agents/retriever.agent.yaml
+    input:
+      schema:
+        type: object
+        properties:
+          task: { type: string }
+          context: { type: string }
+          expected_output: { type: string }
+        required: [task]
+        additionalProperties: false
+```
+
+The `agent` block is intentionally small:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `manifest` | yes | Child `kind: Agent` manifest, resolved relative to the parent manifest during load. |
+
+Do not put runtime budgets in the parent agent tool. The child agent controls
+its own `runtime.limits`, tools, skills, model, output schema, evaluators, and
+permissions through its own manifest. The parent tool declaration only says that
+the parent may delegate one bounded task to that child agent.
+
+Workspace behavior:
+
+- when the child agent is run directly, it uses its own manifest
+  `workspace.path`;
+- when the child agent is invoked as an agent tool, it inherits the parent run's
+  effective workspace by default.
+
+This keeps reusable child agents independently runnable while making inline
+delegation target the same project or workspace as the parent run.
+
+Validation and execution requirements:
+
+- `uses: agent` must be declared as an object tool; scalar shorthand is not
+  supported.
+- The load phase resolves `agent.manifest` paths from the parent manifest.
+- The compiler performs full static validation of the child manifest so protocol
+  errors are caught before runtime.
+- The child manifest must be `kind: Agent`; `AgentTeam` manifests are not valid
+  agent tools.
+- Nested agent tools are not supported in the first version. A child agent used
+  as a tool must not itself declare `uses: agent`.
+- The agent tool capability is `agentRun`. It gates delegation itself; child
+  file, shell, and network calls remain governed by the child manifest's own
+  permissions and policy.
+- Parent `permissions.access` does not automatically narrow child permissions.
+  For example, a `readOnly` parent can delegate to a child whose manifest allows
+  workspace writes or commands; the parent gates only the `agentRun` delegation,
+  and the child gates its own tools.
+- A child run failure is returned to the parent as a structured tool result with
+  status and run references. Hard integration failures, such as an invalid child
+  manifest or failed child compilation, are parent tool errors.
+
+Runtime records both sides of the delegation: a normal tool span for the parent
+model's tool call and a nested `subagent` span for the child run. The tool
+result includes the child final answer plus metadata such as child agent
+name, status, run ID, run path, and child run stats.
 
 ## Skills
 

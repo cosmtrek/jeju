@@ -56,3 +56,48 @@ tools:
 		t.Fatalf("expected schema path %q, got %#v", schemaPath, got)
 	}
 }
+
+func TestLoadFileResolvesAgentToolManifestRelativeToManifest(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := filepath.Join(dir, "agents")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll agents failed: %v", err)
+	}
+	childPath := filepath.Join(agentDir, "child.yaml")
+	if err := os.WriteFile(childPath, []byte("placeholder"), 0o644); err != nil {
+		t.Fatalf("WriteFile child failed: %v", err)
+	}
+	manifestPath := filepath.Join(agentDir, "parent.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`apiVersion: jeju/v1alpha1
+kind: Agent
+metadata:
+  name: parent
+models:
+  providers:
+    primary:
+      type: mock
+      model: mock-react
+instructions:
+  system: ../prompts/system.md
+runtime:
+  loop:
+    type: react
+workspace:
+  path: ../workspace
+tools:
+  - name: ask_child
+    uses: agent
+    agent:
+      manifest: child.yaml
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile manifest failed: %v", err)
+	}
+
+	manifest, _, err := LoadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("LoadFile failed: %v", err)
+	}
+	if got := manifest.Tools[0].Agent.Manifest; got != childPath {
+		t.Fatalf("expected agent manifest path %q, got %q", childPath, got)
+	}
+}

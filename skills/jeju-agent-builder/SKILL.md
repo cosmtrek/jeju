@@ -1,16 +1,18 @@
 ---
 name: jeju-agent-builder
-description: Use when converting a repeated workflow, local developer task, or specialist agent idea into a minimal Jeju agent bundle with manifest, prompt, tools, permissions, evaluation, and smoke validation. This is for any higher-level AI agent that needs to author Jeju agents.
+description: Use when converting a repeated workflow, local developer task, specialist agent idea, inline child-agent delegation idea, or bounded lead-worker team idea into a minimal Jeju agent, agent-tool bundle, or AgentTeam bundle with manifests, prompts, tools, permissions, evaluation, and smoke validation. This is for any higher-level AI agent that needs to author Jeju agents or teams.
 metadata:
   short-description: Create focused Jeju agents from repeated workflows
-  version: "0.2.0"
+  version: "0.4.0"
 ---
 
 # Jeju Agent Builder
 
 Use this skill when the user wants an AI agent to turn a repeated workflow into
-a Jeju agent. Jeju agents should be narrow, bounded execution units that another
-higher-level agent can create, run, inspect, and improve.
+a Jeju agent, an agent with declared child-agent tools, or a bounded AgentTeam.
+Jeju agents should be narrow, bounded execution units that another higher-level
+agent can create, run, inspect, and improve; AgentTeams should stay limited to
+one lead-worker controller over ordinary Jeju agents.
 
 This is an authoring skill stored in the Jeju repository. It is not a Jeju
 runtime skill loaded by an agent manifest unless someone explicitly copies or
@@ -36,6 +38,11 @@ Prefer another artifact when:
 Good Jeju agent candidates are narrow specialists such as code-review triage,
 docs update planning, benchmark failure classification, trajectory inspection,
 prompt regression review, release-note drafting, and local repo hygiene checks.
+Use `tools[].uses: agent` when one ordinary parent agent should call one or more
+declared specialist child agents inline and consume their final answers as tool
+results.
+Use `kind: AgentTeam` only when the workflow genuinely needs a bounded
+lead-worker controller over several ordinary child agents.
 
 ## Minimal Design Contract
 
@@ -158,6 +165,197 @@ package add` and `jeju package update` should fail by default when the digest
 changes. Use `--replace` only when the user explicitly wants to move the local
 `id@version` ref to new content.
 
+## Agent Tools Authoring
+
+Use `tools[].uses: agent` for inline delegation inside one ordinary `kind:
+Agent` loop. This is the right fit when a parent agent needs a small number of
+static specialists and can decide when to call them as normal tools.
+
+Do not use agent tools as a general workflow graph, dynamic worker pool, or
+replacement for AgentTeam. Use `kind: AgentTeam` instead when the task needs
+explicit task state, dependencies, retries, verification, parallel scheduling,
+or controller-level final selection.
+
+Minimal agent-tool bundle shape:
+
+```text
+agents/<parent>.agent.yaml
+agents/<child>.agent.yaml
+prompts/<parent>.md
+prompts/<child>.md
+workspace/<name>/.gitkeep
+README.md
+```
+
+Manifest shape:
+
+```yaml
+tools:
+  - name: ask_retriever
+    uses: agent
+    description: Run the retriever child agent for one scoped subtask.
+    agent:
+      manifest: child.agent.yaml
+    input:
+      schema:
+        type: object
+        required: [task]
+        additionalProperties: false
+        properties:
+          task:
+            type: string
+          context:
+            type: string
+          expected_output:
+            type: string
+```
+
+Agent tool rules:
+
+- The child manifest must be `kind: Agent`; do not point at `AgentTeam`.
+- The compiler validates and compiles the child manifest before runtime.
+- Nested agent tools are not supported. A child agent used as a tool must not
+  itself declare `uses: agent`.
+- Do not put parent-side runtime budgets such as timeout, max rounds, or max
+  depth on the agent tool. The child controls its own `runtime.limits`.
+- When the child runs directly, it uses its own `workspace.path`. When invoked
+  as an agent tool, it inherits the parent run's effective workspace.
+- The parent policy gates delegation through the `agentRun` capability. The
+  child still enforces its own manifest permissions for file, shell, command,
+  HTTP, and network behavior.
+- `readOnly` parent access does not block `agentRun` by itself. If delegation
+  should require a human approval step, use `permissions.approval: onRequest`.
+- A child run failure is returned to the parent as an agent tool result with
+  child status, run id, path, and stats. Hard integration failures such as an
+  invalid child manifest are parent tool errors.
+- The parent trajectory records a normal tool span plus a nested `subagent`
+  span. The child run has its own `trajectory.jsonl` under the parent run's
+  `child-runs/<tool>/<tool_call_id>/<child_run_id>/` directory.
+
+Prompt the parent to keep delegation small and explicit. A useful parent prompt
+names the child tools, when each should be called, what to do if a child returns
+`status: failed`, and when to stop calling tools and produce final output.
+
+Validate and smoke-run an agent-tool bundle from the Jeju source checkout:
+
+```bash
+jeju validate <bundle>/agents/<parent>.agent.yaml
+jeju run --workspace /path/to/project --runs-dir .jeju-dev/runs/<name> <bundle>/agents/<parent>.agent.yaml "<sample input>"
+jeju view --runs-dir .jeju-dev/runs/<name> <run_id>
+```
+
+Example to study when available:
+
+```text
+examples/code-review-with-agent-tools/
+```
+
+## AgentTeam Authoring
+
+Use `kind: AgentTeam` for bounded lead-worker orchestration from one user goal.
+Do not use it for peer-to-peer chat, dynamic worker creation, distributed
+workers, shared long-term memory, or a general multi-agent platform.
+
+Minimal team shape:
+
+```text
+teams/<name>.team.yaml
+agents/<lead>.agent.yaml
+agents/<worker>.agent.yaml
+prompts/<lead>.md
+prompts/<worker>.md
+workspace/<name>/.gitkeep
+```
+
+Team manifest rules:
+
+- Set `runtime.topology: lead_worker`.
+- Declare one `lead.agent` and a fixed `workers` catalog.
+- Do not write `lead.synthesisAgent`; it is no longer supported.
+- If final composition needs a separate model pass, declare a normal `writer`
+  worker and have the lead create a final writer task.
+- Do not package `AgentTeam` in V1; package only reusable `kind: Agent`
+  manifests.
+
+Lead decision contract:
+
+- The controller injects an AgentTeam protocol system prompt before the lead
+  agent's own system prompt. Keep the lead prompt focused on team strategy,
+  worker responsibilities, escalation policy, and when to finish.
+- The lead must return exactly one TeamDecision JSON object on every turn.
+- `decision` is a tagged union: `continue`, `finish`, or `abort`.
+- For `continue`, use `tasks` to add new worker tasks. Each task needs stable
+  `id`, declared `worker`, non-empty `objective`, optional `depends_on`,
+  optional `context_refs`, and optional `output_contract`.
+- `depends_on` is the scheduling edge. `context_refs` is the data-injection
+  edge. If `context_refs` is omitted, it defaults to `depends_on`; explicit
+  `[]` means inject no prior task output.
+- Repeated task ids are ignored, not updated. Tell the lead to create a new id
+  for replacement work after rejection.
+- For `finish`, set exactly one of `finish.content` or `finish.task_id`.
+  Prefer `finish.task_id` when a verified writer task produced the final
+  answer. The referenced task must be verified and have non-empty final output.
+- For `abort`, set `abort.reason` when the declared team cannot complete the
+  goal with available workers, tools, policy, or workspace.
+- Do not use old decisions such as `synthesize` or `blocked`.
+
+Worker/output rules:
+
+- Workers are ordinary `kind: Agent` manifests and do not chat with each other.
+- Do not force every worker to return JSON. Use task `output_contract` only
+  when the controller or another worker needs machine-checkable output.
+- When `verification.requireStructuredTaskOutput` is enabled, required-field
+  checks apply only to tasks whose active output contract format is `json`.
+  Markdown/text writer tasks are valid for final reports.
+- If `verification.requireVerifier` is true, declare a worker named `verifier`;
+  finish remains blocked until at least one verifier task is verified.
+
+Minimal team manifest sketch:
+
+```yaml
+apiVersion: jeju/v1alpha1
+kind: AgentTeam
+
+metadata:
+  name: review-team
+
+lead:
+  agent: ../agents/review-lead.agent.yaml
+
+workers:
+  reviewer:
+    agent: ../agents/reviewer.agent.yaml
+    maxTasks: 3
+  verifier:
+    agent: ../agents/verifier.agent.yaml
+    maxTasks: 2
+  writer:
+    agent: ../agents/writer.agent.yaml
+    maxTasks: 1
+
+runtime:
+  topology: lead_worker
+  maxRounds: 6
+  maxTasks: 8
+  maxParallel: 2
+  maxRetriesPerTask: 1
+
+verification:
+  requireStructuredTaskOutput: true
+  requireVerifier: true
+  requiredTaskFields: [summary, findings, evidence, gaps, residual_risk]
+
+output:
+  dir: ../.jeju-dev/team/review-team
+```
+
+Validate and smoke-run a team from the Jeju source checkout:
+
+```bash
+jeju validate <bundle>/teams/<name>.team.yaml
+jeju team run --workspace /path/to/project --output final <bundle>/teams/<name>.team.yaml "<sample goal>"
+```
+
 ## Minimal Manifest Template
 
 ```yaml
@@ -245,7 +443,8 @@ evaluate:
 - Use `permissions.access: workspace` and `permissions.approval: onRequest`
   only when the agent must write, run shell commands, or access networks.
 - Declare tool capabilities accurately: `workspaceRead`, `workspaceWrite`,
-  `command`, `networkRead`, or `networkWrite`.
+  `command`, `networkRead`, `networkWrite`, or `agentRun`. Agent tools infer
+  `agentRun` automatically.
 - Make the system prompt narrow: exact workflow, output format, inspection
   strategy, residual-risk reporting, and non-goals.
 - For structured final JSON, put the exact shape in manifest `output.schema`
@@ -318,6 +517,8 @@ rg -n "AgentManifest|ToolConfig|finalAnswerExists|workspace.path|permissions.acc
 rg -n "config.LoadFile|config.Validate|compiler.Compile|runtime.Run"
 rg -n "uses: command|uses: http|allowed-tools|active skills|evaluate|output.schema"
 rg -n "AgentPackage|jeju.package.yaml|package add|package://|JEJU_REGISTRY_INDEX"
+rg -n "uses: agent|agentRun|AgentToolConfig|SpanSubagent|child-runs|code-review-with-agent-tools"
+rg -n "AgentTeam|TeamDecision|finish.task_id|lead.synthesisAgent|lead_worker|jeju team run"
 ```
 
 Look for current docs, schema structs, defaults, validators, compiler behavior,

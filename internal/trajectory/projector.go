@@ -34,16 +34,27 @@ type RunRecord struct {
 }
 
 type RunStats struct {
-	Steps                int
-	ModelCalls           int
-	ToolCalls            int
-	ModelErrors          int
-	ToolErrors           int
-	PermissionDenied     int
-	PromptTokens         int
-	PromptCacheHitTokens int
-	CompletionTokens     int
-	TotalTokens          int
+	Steps                     int
+	ModelCalls                int
+	ToolCalls                 int
+	ModelErrors               int
+	ToolErrors                int
+	PermissionDenied          int
+	ChildRuns                 int
+	ChildRunErrors            int
+	ChildModelCalls           int
+	ChildToolCalls            int
+	ChildModelErrors          int
+	ChildToolErrors           int
+	ChildPermissionDenied     int
+	ChildPromptTokens         int
+	ChildPromptCacheHitTokens int
+	ChildCompletionTokens     int
+	ChildTotalTokens          int
+	PromptTokens              int
+	PromptCacheHitTokens      int
+	CompletionTokens          int
+	TotalTokens               int
 }
 
 type PackageProvenance struct {
@@ -117,19 +128,20 @@ type SpanRecord struct {
 }
 
 type ProjectedStep struct {
-	ID           int
-	SpanID       string
-	Status       string
-	Thought      string
-	Kind         string
-	ModelSpans   []SpanRecord
-	ToolSpans    []SpanRecord
-	ContextSpans []SpanRecord
-	Actions      []map[string]any
-	Permissions  []map[string]any
-	Messages     []map[string]any
-	Artifacts    []Artifact
-	Events       []Event
+	ID            int
+	SpanID        string
+	Status        string
+	Thought       string
+	Kind          string
+	ModelSpans    []SpanRecord
+	ToolSpans     []SpanRecord
+	SubagentSpans []SpanRecord
+	ContextSpans  []SpanRecord
+	Actions       []map[string]any
+	Permissions   []map[string]any
+	Messages      []map[string]any
+	Artifacts     []Artifact
+	Events        []Event
 }
 
 func Project(events []Event) RunRecord {
@@ -211,6 +223,9 @@ func Project(events []Event) RunRecord {
 			span.Output = mapPayload(event.Payload, "output")
 			span.Error = nestedString(event.Payload, "error", "message")
 			span.Metrics = mapPayload(event.Payload, "metrics")
+			if attrs := mapPayload(event.Payload, "attrs"); len(attrs) > 0 {
+				span.Attrs = attrs
+			}
 			span.ToolCallID = stringPayload(event.Payload, "tool_call_id")
 			record.Spans[span.ID] = span
 			applySpanStats(&record.Stats, span)
@@ -351,6 +366,8 @@ func Project(events []Event) RunRecord {
 			step.ModelSpans = append(step.ModelSpans, span)
 		case string(SpanTool), string(SpanShell):
 			step.ToolSpans = append(step.ToolSpans, span)
+		case string(SpanSubagent):
+			step.SubagentSpans = append(step.SubagentSpans, span)
 		case string(SpanContext):
 			step.ContextSpans = append(step.ContextSpans, span)
 		}
@@ -361,6 +378,7 @@ func Project(events []Event) RunRecord {
 		}
 		sort.Slice(step.ModelSpans, func(i, j int) bool { return step.ModelSpans[i].StartedAt.Before(step.ModelSpans[j].StartedAt) })
 		sort.Slice(step.ToolSpans, func(i, j int) bool { return step.ToolSpans[i].StartedAt.Before(step.ToolSpans[j].StartedAt) })
+		sort.Slice(step.SubagentSpans, func(i, j int) bool { return step.SubagentSpans[i].StartedAt.Before(step.SubagentSpans[j].StartedAt) })
 		sort.Slice(step.ContextSpans, func(i, j int) bool { return step.ContextSpans[i].StartedAt.Before(step.ContextSpans[j].StartedAt) })
 		record.Steps = append(record.Steps, *step)
 	}
@@ -470,6 +488,20 @@ func applySpanStats(stats *RunStats, span SpanRecord) {
 		} else {
 			stats.ToolCalls++
 		}
+	case string(SpanSubagent):
+		stats.ChildRuns++
+		if span.Status == string(SpanStatusError) {
+			stats.ChildRunErrors++
+		}
+		stats.ChildModelCalls += intPayload(span.Metrics, "model_calls")
+		stats.ChildToolCalls += intPayload(span.Metrics, "tool_calls")
+		stats.ChildModelErrors += intPayload(span.Metrics, "model_errors")
+		stats.ChildToolErrors += intPayload(span.Metrics, "tool_errors")
+		stats.ChildPermissionDenied += intPayload(span.Metrics, "permission_denied")
+		stats.ChildPromptTokens += intPayload(span.Metrics, "prompt_tokens")
+		stats.ChildPromptCacheHitTokens += intPayload(span.Metrics, "prompt_cache_hit_tokens")
+		stats.ChildCompletionTokens += intPayload(span.Metrics, "completion_tokens")
+		stats.ChildTotalTokens += intPayload(span.Metrics, "total_tokens")
 	}
 }
 

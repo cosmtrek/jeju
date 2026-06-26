@@ -118,7 +118,7 @@ Span kinds:
 | `context` | Context estimation, compression, summarization, or truncation. |
 | `evaluator` | One evaluation pass. |
 | `skill` | Skill disclosure or loading work when modeled as an operation. |
-| `subagent` | Nested agent run, such as a team lead or worker. |
+| `subagent` | Nested agent run, such as a team lead, worker, or agent-tool child run. |
 | `shell` | Shell command execution inside a tool, when the command needs a nested span. |
 
 ### Agent Team Profile
@@ -137,6 +137,26 @@ transition, for example `task.created`, `task.completed`, `task.verified`,
 `finish.skipped`. Large structured team data, such as the manifest snapshot,
 lead decision JSON, final answer, and projected team summary, should be stored
 as trajectory artifacts.
+
+### Agent Tool Profile
+
+Agent tools use the normal tool-call events and spans for the parent
+agent invocation, then attach the child run as a nested `subagent` span under the
+tool span. The parent trajectory records child run references and aggregate
+stats; the child run keeps its own `trajectory.jsonl` as canonical evidence.
+
+For an agent tool named `ask_retriever`, the trace tree projects as:
+
+```text
+span_step_003
+  span_tool_003_call_abc       kind=tool name=ask_retriever
+    span_subagent_003_call_abc kind=subagent name=ask_retriever
+```
+
+The `subagent` span stores child references in `payload.attrs`, including
+`tool`, `tool_call_id`, `agent`, `child_run_id`, `child_run_path`, and child
+`status`. Child model, tool, token, permission, and duration stats belong in the
+subagent span metrics and may also be aggregated into the parent run summary.
 
 `span.started` example:
 

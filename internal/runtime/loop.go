@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ func (r *Runtime) RunWithMessages(ctx context.Context, agent *compiler.CompiledA
 }
 
 func (r *Runtime) runWithInitialState(ctx context.Context, agent *compiler.CompiledAgent, runDir *runs.RunDir, state *RunState, input string) (*RunResult, error) {
+	state.RunDir = runDir.Path
 	recorder, err := trajectory.NewRecorderWithOptions(runDir.Path, trajectory.RecorderOptions{
 		Console: !r.suppressConsoleTrajectory,
 	})
@@ -806,7 +808,13 @@ func (r *Runtime) handleToolCall(ctx context.Context, agent *compiler.CompiledAg
 		"tool_call_id": action.ToolCallID,
 		"input":        map[string]any{"value": compactToolInput(action.Input)},
 	})
-	result, err := runToolWithTimeout(ctx, tool, spec, action.Input)
+	var result tools.Result
+	var err error
+	if agentTool, ok := agent.AgentTools[action.Tool]; ok {
+		result, err = r.runAgentTool(ctx, agent, recorder, state, action, toolSpan, agentTool)
+	} else {
+		result, err = runToolWithTimeout(ctx, tool, spec, action.Input)
+	}
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		state.ToolErrors++
@@ -942,6 +950,156 @@ func runToolWithTimeout(ctx context.Context, tool tools.Tool, spec tools.Spec, i
 	return tool.Run(ctx, input)
 }
 
+func (r *Runtime) runAgentTool(ctx context.Context, parent *compiler.CompiledAgent, recorder *trajectory.Recorder, state *RunState, action Action, toolSpan string, spec compiler.AgentToolSpec) (tools.Result, error) {
+	spanID := subagentSpanID(state.Step, action.ToolCallID)
+	attrs := map[string]any{
+		"tool":         action.Tool,
+		"tool_call_id": action.ToolCallID,
+		"manifest":     spec.Manifest,
+	}
+	recorder.EmitSpanStarted(ctx, state.RunID, state.Step, spanID, toolSpan, "subagent:"+action.Tool, trajectory.SpanSubagent, action.Tool, map[string]any{
+		"tool_call_id": action.ToolCallID,
+		"attrs":        attrs,
+	})
+
+	childStore := runs.NewStore(filepath.Join(state.RunDir, "child-runs", sanitizeArtifactSuffix(action.Tool), sanitizeArtifactSuffix(action.ToolCallID)))
+	child, err := compiler.CompileWithOptions(spec.Manifest, compiler.Options{
+		RunStore:          childStore,
+		WorkspaceOverride: parent.Config.Workspace.Path,
+	})
+	if err != nil {
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, toolSpan, "subagent:"+action.Tool, trajectory.SpanSubagent, trajectory.SpanStatusError, map[string]any{
+			"tool_call_id": action.ToolCallID,
+			"attrs":        attrs,
+			"error":        map[string]any{"message": err.Error()},
+		})
+		return tools.Result{}, err
+	}
+
+	input := renderAgentToolInput(parent.Name, action.Tool, action.Input)
+	autoUserInput := "Use only the delegated tool task and available tools. Do not ask the user during an agent tool child run; return a final answer with any gaps or residual risk."
+	rt := NewWithOptions(Options{
+		AutoUserInput:             &autoUserInput,
+		SuppressConsoleTrajectory: true,
+	})
+	result, err := rt.Run(ctx, child, input)
+	if err != nil {
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, toolSpan, "subagent:"+action.Tool, trajectory.SpanSubagent, trajectory.SpanStatusError, map[string]any{
+			"tool_call_id": action.ToolCallID,
+			"attrs":        attrs,
+			"error":        map[string]any{"message": err.Error()},
+		})
+		return tools.Result{}, err
+	}
+
+	record, err := child.RunStore.ReadRunRecord(result.RunID)
+	if err != nil {
+		recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, toolSpan, "subagent:"+action.Tool, trajectory.SpanSubagent, trajectory.SpanStatusError, map[string]any{
+			"tool_call_id": action.ToolCallID,
+			"attrs":        attrs,
+			"error":        map[string]any{"message": err.Error()},
+		})
+		return tools.Result{}, err
+	}
+	childRunDir := filepath.Join(child.RunStore.BasePath, result.RunID)
+	childRunPath := relativeRunPath(state.RunDir, childRunDir)
+	attrs["agent"] = record.Agent
+	attrs["child_run_id"] = result.RunID
+	attrs["child_run_path"] = childRunPath
+	attrs["status"] = string(result.Status)
+	metrics := statsMetrics(record.Stats, record.DurationMS)
+	recorder.EmitSpanEnded(ctx, state.RunID, state.Step, spanID, toolSpan, "subagent:"+action.Tool, trajectory.SpanSubagent, spanStatusForRun(result.Status), map[string]any{
+		"tool_call_id": action.ToolCallID,
+		"attrs":        attrs,
+		"metrics":      metrics,
+	})
+	addChildStats(state, record)
+
+	return tools.Result{
+		Output: strings.TrimSpace(result.Final),
+		Metadata: map[string]any{
+			"kind":     "agent_run",
+			"agent":    record.Agent,
+			"status":   string(result.Status),
+			"run_id":   result.RunID,
+			"run_path": childRunPath,
+			"stats":    metrics,
+		},
+	}, nil
+}
+
+func renderAgentToolInput(parentAgent, tool string, input json.RawMessage) string {
+	var payload map[string]any
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return fmt.Sprintf("# Jeju Agent Tool Task\n\nparent_agent: %s\ntool: %s\n\n# Tool Input\n\n%s", parentAgent, tool, strings.TrimSpace(string(input)))
+	}
+	var b strings.Builder
+	b.WriteString("# Jeju Agent Tool Task\n\n")
+	b.WriteString(fmt.Sprintf("parent_agent: %s\n", parentAgent))
+	b.WriteString(fmt.Sprintf("tool: %s\n", tool))
+	if task, ok := payload["task"]; ok {
+		b.WriteString("\n# Task\n\n")
+		b.WriteString(fmt.Sprint(task))
+		b.WriteString("\n")
+	}
+	if contextValue, ok := payload["context"]; ok {
+		b.WriteString("\n# Context\n\n")
+		b.WriteString(fmt.Sprint(contextValue))
+		b.WriteString("\n")
+	}
+	if expected, ok := payload["expected_output"]; ok {
+		b.WriteString("\n# Expected Output\n\n")
+		b.WriteString(fmt.Sprint(expected))
+		b.WriteString("\n")
+	}
+	if _, ok := payload["task"]; !ok {
+		data, _ := json.MarshalIndent(payload, "", "  ")
+		b.WriteString("\n# Tool Input JSON\n\n")
+		b.Write(data)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func addChildStats(state *RunState, record trajectory.RunRecord) {
+	state.ChildRuns++
+	if record.Status != string(StatusCompleted) {
+		state.ChildRunErrors++
+	}
+	state.ChildModelCalls += record.Stats.ModelCalls
+	state.ChildToolCalls += record.Stats.ToolCalls
+	state.ChildModelErrors += record.Stats.ModelErrors
+	state.ChildToolErrors += record.Stats.ToolErrors
+	state.ChildPermissionDenied += record.Stats.PermissionDenied
+	state.ChildPromptTokens += record.Stats.PromptTokens
+	state.ChildPromptCacheHitTokens += record.Stats.PromptCacheHitTokens
+	state.ChildCompletionTokens += record.Stats.CompletionTokens
+	state.ChildTotalTokens += record.Stats.TotalTokens
+}
+
+func statsMetrics(stats trajectory.RunStats, durationMS int64) map[string]any {
+	return map[string]any{
+		"model_calls":             stats.ModelCalls,
+		"tool_calls":              stats.ToolCalls,
+		"model_errors":            stats.ModelErrors,
+		"tool_errors":             stats.ToolErrors,
+		"permission_denied":       stats.PermissionDenied,
+		"prompt_tokens":           stats.PromptTokens,
+		"prompt_cache_hit_tokens": stats.PromptCacheHitTokens,
+		"completion_tokens":       stats.CompletionTokens,
+		"total_tokens":            stats.TotalTokens,
+		"duration_ms":             durationMS,
+	}
+}
+
+func relativeRunPath(base, path string) string {
+	rel, err := filepath.Rel(base, path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
+}
+
 func (r *Runtime) askApproval(tool string, capabilities []string) (approved bool, stop bool) {
 	fmt.Printf("? Permission required  tool=%s capabilities=%v approve? [y/N] ", tool, capabilities)
 	answer := strings.TrimSpace(strings.ToLower(r.readLine()))
@@ -1035,6 +1193,10 @@ func toolSpanID(step int, callID string) string {
 	return fmt.Sprintf("span_tool_%03d_%s", step, sanitizeArtifactSuffix(callID))
 }
 
+func subagentSpanID(step int, callID string) string {
+	return fmt.Sprintf("span_subagent_%03d_%s", step, sanitizeArtifactSuffix(callID))
+}
+
 func contextSpanID(step int, suffix string) string {
 	return fmt.Sprintf("span_context_%03d_%s", step, sanitizeArtifactSuffix(suffix))
 }
@@ -1052,16 +1214,27 @@ func spanStatusForRun(status RunStatus) trajectory.SpanStatus {
 
 func runStatsPayload(state *RunState) map[string]any {
 	return map[string]any{
-		"steps":                   state.Step,
-		"model_calls":             state.ModelCalls,
-		"tool_calls":              state.ToolCalls,
-		"permission_denied":       state.PermissionDenied,
-		"model_errors":            state.ModelErrors,
-		"tool_errors":             state.ToolErrors,
-		"prompt_tokens":           state.PromptTokens,
-		"prompt_cache_hit_tokens": state.PromptCacheHitTokens,
-		"completion_tokens":       state.CompletionTokens,
-		"total_tokens":            state.TotalTokens,
+		"steps":                         state.Step,
+		"model_calls":                   state.ModelCalls,
+		"tool_calls":                    state.ToolCalls,
+		"permission_denied":             state.PermissionDenied,
+		"model_errors":                  state.ModelErrors,
+		"tool_errors":                   state.ToolErrors,
+		"child_runs":                    state.ChildRuns,
+		"child_run_errors":              state.ChildRunErrors,
+		"child_model_calls":             state.ChildModelCalls,
+		"child_tool_calls":              state.ChildToolCalls,
+		"child_model_errors":            state.ChildModelErrors,
+		"child_tool_errors":             state.ChildToolErrors,
+		"child_permission_denied":       state.ChildPermissionDenied,
+		"child_prompt_tokens":           state.ChildPromptTokens,
+		"child_prompt_cache_hit_tokens": state.ChildPromptCacheHitTokens,
+		"child_completion_tokens":       state.ChildCompletionTokens,
+		"child_total_tokens":            state.ChildTotalTokens,
+		"prompt_tokens":                 state.PromptTokens,
+		"prompt_cache_hit_tokens":       state.PromptCacheHitTokens,
+		"completion_tokens":             state.CompletionTokens,
+		"total_tokens":                  state.TotalTokens,
 	}
 }
 

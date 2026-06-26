@@ -290,6 +290,7 @@ boundaries, run evidence, and evaluation or evolution where useful:
 
 - [Bug rescue agent](examples/bug-rescue-agent/README.md)
 - [Code review agent](examples/code-review-agent/README.md)
+- [Code review with agent tools](examples/code-review-with-agent-tools/README.md)
 - [Code review team](examples/code-review-team/README.md)
 - [Commit plan agent](examples/commit-plan-agent/README.md)
 - [HotpotQA evolve benchmark](examples/hotpotqa-agent/README.md)
