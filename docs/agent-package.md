@@ -267,6 +267,7 @@ jeju run p:coding/code-review "Review current diff."
 
 # Read task input from a source.
 jeju run --from clipboard p:coding/code-review
+jeju run --from clipboard p:coding/code-review "Translate to Chinese."
 jeju run --from notes.md p:coding/code-review
 
 # Remote package source, materialize then run.
@@ -290,11 +291,13 @@ resolve <agent-ref>
   -> record package provenance when package-backed
 ```
 
-The resolved task string is passed unchanged to `runtime.Run`. `--from` only
-changes where the CLI reads that task string from. Package metadata must not
-render, transform, or reinterpret the task. `--workspace`, `--output`, and
-`--from` keep the same semantics for local manifests, local package refs, and
-remote package sources.
+The resolved task string is passed unchanged to `runtime.Run`. `--from` reads
+source text from clipboard, stdin, or a file. When a trailing task argument is
+also provided, Jeju treats it as supplemental instructions for that source text
+and builds the final task as the supplemental instructions, a blank line, then
+the source text. Package metadata must not render, transform, or reinterpret the
+task. `--workspace`, `--output`, and `--from` keep the same semantics for local
+manifests, local package refs, and remote package sources.
 
 Package-backed runs default to `~/.jeju/runs` when neither `--runs-dir` nor
 `JEJU_RUNS_DIR` is set, so invoking a package from an arbitrary working

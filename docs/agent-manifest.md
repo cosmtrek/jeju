@@ -479,10 +479,12 @@ jeju run agents/research.agent.yaml "Summarize this repository."
 ```
 
 For longer input, `jeju run --from <source>` can read the task from an external
-source instead of the trailing task argument:
+source. A trailing task argument is optional and is treated as supplemental
+instructions for the sourced text:
 
 ```bash
 jeju run --from clipboard agents/translator.agent.yaml
+jeju run --from clipboard agents/translator.agent.yaml "Translate to Chinese."
 jeju run --from stdin agents/translator.agent.yaml
 jeju run --from notes.md agents/translator.agent.yaml
 ```
@@ -493,9 +495,12 @@ Supported sources:
 - `stdin` or `-`: standard input.
 - any other value: file path, with optional `file:` prefix for compatibility.
 
-When `--from` is set, do not pass a trailing task string. If a file is literally
-named `clipboard` or `stdin`, use `./clipboard` or `./stdin` so it is treated as
-a path. Jeju preserves the source text as read, including trailing newlines. The
+When a trailing task string is provided with `--from`, Jeju builds the final task
+as the supplemental instructions, a blank line, then the source text. This is
+useful for cases like copying foreign-language text to the clipboard and adding
+`"Translate to Chinese."` at invocation time. If a file is literally named
+`clipboard` or `stdin`, use `./clipboard` or `./stdin` so it is treated as a
+path. Jeju preserves the source text as read, including trailing newlines. The
 resolved task is recorded in the trajectory like any other run input.
 
 ## Run Output

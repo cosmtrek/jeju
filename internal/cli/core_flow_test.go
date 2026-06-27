@@ -230,6 +230,15 @@ func TestRunFromFileAndStdin(t *testing.T) {
 	if !strings.Contains(stdinOutput, "Task: Reply with stdin input.") {
 		t.Fatalf("run --from stdin did not use stdin content:\n%s", stdinOutput)
 	}
+
+	withInstructionOutput := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"run", "--output", "final", "--from", "input.md", "agents/research.agent.yaml", "Summarize in Chinese."}); err != nil {
+			t.Fatalf("run --from file with supplemental task failed: %v", err)
+		}
+	})
+	if !strings.Contains(withInstructionOutput, "Task: Summarize in Chinese.\n\nReply with file input.") {
+		t.Fatalf("run --from file did not combine supplemental task and file content:\n%s", withInstructionOutput)
+	}
 }
 
 func TestResolveRunTaskFromSourceRules(t *testing.T) {
@@ -247,9 +256,12 @@ func TestResolveRunTaskFromSourceRules(t *testing.T) {
 		t.Fatalf("resolveRunTask = %q %q, want p:local/translator clipboard task", agentRef, task)
 	}
 
-	_, _, err = resolveRunTask(context.Background(), []string{"p:local/translator", "extra task"}, "clipboard", reader)
-	if err == nil || !strings.Contains(err.Error(), "cannot be provided when --from is set") {
-		t.Fatalf("expected extra task with --from error, got %v", err)
+	agentRef, task, err = resolveRunTask(context.Background(), []string{"p:local/translator", "translate to Chinese"}, "clipboard", reader)
+	if err != nil {
+		t.Fatalf("resolveRunTask with supplemental task failed: %v", err)
+	}
+	if agentRef != "p:local/translator" || task != "translate to Chinese\n\nclipboard task" {
+		t.Fatalf("resolveRunTask with supplemental task = %q %q, want p:local/translator combined task", agentRef, task)
 	}
 	_, _, err = resolveRunTask(context.Background(), []string{"p:local/translator"}, "", reader)
 	if err == nil || !strings.Contains(err.Error(), "unless --from is set") {

@@ -36,11 +36,13 @@ func resolveRunTask(ctx context.Context, args []string, from string, readSource 
 		if isMisplacedRunFlag(args[1]) {
 			return "", "", fmt.Errorf("run flags must appear before <agent-ref>; use -- before the task if it starts with flag-like text")
 		}
-		return "", "", fmt.Errorf("run task text cannot be provided when --from is set")
 	}
 	task, err := readSource(ctx, from)
 	if err != nil {
 		return "", "", err
+	}
+	if len(args) > 1 {
+		task = strings.Join(args[1:], " ") + "\n\n" + task
 	}
 	return agentRef, task, nil
 }
