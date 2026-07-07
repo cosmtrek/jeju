@@ -3,7 +3,7 @@ name: jeju-agent-builder
 description: Use when converting a repeated workflow, local developer task, specialist agent idea, inline child-agent delegation idea, or bounded lead-worker team idea into a minimal Jeju agent, agent-tool bundle, or AgentTeam bundle with manifests, prompts, tools, permissions, evaluation, and smoke validation. This is for any higher-level AI agent that needs to author Jeju agents or teams.
 metadata:
   short-description: Create focused Jeju agents from repeated workflows
-  version: "0.4.0"
+  version: "0.4.1"
 ---
 
 # Jeju Agent Builder
@@ -490,7 +490,8 @@ From the Jeju source checkout, write local run artifacts under `.jeju-dev/`:
 ```bash
 jeju validate <bundle>/agents/<name>.agent.yaml
 jeju run --runs-dir .jeju-dev/runs/<name> <bundle>/agents/<name>.agent.yaml "<sample input>"
-jeju inspect --runs-dir .jeju-dev/runs/<name> <run_id>
+jeju view --runs-dir .jeju-dev/runs/<name>
+jeju view --runs-dir .jeju-dev/runs/<name> <run_id>
 ```
 
 For distributable bundles, validate both the agent and the package before
@@ -501,6 +502,7 @@ jeju package validate <bundle>
 jeju package pack <bundle> --out .jeju-dev/packages/<name>
 jeju package add .jeju-dev/packages/<name>/<namespace-name>-<version>.jpkg
 jeju run --runs-dir .jeju-dev/runs/<name> package://<namespace/name>@<version> "<sample input>"
+jeju view --runs-dir .jeju-dev/runs/<name> package://<namespace/name>@<version>
 ```
 
 When only adding or editing authoring docs, `go test ./...` is not required

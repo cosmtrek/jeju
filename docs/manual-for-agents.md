@@ -381,7 +381,8 @@ From the Jeju source checkout, write local run outputs under `.jeju-dev/`:
 ```bash
 jeju validate <bundle>/agents/<name>.agent.yaml
 jeju run --runs-dir .jeju-dev/runs/<name> <bundle>/agents/<name>.agent.yaml "<sample input>"
-jeju inspect --runs-dir .jeju-dev/runs/<name> <run_id>
+jeju view --runs-dir .jeju-dev/runs/<name>
+jeju view --runs-dir .jeju-dev/runs/<name> <run_id>
 ```
 
 Run source tests only when changing Jeju code:

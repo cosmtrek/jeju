@@ -38,6 +38,7 @@ under repo-root `.jeju-dev/`:
 
 ```bash
 jeju run --runs-dir .jeju-dev/runs/<scenario> <agent.yaml> "<task>"
+jeju view --runs-dir .jeju-dev/runs/<scenario>
 jeju evolve --out .jeju-dev/evolve/<scenario> <experiment.yaml>
 ```
 

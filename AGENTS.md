@@ -25,6 +25,7 @@
 - All tool calls must pass through `policy.Gate` before execution.
 - File tools must stay inside the configured local workspace. Shell runs must use the sandbox workdir and enforce timeout.
 - Skills use disclosure plus manual active loading. Do not inject all skill assets by default.
+- When editing a project `SKILL.md`, bump its `metadata.version` in the same change.
 
 ## Generated Files
 

@@ -72,10 +72,10 @@ target project at runtime:
 jeju run --output final --runs-dir .jeju-dev/runs/code-review --workspace /path/to/project ~/.jeju/ability/code-review/agents/code-review.agent.yaml "Review the current repository changes."
 ```
 
-Inspect the recorded run:
+View the recorded run:
 
 ```bash
 cd /path/to/project
 go run /path/to/jeju/cmd/jeju view --runs-dir /path/to/jeju/.jeju-dev/runs/code-review
-go run /path/to/jeju/cmd/jeju inspect --runs-dir /path/to/jeju/.jeju-dev/runs/code-review <run_id>
+go run /path/to/jeju/cmd/jeju view --runs-dir /path/to/jeju/.jeju-dev/runs/code-review <run_id>
 ```
