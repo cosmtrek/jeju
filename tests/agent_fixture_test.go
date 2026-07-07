@@ -46,8 +46,8 @@ func TestAgentFixtures(t *testing.T) {
 			t.Fatalf("expected 1 run, got %d", len(runList))
 		}
 		runID := runList[0].RunID
-		if err := cli.Execute(ctx, []string{"runs"}); err != nil {
-			t.Fatalf("runs command failed: %v", err)
+		if err := cli.Execute(ctx, []string{"view"}); err != nil {
+			t.Fatalf("view command failed: %v", err)
 		}
 		if err := cli.Execute(ctx, []string{"inspect", runID}); err != nil {
 			t.Fatalf("inspect command failed: %v", err)

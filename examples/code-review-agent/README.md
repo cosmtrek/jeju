@@ -76,6 +76,6 @@ Inspect the recorded run:
 
 ```bash
 cd /path/to/project
-go run /path/to/jeju/cmd/jeju runs --runs-dir /path/to/jeju/.jeju-dev/runs/code-review
+go run /path/to/jeju/cmd/jeju view --runs-dir /path/to/jeju/.jeju-dev/runs/code-review
 go run /path/to/jeju/cmd/jeju inspect --runs-dir /path/to/jeju/.jeju-dev/runs/code-review <run_id>
 ```

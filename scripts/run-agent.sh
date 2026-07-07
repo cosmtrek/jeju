@@ -71,7 +71,7 @@ fi
   cd "$workdir"
   go run "$repo_root/cmd/jeju" validate "$manifest"
   printf 'y\n' | go run "$repo_root/cmd/jeju" run "$manifest" "$task"
-  go run "$repo_root/cmd/jeju" runs
+  go run "$repo_root/cmd/jeju" view
 
   run_id="$(find runs -mindepth 1 -maxdepth 1 -type d -name '20*' -exec basename {} \; | sort | tail -n 1)"
   if [[ -z "$run_id" ]]; then

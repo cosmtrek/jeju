@@ -153,15 +153,34 @@ func TestPackageRunDefaultsToGlobalRunsStore(t *testing.T) {
 		t.Fatalf("metadata missing package provenance: %#v", items[0])
 	}
 
-	runsOutput := captureStdout(t, func() {
-		if err := Execute(ctx, []string{"runs"}); err != nil {
-			t.Fatalf("runs failed: %v", err)
+	viewOutput := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"view"}); err != nil {
+			t.Fatalf("view list failed: %v", err)
 		}
 	})
 	for _, want := range []string{"research/research@0.1.0", "global"} {
-		if !strings.Contains(runsOutput, want) {
-			t.Fatalf("runs output missing %q:\n%s", want, runsOutput)
+		if !strings.Contains(viewOutput, want) {
+			t.Fatalf("view output missing %q:\n%s", want, viewOutput)
 		}
+	}
+
+	packageRunsOutput := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"view", "research/research@0.1.0"}); err != nil {
+			t.Fatalf("view package failed: %v", err)
+		}
+	})
+	for _, want := range []string{"research/research@0.1.0", "global", runID} {
+		if !strings.Contains(packageRunsOutput, want) {
+			t.Fatalf("view package output missing %q:\n%s", want, packageRunsOutput)
+		}
+	}
+	packageRefOutput := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"view", "package://research/research@0.1.0"}); err != nil {
+			t.Fatalf("view package ref failed: %v", err)
+		}
+	})
+	if !strings.Contains(packageRefOutput, runID) {
+		t.Fatalf("view package ref output missing run %q:\n%s", runID, packageRefOutput)
 	}
 
 	inspectOutput := captureStdout(t, func() {

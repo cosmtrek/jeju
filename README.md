@@ -73,10 +73,10 @@ in a copied workspace, writes `REPAIR.md`, and saves the run:
 
 ![Jeju trajectory visualization](docs/trajectory-visualization.png)
 
-`trajectory.jsonl` is the source of truth; `jeju view` opens the derived report
-and refreshes it when the trajectory is newer. For a no-credential mock
-lifecycle check, use `jeju init <name>` or `make test-agent`. Windows is not
-guaranteed yet; install from source with
+`trajectory.jsonl` is the source of truth; `jeju view` lists run history, opens
+the derived report for a run ID, and refreshes it when the trajectory is newer.
+For a no-credential mock lifecycle check, use `jeju init <name>` or
+`make test-agent`. Windows is not guaranteed yet; install from source with
 `go install github.com/cosmtrek/jeju/cmd/jeju@latest`.
 
 ### Build your own agent
@@ -328,9 +328,10 @@ make test-agent PROVIDER=mimo
 
 For source-checkout development, keep generated runs out of repo-root `runs/` by
 pointing at `.jeju-dev/`, for example
-`jeju run --runs-dir .jeju-dev/runs/<scenario> <agent.yaml> "<task>"`. Inside a
-generated user agent project, the default `./runs` store remains the normal
-local run history for manifest-based runs.
+`jeju run --runs-dir .jeju-dev/runs/<scenario> <agent.yaml> "<task>"`, then list
+them with `jeju view --runs-dir .jeju-dev/runs/<scenario>`. Inside a generated
+user agent project, the default `./runs` store remains the normal local run
+history for manifest-based runs.
 
 ## License
 

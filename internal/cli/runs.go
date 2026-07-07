@@ -13,7 +13,7 @@ type listedRun struct {
 	StoreLabel string
 }
 
-func runRuns(runsDir string) error {
+func runListRuns(runsDir, packageSelector string) error {
 	candidates, err := readRunStoreCandidates(runsDir)
 	if err != nil {
 		return err
@@ -26,6 +26,9 @@ func runRuns(runsDir string) error {
 			return err
 		}
 		for _, item := range runItems {
+			if packageSelector != "" && !matchesPackageSelector(item, packageSelector) {
+				continue
+			}
 			items = append(items, listedRun{
 				Metadata:   item,
 				StoreLabel: candidate.Label,
@@ -33,7 +36,11 @@ func runRuns(runsDir string) error {
 		}
 	}
 	if len(items) == 0 {
-		fmt.Println("no runs")
+		if packageSelector != "" {
+			fmt.Printf("no runs for package %s\n", packageSelector)
+		} else {
+			fmt.Println("no runs")
+		}
 		return nil
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -54,6 +61,39 @@ func runRuns(runsDir string) error {
 		)
 	}
 	return nil
+}
+
+func matchesPackageSelector(item runs.Metadata, selector string) bool {
+	id, version := splitPackageSelector(selector)
+	if item.PackageID != id {
+		return false
+	}
+	if version == "" {
+		return true
+	}
+	return item.PackageVersion == version
+}
+
+func splitPackageSelector(selector string) (string, string) {
+	selector = normalizePackageSelector(selector)
+	id, version, ok := strings.Cut(selector, "@")
+	if !ok {
+		return id, ""
+	}
+	return id, version
+}
+
+func isPackageSelector(selector string) bool {
+	selector = normalizePackageSelector(selector)
+	id, _, _ := strings.Cut(selector, "@")
+	return strings.Contains(id, "/")
+}
+
+func normalizePackageSelector(selector string) string {
+	for _, prefix := range []string{"package://", "p:", "jeju:"} {
+		selector = strings.TrimPrefix(selector, prefix)
+	}
+	return selector
 }
 
 func duplicateRunIDs(items []listedRun) []string {

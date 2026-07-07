@@ -13,7 +13,7 @@ import (
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
-func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
+func TestCoreFlowInitValidateRunInspectView(t *testing.T) {
 	disableReportOpen(t)
 
 	tmp := t.TempDir()
@@ -61,8 +61,8 @@ func TestCoreFlowInitValidateRunInspectRuns(t *testing.T) {
 		t.Fatalf("run output did not include report path %q:\n%s", expectedReportOutput, runOutput)
 	}
 
-	if err := Execute(ctx, []string{"runs"}); err != nil {
-		t.Fatalf("runs failed: %v", err)
+	if err := Execute(ctx, []string{"view"}); err != nil {
+		t.Fatalf("view list failed: %v", err)
 	}
 	if err := Execute(ctx, []string{"inspect", runID}); err != nil {
 		t.Fatalf("inspect failed: %v", err)
@@ -303,8 +303,8 @@ func TestRunCommandsUseCustomRunsDir(t *testing.T) {
 		t.Fatalf("run unexpectedly wrote trajectory to default ./runs")
 	}
 
-	if err := Execute(ctx, []string{"runs", "--runs-dir", customRuns}); err != nil {
-		t.Fatalf("runs --runs-dir failed: %v", err)
+	if err := Execute(ctx, []string{"view", "--runs-dir", customRuns}); err != nil {
+		t.Fatalf("view --runs-dir list failed: %v", err)
 	}
 	if err := Execute(ctx, []string{"inspect", "--runs-dir", customRuns, runID}); err != nil {
 		t.Fatalf("inspect --runs-dir failed: %v", err)
@@ -341,8 +341,8 @@ func TestRunCommandsUseRunsDirEnv(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected 1 env run, got %d", len(items))
 	}
-	if err := Execute(ctx, []string{"runs"}); err != nil {
-		t.Fatalf("runs with JEJU_RUNS_DIR failed: %v", err)
+	if err := Execute(ctx, []string{"view"}); err != nil {
+		t.Fatalf("view with JEJU_RUNS_DIR failed: %v", err)
 	}
 	if err := Execute(ctx, []string{"inspect", items[0].RunID}); err != nil {
 		t.Fatalf("inspect with JEJU_RUNS_DIR failed: %v", err)
@@ -470,14 +470,13 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		"Run an evolution experiment",
 		"jeju inspect <run_id>",
 		"Print a run summary and artifact paths",
-		"jeju view <run_id> [--out <html>]",
-		"Open an HTML run report",
-		"jeju runs",
-		"List local runs",
+		"jeju view [<run_id>|<package-ref>] [--out <html>]",
+		"List runs or open an HTML run report",
 		"jeju init research --dir ./research-agent",
 		"jeju validate ./research-agent/agents/research.agent.yaml",
 		`jeju run ./research-agent/agents/research.agent.yaml "Create a short note explaining this agent run lifecycle."`,
 		"jeju inspect <run_id>",
+		"jeju view",
 		"jeju view <run_id>",
 	} {
 		if !strings.Contains(output, want) {

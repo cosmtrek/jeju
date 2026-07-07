@@ -25,7 +25,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		Example: `  jeju init research --dir ./research-agent
   jeju validate ./research-agent/agents/research.agent.yaml
   jeju run ./research-agent/agents/research.agent.yaml "Create a short note explaining this agent run lifecycle."
-  jeju runs
+  jeju view
   jeju inspect <run_id>
   jeju view <run_id>`,
 		SilenceUsage:  true,
@@ -46,7 +46,6 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 	root.AddCommand(newEvolveCommand(ctx))
 	root.AddCommand(newInspectCommand())
 	root.AddCommand(newViewCommand())
-	root.AddCommand(newRunsCommand())
 	root.AddCommand(newVersionCommand())
 	return root
 }
@@ -211,30 +210,19 @@ func newViewCommand() *cobra.Command {
 	var out string
 	var runsDir string
 	cmd := &cobra.Command{
-		Use:          "view <run_id> [--out <html>]",
-		Short:        "Open an HTML run report",
-		Args:         cobra.ExactArgs(1),
+		Use:          "view [<run_id>|<package-ref>] [--out <html>]",
+		Short:        "List runs or open an HTML run report",
+		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runView(args[0], out, runsDir)
+			selector := ""
+			if len(args) > 0 {
+				selector = args[0]
+			}
+			return runView(selector, out, runsDir)
 		},
 	}
 	cmd.Flags().StringVar(&out, "out", "", "output HTML path")
-	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or local/global run stores)")
-	return cmd
-}
-
-func newRunsCommand() *cobra.Command {
-	var runsDir string
-	cmd := &cobra.Command{
-		Use:          "runs",
-		Short:        "List local runs",
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRuns(runsDir)
-		},
-	}
 	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR or local/global run stores)")
 	return cmd
 }

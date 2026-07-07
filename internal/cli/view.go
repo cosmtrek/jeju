@@ -41,6 +41,19 @@ func renderMarkdown(src string) template.HTML {
 }
 
 func runView(runID, out, runsDir string) error {
+	if runID == "" {
+		if out != "" {
+			return fmt.Errorf("--out requires a run_id")
+		}
+		return runListRuns(runsDir, "")
+	}
+	if isPackageSelector(runID) {
+		if out != "" {
+			return fmt.Errorf("--out requires a run_id")
+		}
+		return runListRuns(runsDir, runID)
+	}
+
 	loaded, err := loadRunFromCandidateStores(runID, runsDir)
 	if err != nil {
 		return err

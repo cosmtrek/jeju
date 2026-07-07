@@ -529,10 +529,10 @@ paths such as `.jeju-dev/runs/<scenario>`:
 
 ```bash
 jeju run --runs-dir .jeju-dev/runs/research agents/research.agent.yaml "Save a note"
-jeju runs --runs-dir .jeju-dev/runs/research
+jeju view --runs-dir .jeju-dev/runs/research
 jeju inspect --runs-dir .jeju-dev/runs/research <run_id>
 ```
 
-`jeju runs`, `jeju inspect`, and `jeju view` search both `./runs` and
-`~/.jeju/runs` when no explicit run store is configured. If a run ID exists in
-both stores, pass `--runs-dir` to choose one.
+`jeju view` and `jeju inspect` search both `./runs` and `~/.jeju/runs` when no
+explicit run store is configured. `jeju view <package-ref>` lists runs for one
+package. If a run ID exists in both stores, pass `--runs-dir` to choose one.

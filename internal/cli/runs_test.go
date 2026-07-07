@@ -9,7 +9,7 @@ import (
 	"github.com/cosmtrek/jeju/internal/runs"
 )
 
-func TestRunsWarnsForDuplicateRunIDsAcrossDefaultStores(t *testing.T) {
+func TestViewWarnsForDuplicateRunIDsAcrossDefaultStores(t *testing.T) {
 	tmp := t.TempDir()
 	restoreCWD := chdir(t, tmp)
 	defer restoreCWD()
@@ -30,8 +30,8 @@ func TestRunsWarnsForDuplicateRunIDsAcrossDefaultStores(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		if err := runRuns(""); err != nil {
-			t.Fatalf("runs failed: %v", err)
+		if err := runListRuns("", ""); err != nil {
+			t.Fatalf("view list failed: %v", err)
 		}
 	})
 	for _, want := range []string{
@@ -41,7 +41,7 @@ func TestRunsWarnsForDuplicateRunIDsAcrossDefaultStores(t *testing.T) {
 		"global",
 	} {
 		if !strings.Contains(output, want) {
-			t.Fatalf("runs output missing %q:\n%s", want, output)
+			t.Fatalf("view output missing %q:\n%s", want, output)
 		}
 	}
 }
