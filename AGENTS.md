@@ -7,6 +7,8 @@
 - Agent manifest docs live in `docs/agent-manifest.md`; evolution experiment docs live in `docs/agent-evolution-manifest.md`.
 - Agent team docs live in `docs/agent-team.md`.
 - DeepSeek setup notes live in `docs/deepseek.md`.
+- First-party distributable agent packages live in `catalog/`.
+- The static project website lives in `website/`; it is not part of the Go module.
 - CLI entrypoint is `cmd/jeju/main.go`; command handlers live in `internal/cli/`.
 
 ## Scope Rules
@@ -15,6 +17,15 @@
 - Agent Team is allowed as the bounded lead-worker outer controller described in `docs/agent-team.md`; do not expand it into peer-to-peer chat, shared mutable memory, distributed workers, or a general multi-agent platform unless explicitly requested.
 - Runtime must not read YAML directly. The path is `config.LoadFile -> config.Validate -> compiler.Compile -> runtime.Run`.
 - Agent behavior should come from manifest config, loaded instructions, tools, skills, policy, sandbox, trajectory, and evaluator config rather than hardcoded runtime branches.
+- `website/` is an Astro static site and must not grow runtime Web UI or console functionality.
+
+## Catalog Rules
+
+- `catalog/` is the first-party package catalog. These packages are maintained source artifacts, not examples or scratch agents.
+- Catalog packages must pass `jeju package validate <package-root>`.
+- Any catalog package content change must bump `metadata.version` in that package's `jeju.package.yaml`.
+- User-facing documentation and examples for published packages must use `jeju:` registry references, not GitHub subdirectory references.
+- Keep `catalog/` distinct from `examples/`: catalog is the installable shelf with versions and maintenance expectations; examples are teaching material for manifest authors.
 
 ## Runtime Invariants
 

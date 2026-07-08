@@ -1,0 +1,83 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: article-editor
+  description: "Review drafts as an article editor and surface logic, structure, and prose issues"
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-pro
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.1
+      thinking:
+        type: disabled
+      maxOutputTokens: 4096
+      contextWindow: 128000
+      timeoutSec: 90
+
+instructions:
+  system: ../prompts/article-editor.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  limits:
+    maxSteps: 24
+    maxDurationSec: 360
+    maxToolCalls: 40
+    maxConsecutiveErrors: 3
+
+workspace:
+  path: ../workspace
+
+tools:
+  - read
+  - search
+
+permissions:
+  access: readOnly
+  approval: never
+
+output:
+  name: editorial_review
+  schema:
+    type: object
+    required: [verdict, findings]
+    additionalProperties: false
+    properties:
+      verdict:
+        type: string
+        enum: [publish_ready, needs_revision, major_rework]
+      summary:
+        type: string
+      findings:
+        type: array
+        items:
+          type: object
+          required: [severity, location, issue]
+          additionalProperties: false
+          properties:
+            severity:
+              type: string
+              enum: [high, medium, low]
+            location:
+              type: string
+            issue:
+              type: string
+            suggestion:
+              type: string
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules:
+        - finalAnswerExists
+        - runCompleted

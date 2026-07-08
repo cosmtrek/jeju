@@ -1,0 +1,54 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: chinese-expression-polisher
+  description: "Polish Chinese expression into more idiomatic, natural, and fluent prose"
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-flash
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.2
+      thinking:
+        type: disabled
+      maxOutputTokens: 4096
+      contextWindow: 128000
+      timeoutSec: 90
+
+instructions:
+  system: ../prompts/chinese-expression-polisher.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  limits:
+    maxSteps: 16
+    maxDurationSec: 300
+    maxToolCalls: 24
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace
+
+tools:
+  - read
+  - search
+
+permissions:
+  access: readOnly
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules:
+        - finalAnswerExists
+        - runCompleted

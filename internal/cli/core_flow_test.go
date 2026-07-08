@@ -10,6 +10,7 @@ import (
 
 	"github.com/cosmtrek/jeju/internal/config"
 	"github.com/cosmtrek/jeju/internal/runs"
+	"github.com/cosmtrek/jeju/internal/runtime"
 	"github.com/cosmtrek/jeju/internal/trajectory"
 )
 
@@ -158,10 +159,13 @@ func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
 	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
 	defer restoreWorkCWD()
 
+	var stderr string
 	output := captureStdout(t, func() {
-		if err := Execute(ctx, []string{"run", "--output", "final", "agents/research.agent.yaml", "Save a short note to notes.md"}); err != nil {
-			t.Fatalf("run --output final failed: %v", err)
-		}
+		stderr = captureStderr(t, func() {
+			if err := Execute(ctx, []string{"run", "--output", "final", "agents/research.agent.yaml", "Save a short note to notes.md"}); err != nil {
+				t.Fatalf("run --output final failed: %v", err)
+			}
+		})
 	})
 	for _, unexpected := range []string{"Jeju Run", "\nStep ", "model  ", "tool   ", "\nOutputs\n", "report "} {
 		if strings.Contains(output, unexpected) {
@@ -170,6 +174,9 @@ func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
 	}
 	if !strings.Contains(output, "This is a deterministic mock response.") {
 		t.Fatalf("run --output final did not print final answer:\n%s", output)
+	}
+	if !strings.Contains(stderr, "run_id ") || !strings.Contains(stderr, "report ") {
+		t.Fatalf("run --output final did not print run evidence to stderr:\n%s", stderr)
 	}
 
 	store := runs.NewStore("./runs")
@@ -193,6 +200,72 @@ func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
 		trajectory.EventSpanEnded,
 		trajectory.EventRunSummary,
 	)
+}
+
+func TestRunReturnsErrorForFailedStatus(t *testing.T) {
+	disableReportOpen(t)
+
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+
+	manifestPath := filepath.Join("agents", "research.agent.yaml")
+	f, err := os.OpenFile(manifestPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open manifest failed: %v", err)
+	}
+	if _, err := f.WriteString(`
+output:
+  name: strict_result
+  schema:
+    type: object
+    required: [verdict]
+    additionalProperties: false
+    properties:
+      verdict:
+        type: string
+`); err != nil {
+		_ = f.Close()
+		t.Fatalf("append output schema failed: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close manifest failed: %v", err)
+	}
+
+	var stderr string
+	output := captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			err = Execute(ctx, []string{"run", "--output", "final", manifestPath, "Return any short note."})
+		})
+	})
+	if err == nil {
+		t.Fatal("Execute() error = nil, want failed run error")
+	}
+	if !strings.Contains(err.Error(), "run failed") || !strings.Contains(err.Error(), "run_id") {
+		t.Fatalf("error = %q, want run failed with run_id", err.Error())
+	}
+	if !strings.Contains(output, "Run failed because final answer did not match output schema") {
+		t.Fatalf("run output did not include final failure:\n%s", output)
+	}
+	if !strings.Contains(stderr, "run_id ") || !strings.Contains(stderr, "report ") {
+		t.Fatalf("failed run did not print evidence to stderr:\n%s", stderr)
+	}
+
+	items, err := runs.NewStore("./runs").ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns failed: %v", err)
+	}
+	if len(items) != 1 || items[0].Status != string(runtime.StatusFailed) {
+		t.Fatalf("expected one failed run, got %#v", items)
+	}
 }
 
 func TestRunFromFileAndStdin(t *testing.T) {
@@ -782,6 +855,29 @@ func captureStdout(t *testing.T, fn func()) string {
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		t.Fatalf("read stdout failed: %v", err)
+	}
+	return string(data)
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe failed: %v", err)
+	}
+	os.Stderr = writer
+	defer func() {
+		os.Stderr = old
+		_ = reader.Close()
+	}()
+	fn()
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stderr writer failed: %v", err)
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read stderr failed: %v", err)
 	}
 	return string(data)
 }

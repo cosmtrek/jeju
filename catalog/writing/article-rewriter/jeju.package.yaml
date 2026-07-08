@@ -1,0 +1,14 @@
+apiVersion: jeju/v1alpha1
+kind: AgentPackage
+
+metadata:
+  id: writing/article-rewriter
+  name: article-rewriter
+  version: 0.1.0
+  description: "Rewrite a draft according to concrete editorial suggestions."
+
+compatibility:
+  jeju: ">=0.7.0"
+
+agent:
+  manifest: agents/article-rewriter.agent.yaml

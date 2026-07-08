@@ -1,0 +1,14 @@
+apiVersion: jeju/v1alpha1
+kind: AgentPackage
+
+metadata:
+  id: writing/translator
+  name: translator
+  version: 0.1.0
+  description: "Translate short text between languages with idiomatic Simplified Chinese output."
+
+compatibility:
+  jeju: ">=0.7.0"
+
+agent:
+  manifest: agents/translator.agent.yaml

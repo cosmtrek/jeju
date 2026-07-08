@@ -1,0 +1,14 @@
+apiVersion: jeju/v1alpha1
+kind: AgentPackage
+
+metadata:
+  id: writing/article-editor
+  name: article-editor
+  version: 0.1.0
+  description: "Review drafts for publish readiness, logic, structure, and prose flow."
+
+compatibility:
+  jeju: ">=0.7.0"
+
+agent:
+  manifest: agents/article-editor.agent.yaml

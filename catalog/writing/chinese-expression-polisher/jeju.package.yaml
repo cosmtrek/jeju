@@ -1,0 +1,12 @@
+apiVersion: jeju/v1alpha1
+kind: AgentPackage
+
+metadata:
+  id: writing/chinese-expression-polisher
+  name: chinese-expression-polisher
+  version: 0.1.0
+  description: "Polish Chinese expression into more idiomatic, natural, and fluent prose."
+compatibility:
+  jeju: ">=0.7.0"
+agent:
+  manifest: agents/chinese-expression-polisher.agent.yaml

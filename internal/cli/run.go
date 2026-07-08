@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -71,13 +72,14 @@ func runAgent(ctx context.Context, agentRef, task, workspace, runsDir, output st
 		if result.Final != "" {
 			fmt.Println(strings.TrimRight(result.Final, "\n"))
 		}
-		return nil
+		fmt.Fprintf(os.Stderr, "Outputs\n  run_id %s\n  report %s\n", result.RunID, reportPath)
+		return runStatusError(result)
 	}
 	if result.Final != "" {
 		fmt.Printf("\nFinal\n%s\n", strings.TrimRight(result.Final, "\n"))
 	}
 	fmt.Printf("\nOutputs\n  run_id %s\n  report %s\n", result.RunID, reportPath)
-	return nil
+	return runStatusError(result)
 }
 
 func printRunPackageSummary(provenance agentpkg.RunProvenance, risk agentpkg.RiskSummary) {
@@ -91,4 +93,31 @@ func printRunPackageSummary(provenance agentpkg.RunProvenance, risk agentpkg.Ris
 		fmt.Printf("  capabilities %s\n", strings.Join(risk.Capabilities, ","))
 	}
 	fmt.Println()
+}
+
+func runStatusError(result *runtime.RunResult) error {
+	if result.Status == runtime.StatusCompleted {
+		return nil
+	}
+	status := strings.TrimSpace(string(result.Status))
+	if status == "" {
+		status = "unknown"
+	}
+	final := strings.TrimSpace(result.Final)
+	if final == "" {
+		return fmt.Errorf("run %s (run_id %s)", status, result.RunID)
+	}
+	return fmt.Errorf("run %s (run_id %s): %s", status, result.RunID, summarizeRunFinal(final))
+}
+
+func summarizeRunFinal(final string) string {
+	firstLine := strings.TrimSpace(strings.SplitN(final, "\n", 2)[0])
+	if firstLine == "" {
+		return "no final summary"
+	}
+	const maxLen = 180
+	if len(firstLine) <= maxLen {
+		return firstLine
+	}
+	return firstLine[:maxLen] + "..."
 }

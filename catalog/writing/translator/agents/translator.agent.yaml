@@ -1,0 +1,50 @@
+apiVersion: jeju/v1alpha1
+kind: Agent
+
+metadata:
+  name: translator
+  description: "Translate short text between languages with idiomatic Simplified Chinese output"
+
+models:
+  providers:
+    primary:
+      type: openaiCompatible
+      preset: deepseek
+      model: deepseek-v4-pro
+      envKey: DEEPSEEK_API_KEY
+      temperature: 0.1
+      thinking:
+        type: disabled
+      maxOutputTokens: 2048
+      contextWindow: 128000
+      timeoutSec: 60
+
+instructions:
+  system: ../prompts/translator.md
+
+runtime:
+  model: primary
+  loop:
+    type: react
+  compressionThreshold: 0.8
+  limits:
+    maxSteps: 4
+    maxDurationSec: 120
+    maxToolCalls: 0
+    maxConsecutiveErrors: 2
+
+workspace:
+  path: ../workspace
+
+permissions:
+  access: readOnly
+  approval: never
+
+evaluate:
+  enabled: true
+  evaluators:
+    - name: basic
+      uses: rules
+      rules:
+        - finalAnswerExists
+        - runCompleted

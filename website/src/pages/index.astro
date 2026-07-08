@@ -1,0 +1,1107 @@
+---
+import packages from "../data/catalog.generated.json";
+
+const registryUrl = "https://jeju.rickoyu.com/registry/index.yaml";
+
+const installCmd = "npx skills add cosmtrek/jeju --skill jeju-writing -g";
+const agentPrompt = "Review ~/drafts/launch-post.md for publish readiness.";
+
+const manifestSnippet = `kind: Agent
+metadata:
+  name: article-editor
+models:
+  providers:
+    primary:
+      preset: deepseek
+      model: deepseek-v4-pro
+      temperature: 0.1
+instructions:
+  system: prompts/article-editor.md
+tools: [read, search]
+permissions:
+  access: readOnly
+runtime:
+  limits: { maxSteps: 24, maxToolCalls: 40 }
+output:
+  name: editorial_review
+  schema: # verdict, findings[]…`;
+
+const pillars = [
+  {
+    key: "manifest",
+    title: "An agent is a manifest",
+    body: "Model, prompt, tools, permissions, limits, output schema — one YAML file, fully inspectable. No behavior hidden in code.",
+  },
+  {
+    key: "boundary",
+    title: "Every run is bounded",
+    body: "Each tool call passes a policy gate. File access stays inside the declared workspace. Step and cost limits are enforced, not suggested.",
+  },
+  {
+    key: "evidence",
+    title: "Every run leaves evidence",
+    body: "trajectory.jsonl records model calls, tool calls, policy decisions, and artifacts. jeju view renders it as a report.",
+  },
+  {
+    key: "package",
+    title: "Agents ship as packages",
+    body: "Versioned, digest-verified, installed by reference from a static registry. The same worker, reproducible on any machine.",
+  },
+];
+
+const problems = [
+  {
+    num: "a",
+    title: "Frontier models doing grunt work",
+    body: "When your orchestrator writes, rewrites, and translates everything itself, you pay frontier prices for work a smaller model does fine. Jeju splits the bill: your model plans and reviews, cheap specialists execute.",
+  },
+  {
+    num: "b",
+    title: "Prompted behavior drifts",
+    body: "A prompt is advice — the same instructions behave differently across sessions and models. A Jeju worker is a manifest: pinned model, temperature, prompt, tools, step limits. Identical next month.",
+  },
+  {
+    num: "c",
+    title: "Chat logs are not evidence",
+    body: "When delegated work goes wrong, a conversation tells you nothing. Every Jeju run files trajectory.jsonl and a report — model calls, tool calls, policy decisions — and every tool call passes a policy gate first.",
+  },
+];
+
+const routes = [
+  {
+    ask: "“Translate this abstract.”",
+    worker: "writing/translator",
+    returns: "translated text",
+  },
+  {
+    ask: "“这段中文帮我改自然一点。”",
+    worker: "writing/chinese-expression-polisher",
+    returns: "polished draft",
+  },
+  {
+    ask: "“Rewrite this for a technical audience.”",
+    worker: "writing/article-rewriter",
+    returns: "revised draft",
+  },
+  {
+    ask: "“Is this ready to publish?”",
+    worker: "writing/article-editor",
+    returns: "verdict + findings, JSON",
+    note: "You pick the findings worth fixing. The skill dispatches the rewriter or polisher with exactly those.",
+  },
+];
+
+const practices = [
+  {
+    title: "Humans pick the findings",
+    body: "No rewriting on autopilot. Review findings go to the author; only the accepted subset becomes the next worker's task.",
+  },
+  {
+    title: "The boundary stays explicit",
+    body: "Workers run read-only inside a policy-gated workspace. They return text — they never touch your files.",
+  },
+  {
+    title: "Verify the run, not the vibe",
+    body: "Every step prints a run id. jeju view opens the report: what was read, what was denied, what it cost. Failed runs exit non-zero.",
+  },
+];
+
+const reviewCmd = `jeju run --workspace ~/drafts --from ~/drafts/draft.md \\
+  p:writing/article-editor@0.1.0 \\
+  "Review this draft for publish readiness. Return only the configured JSON."`;
+
+const reviewOut = `{
+  "verdict": "needs_revision",
+  "summary": "Clear thesis, but the argument is asserted rather than built.",
+  "findings": [
+    {
+      "severity": "high",
+      "location": "opening paragraph",
+      "issue": "The central claim is stated as absolute but never defended.",
+      "suggestion": "Soften the claim or add a concrete comparison."
+    }
+  ]
+}`;
+
+const registryEntry = `packages:
+  writing/article-editor:
+    versions:
+      0.1.0:
+        source: github:cosmtrek/jeju//catalog/writing/article-editor?ref=<commit>
+        digest: sha256:966d…6aff`;
+
+const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jeju — hire a workforce for your coding agent</title>
+    <meta
+      name="description"
+      content="Jeju gives your coding agent bounded, cheap, auditable workers. Install one skill; your agent routes writing work to pinned specialists and files evidence for every run."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <header class="nav">
+      <a class="wordmark" href="#top">jeju</a>
+      <nav>
+        <a href="#problem">Why</a>
+        <a href="#product">Product</a>
+        <a href="#skill">First recipe</a>
+        <a href="#internals">Under the hood</a>
+        <a href="https://github.com/cosmtrek/jeju">GitHub ↗</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <!-- ================= HERO ================= -->
+      <section class="hero">
+        <p class="tag" data-reveal>Open-source agent runtime — Go, local-first</p>
+        <h1 data-reveal>
+          Hire a workforce<br />for your coding agent.
+        </h1>
+        <p class="lede" data-reveal>
+          Jeju is a local-first runtime that turns agents into installable
+          workers — pinned manifest, policy-gated workspace, evidence for every
+          run. Your agent plans; cheap bounded specialists execute; you audit.
+        </p>
+        <div class="cta" data-reveal>
+          <a class="btn btn-solid" href="#install">Install the skill</a>
+          <a class="btn btn-ghost" href="https://github.com/cosmtrek/jeju">Star on GitHub</a>
+        </div>
+
+        <div class="terminal" id="install" data-reveal>
+          <div class="terminal-row">
+            <div class="terminal-label">
+              <span>shell</span>
+              <button type="button" data-copy>copy</button>
+            </div>
+            <pre><code><span class="prompt">$</span> {installCmd}</code></pre>
+          </div>
+          <div class="terminal-row">
+            <div class="terminal-label"><span>then, in your coding agent</span></div>
+            <pre><code><span class="prompt">›</span> {agentPrompt}</code></pre>
+          </div>
+          <p class="terminal-foot">
+            Works with Claude Code, Codex, Cursor and 20+ agents. The skill
+            bootstraps the Jeju runtime on first use — you only bring a
+            <code>DEEPSEEK_API_KEY</code>.
+          </p>
+        </div>
+      </section>
+
+      <!-- ================= PROBLEM ================= -->
+      <section class="block" id="problem">
+        <p class="index" data-reveal>01 — The problem</p>
+        <h2 data-reveal>Delegation without a runtime is hoping</h2>
+        <div class="cols" data-reveal>
+          {problems.map((p) => (
+            <article>
+              <h3><span class="col-key">{p.num}.</span> {p.title}</h3>
+              <p>{p.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <!-- ================= PRODUCT ================= -->
+      <section class="block" id="product">
+        <p class="index" data-reveal>02 — What Jeju is</p>
+        <h2 data-reveal>An agent is a file.<br />A run is a record.</h2>
+        <p class="block-lede" data-reveal>
+          Jeju compiles a YAML manifest into a running worker. Everything the
+          worker is allowed to be — and everything it did — exists as something
+          you can read, diff, and version.
+        </p>
+
+        <div class="anatomy" data-reveal>
+          <pre class="anatomy-yaml"><code>{manifestSnippet}</code></pre>
+          <div class="pillars">
+            {pillars.map((p) => (
+              <article class="pillar">
+                <h3>{p.title}</h3>
+                <p>{p.body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= FIRST RECIPE ================= -->
+      <section class="block" id="skill">
+        <p class="index" data-reveal>03 — First recipe</p>
+        <h2 data-reveal>The writing team</h2>
+        <p class="block-lede" data-reveal>
+          The first thing shipped on Jeju: four catalog workers behind one
+          skill. <code>jeju-writing</code> turns your agent into a dispatcher —
+          plain language in, the cheapest capable worker out. A review step is
+          added only when stakes call for one; simple requests never pay for it.
+        </p>
+
+        <div class="router" data-reveal>
+          <div class="router-row router-head" aria-hidden="true">
+            <span>you say</span>
+            <span></span>
+            <span>routed to</span>
+            <span>returns</span>
+          </div>
+          {routes.map((r) => (
+            <div class="router-row">
+              <span class="router-ask">{r.ask}</span>
+              <span class="router-arrow" aria-hidden="true">→</span>
+              <span class="router-worker">{r.worker}</span>
+              <span class="router-returns">{r.returns}</span>
+              {r.note && <p class="router-note">{r.note}</p>}
+            </div>
+          ))}
+        </div>
+
+        <div class="rules" data-reveal>
+          {practices.map((p) => (
+            <article>
+              <h3>{p.title}</h3>
+              <p>{p.body}</p>
+            </article>
+          ))}
+        </div>
+
+        <div class="demo" data-reveal>
+          <div class="demo-col">
+            <p class="demo-label">what the skill runs for you</p>
+            <pre><code>{reviewCmd}</code></pre>
+          </div>
+          <div class="demo-col">
+            <p class="demo-label">final answer — <span class="ok">schema-validated</span></p>
+            <pre><code>{reviewOut}</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= UNDER THE HOOD ================= -->
+      <section class="block" id="internals">
+        <p class="index" data-reveal>04 — Under the hood</p>
+        <h2 data-reveal>Pinned, verified, immutable</h2>
+        <p class="block-lede" data-reveal>
+          The workers are packages resolved from a static registry — no
+          accounts, no API. Each version pins a commit and a sha256 digest,
+          checked on install. Published versions never change; content changes
+          require a version bump.
+        </p>
+
+        <div class="internals-grid" data-reveal>
+          <pre class="registry-yaml"><code>{registryEntry}</code></pre>
+          <div class="internals-note">
+            <p>
+              The skill points <code>JEJU_REGISTRY_INDEX</code> at{" "}
+              <a href={registryUrl}>jeju.rickoyu.com/registry</a> and installs
+              what it needs. Prefer reading the source? Every package is a
+              directory of YAML and prompts in the{" "}
+              <a href="https://github.com/cosmtrek/jeju/tree/master/catalog">open catalog</a>.
+            </p>
+          </div>
+        </div>
+
+        <table class="pkg-table" data-reveal>
+          <thead>
+            <tr>
+              <th>package</th>
+              <th>model</th>
+              <th>boundary</th>
+              <th>version</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orderedPackages.map((pkg) => (
+              <tr>
+                <td class="pkg-cell">
+                  <span class="pkg-name">{pkg.id}</span>
+                  <span class="pkg-desc">{pkg.description}</span>
+                </td>
+                <td class="mono">{pkg.model}</td>
+                <td class="mono">
+                  {pkg.access}{pkg.tools.length ? ` · ${pkg.tools.join(", ")}` : " · no tools"}
+                </td>
+                <td class="mono">{pkg.version}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        Built by <a href="https://rickoyu.com">Ricko Yu</a> — cosmtrek, author
+        of <a href="https://github.com/air-verse/air">air</a>. These workers run
+        his own blog's writing workflow.
+      </p>
+      <nav aria-label="Project links">
+        <a href="https://github.com/cosmtrek/jeju">GitHub</a>
+        <a href="https://github.com/cosmtrek/jeju/blob/master/docs/agent-package.md">Package docs</a>
+        <a href="https://github.com/cosmtrek/jeju/blob/master/docs/agent-manifest.md">Manifest docs</a>
+        <a href="https://rickoyu.com">Blog</a>
+        <a href={registryUrl}>Registry index</a>
+      </nav>
+    </footer>
+
+    <script>
+      // Copy button: copies the npx install command.
+      for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
+        btn.addEventListener("click", async () => {
+          const code = btn.closest(".terminal-row")?.querySelector("code");
+          if (!code) return;
+          const text = code.innerText.replace(/^[$›]\s*/, "");
+          try {
+            await navigator.clipboard.writeText(text);
+            btn.textContent = "copied";
+            btn.classList.add("copied");
+            setTimeout(() => {
+              btn.textContent = "copy";
+              btn.classList.remove("copied");
+            }, 1500);
+          } catch {
+            btn.textContent = "select & copy";
+          }
+        });
+      }
+
+      // Scroll reveal
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const targets = document.querySelectorAll("[data-reveal]");
+      if (reduced || !("IntersectionObserver" in window)) {
+        for (const el of targets) el.classList.add("in");
+      } else {
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) {
+                e.target.classList.add("in");
+                io.unobserve(e.target);
+              }
+            }
+          },
+          { rootMargin: "0px 0px -6% 0px" },
+        );
+        for (const el of targets) io.observe(el);
+      }
+    </script>
+
+    <style>
+      :root {
+        --bg: oklch(15% 0 0);
+        --panel: oklch(18% 0 0);
+        --fg: oklch(96.5% 0 0);
+        --muted: oklch(68% 0 0);
+        --faint: oklch(48% 0 0);
+        --line: oklch(96.5% 0 0 / 0.1);
+        --line-strong: oklch(96.5% 0 0 / 0.22);
+        --ok: oklch(82% 0.16 155);
+        --sans: "Geist", "PingFang SC", sans-serif;
+        --mono: "Geist Mono", ui-monospace, monospace;
+        --w: min(1120px, 100% - 48px);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--sans);
+        font-size: clamp(15.5px, 0.35vw + 14.4px, 17px);
+        line-height: 1.55;
+        scroll-behavior: smooth;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      ::selection {
+        background: var(--fg);
+        color: var(--bg);
+      }
+
+      a {
+        color: var(--fg);
+        text-decoration: none;
+        border-bottom: 1px solid var(--line-strong);
+        transition: border-color 0.15s;
+      }
+
+      a:hover {
+        border-color: var(--fg);
+      }
+
+      code {
+        font-family: var(--mono);
+        font-size: 0.9em;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        font-weight: 600;
+        letter-spacing: -0.025em;
+        line-height: 1.05;
+        text-wrap: balance;
+      }
+
+      /* ---------- reveal ---------- */
+      [data-reveal] {
+        opacity: 0;
+        transform: translateY(10px);
+        transition:
+          opacity 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+          transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      [data-reveal].in {
+        opacity: 1;
+        transform: none;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        [data-reveal] {
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+      }
+
+      /* ---------- nav ---------- */
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        padding: 0 max(24px, (100% - 1120px) / 2);
+        height: 56px;
+        border-bottom: 1px solid var(--line);
+        background: color-mix(in oklab, var(--bg) 88%, transparent);
+        backdrop-filter: blur(8px);
+      }
+
+      .wordmark {
+        border: none;
+        font-family: var(--mono);
+        font-weight: 500;
+        font-size: 1rem;
+        letter-spacing: -0.02em;
+      }
+
+      .nav nav {
+        display: flex;
+        gap: 24px;
+        font-size: 0.84rem;
+        font-weight: 500;
+      }
+
+      .nav nav a {
+        border: none;
+        color: var(--muted);
+      }
+
+      .nav nav a:hover {
+        color: var(--fg);
+      }
+
+      /* ---------- layout ---------- */
+      main {
+        width: var(--w);
+        margin: 0 auto;
+      }
+
+      .index {
+        margin: 0 0 20px;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        font-weight: 500;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .block {
+        padding: clamp(72px, 10vw, 136px) 0 0;
+      }
+
+      .block h2 {
+        font-size: clamp(1.9rem, 3.8vw, 2.9rem);
+      }
+
+      .block-lede {
+        max-width: 62ch;
+        margin: 18px 0 0;
+        color: var(--muted);
+        font-size: 1.02rem;
+        line-height: 1.65;
+      }
+
+      .block-lede code {
+        color: var(--fg);
+      }
+
+      /* ---------- hero ---------- */
+      .hero {
+        padding-top: clamp(72px, 11vw, 140px);
+      }
+
+      .tag {
+        margin: 0 0 22px;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.74rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .hero h1 {
+        font-size: clamp(2.8rem, 7vw, 5.6rem);
+        font-weight: 650;
+      }
+
+      .hero .lede {
+        max-width: 56ch;
+        margin: 26px 0 0;
+        color: var(--muted);
+        font-size: 1.14rem;
+        line-height: 1.6;
+      }
+
+      .cta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 34px;
+      }
+
+      .btn {
+        display: inline-block;
+        padding: 11px 22px;
+        border: 1px solid var(--fg);
+        border-radius: 2px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+      }
+
+      .btn-solid {
+        background: var(--fg);
+        color: var(--bg);
+      }
+
+      .btn-solid:hover {
+        background: var(--muted);
+        border-color: var(--muted);
+      }
+
+      .btn-ghost {
+        border-color: var(--line-strong);
+        color: var(--fg);
+      }
+
+      .btn-ghost:hover {
+        border-color: var(--fg);
+      }
+
+      /* ---------- terminal ---------- */
+      .terminal {
+        margin-top: clamp(44px, 6vw, 72px);
+        border: 1px solid var(--line);
+        background: var(--panel);
+        scroll-margin-top: 80px;
+      }
+
+      .terminal-row + .terminal-row {
+        border-top: 1px solid var(--line);
+      }
+
+      .terminal-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 18px 0;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .terminal pre {
+        margin: 0;
+        padding: 10px 18px 16px;
+        overflow-x: auto;
+      }
+
+      .terminal code {
+        font-size: 0.88rem;
+        line-height: 1.6;
+        white-space: pre;
+      }
+
+      .prompt {
+        color: var(--ok);
+        user-select: none;
+      }
+
+      .terminal-foot {
+        margin: 0;
+        padding: 12px 18px 14px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+
+      .terminal-foot code {
+        color: var(--fg);
+        font-size: 0.8rem;
+      }
+
+      button[data-copy] {
+        padding: 2px 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 2px;
+        background: transparent;
+        color: var(--muted);
+        font: 500 0.68rem var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
+      }
+
+      button[data-copy]:hover {
+        color: var(--fg);
+        border-color: var(--fg);
+      }
+
+      button[data-copy].copied {
+        color: var(--ok);
+        border-color: var(--ok);
+      }
+
+      /* ---------- problem cols ---------- */
+      .cols {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: clamp(28px, 4vw, 56px);
+        margin-top: clamp(32px, 4.5vw, 52px);
+        padding-top: clamp(26px, 3.5vw, 40px);
+        border-top: 1px solid var(--line);
+      }
+
+      .cols h3 {
+        font-size: 1.05rem;
+        margin-bottom: 12px;
+      }
+
+      .col-key {
+        color: var(--faint);
+        font-family: var(--mono);
+        font-weight: 500;
+        margin-right: 2px;
+      }
+
+      .cols p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.93rem;
+        line-height: 1.65;
+      }
+
+      /* ---------- anatomy (product) ---------- */
+      .anatomy {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+        gap: clamp(24px, 4vw, 56px);
+        margin-top: clamp(36px, 5vw, 56px);
+        align-items: start;
+      }
+
+      .anatomy-yaml {
+        margin: 0;
+        padding: 20px 22px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        overflow-x: auto;
+      }
+
+      .anatomy-yaml code {
+        font-size: 0.8rem;
+        line-height: 1.7;
+        white-space: pre;
+        color: var(--muted);
+      }
+
+      .pillars {
+        display: grid;
+      }
+
+      .pillar {
+        padding: 18px 0;
+      }
+
+      .pillar + .pillar {
+        border-top: 1px solid var(--line);
+      }
+
+      .pillar:first-child {
+        padding-top: 4px;
+      }
+
+      .pillar h3 {
+        font-size: 1rem;
+        margin-bottom: 8px;
+      }
+
+      .pillar p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.91rem;
+        line-height: 1.62;
+      }
+
+      /* ---------- router ---------- */
+      .router {
+        margin-top: clamp(36px, 5vw, 56px);
+        border: 1px solid var(--line);
+      }
+
+      .router-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) 32px minmax(0, 1.3fr) minmax(0, 0.85fr);
+        gap: 6px 16px;
+        align-items: baseline;
+        padding: 16px 20px;
+      }
+
+      .router-row + .router-row {
+        border-top: 1px solid var(--line);
+      }
+
+      .router-row:not(.router-head):hover {
+        background: var(--panel);
+      }
+
+      .router-head {
+        padding-top: 11px;
+        padding-bottom: 10px;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .router-ask {
+        font-size: 0.98rem;
+        font-weight: 500;
+      }
+
+      .router-arrow {
+        color: var(--faint);
+        text-align: center;
+      }
+
+      .router-worker {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        overflow-wrap: anywhere;
+      }
+
+      .router-returns {
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      .router-note {
+        grid-column: 3 / -1;
+        margin: 4px 0 0;
+        padding-left: 14px;
+        border-left: 1px solid var(--line-strong);
+        color: var(--muted);
+        font-size: 0.85rem;
+        line-height: 1.55;
+      }
+
+      /* ---------- rules ---------- */
+      .rules {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: clamp(24px, 3.5vw, 48px);
+        margin-top: clamp(36px, 5vw, 56px);
+      }
+
+      .rules h3 {
+        font-size: 0.98rem;
+        margin-bottom: 10px;
+      }
+
+      .rules p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.9rem;
+        line-height: 1.62;
+      }
+
+      /* ---------- demo ---------- */
+      .demo {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1px;
+        margin-top: clamp(36px, 5vw, 56px);
+        border: 1px solid var(--line);
+        background: var(--line);
+      }
+
+      .demo-col {
+        min-width: 0;
+        padding: 16px 20px 18px;
+        background: var(--panel);
+      }
+
+      .demo-label {
+        margin: 0 0 12px;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .demo-label .ok {
+        color: var(--ok);
+      }
+
+      .demo-col pre {
+        margin: 0;
+        overflow-x: auto;
+      }
+
+      .demo-col code {
+        font-size: 0.8rem;
+        line-height: 1.65;
+        white-space: pre;
+        color: var(--muted);
+      }
+
+      /* ---------- internals ---------- */
+      .internals-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+        gap: clamp(24px, 4vw, 48px);
+        align-items: center;
+        margin-top: clamp(36px, 5vw, 56px);
+      }
+
+      .registry-yaml {
+        margin: 0;
+        padding: 18px 20px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        overflow-x: auto;
+      }
+
+      .registry-yaml code {
+        font-size: 0.78rem;
+        line-height: 1.65;
+        white-space: pre;
+        color: var(--muted);
+      }
+
+      .internals-note p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.96rem;
+        line-height: 1.7;
+      }
+
+      .internals-note code {
+        color: var(--fg);
+        font-size: 0.82rem;
+      }
+
+      /* ---------- package table ---------- */
+      .pkg-table {
+        width: 100%;
+        margin-top: clamp(36px, 5vw, 56px);
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+
+      .pkg-table th {
+        padding: 0 16px 10px 0;
+        border-bottom: 1px solid var(--line-strong);
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        text-align: left;
+      }
+
+      .pkg-table td {
+        padding: 15px 16px 15px 0;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+
+      .pkg-cell {
+        display: grid;
+        gap: 3px;
+        max-width: 38ch;
+      }
+
+      .pkg-name {
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        font-weight: 500;
+      }
+
+      .pkg-desc {
+        color: var(--muted);
+        font-size: 0.85rem;
+        line-height: 1.5;
+      }
+
+      td.mono {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      /* ---------- footer ---------- */
+      footer {
+        width: var(--w);
+        margin: clamp(72px, 10vw, 136px) auto 0;
+        padding: 30px 0 52px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px 48px;
+        justify-content: space-between;
+        align-items: baseline;
+      }
+
+      footer p {
+        margin: 0;
+        max-width: 52ch;
+        color: var(--muted);
+        font-size: 0.88rem;
+        line-height: 1.65;
+      }
+
+      footer nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 22px;
+        font-size: 0.85rem;
+      }
+
+      footer a {
+        border-bottom-color: var(--line);
+      }
+
+      footer nav a {
+        color: var(--muted);
+        border: none;
+      }
+
+      footer nav a:hover {
+        color: var(--fg);
+      }
+
+      /* ---------- responsive ---------- */
+      @media (max-width: 900px) {
+        .cols,
+        .rules,
+        .demo {
+          grid-template-columns: 1fr;
+        }
+
+        .internals-grid,
+        .anatomy {
+          grid-template-columns: 1fr;
+        }
+
+        .router-head {
+          display: none;
+        }
+
+        .router-row {
+          grid-template-columns: 1fr;
+          gap: 4px;
+          padding: 16px 18px;
+        }
+
+        .router-arrow {
+          display: none;
+        }
+
+        .router-note {
+          grid-column: 1;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .nav {
+          padding: 0 20px;
+        }
+
+        .nav nav {
+          gap: 16px;
+        }
+
+        .pkg-table thead {
+          display: none;
+        }
+
+        .pkg-table,
+        .pkg-table tbody,
+        .pkg-table tr,
+        .pkg-table td {
+          display: block;
+        }
+
+        .pkg-table tr {
+          padding: 14px 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .pkg-table td {
+          padding: 3px 0;
+          border: none;
+        }
+
+        td.mono {
+          white-space: normal;
+        }
+      }
+    </style>
+  </body>
+</html>

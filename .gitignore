@@ -5,6 +5,11 @@ dist/
 /.jeju-dev/
 /examples/*/runs/
 /examples/*/.jeju-dev/
+website/node_modules/
+website/.astro/
+website/dist/
+website/src/data/catalog.generated.json
+website/public/registry/index.yaml
 __pycache__/
 *.pyc
 /examples/hotpotqa-agent/datasets/*.jsonl
