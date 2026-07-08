@@ -237,7 +237,7 @@ const coastPath =
       content="Jeju gives your coding agent bounded, cheap, auditable workers. Install one skill; your agent routes writing work to pinned specialists and files evidence for every run."
     />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <meta name="theme-color" content="#f6f1e6" />
+    <meta name="theme-color" content="#fcfcfb" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Jeju — hire a workforce for your coding agent" />
     <meta
@@ -250,7 +250,7 @@ const coastPath =
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Sometype+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:ital,wght@0,400..900;1,400..900&family=Sometype+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap"
       rel="stylesheet"
     />
     <script is:inline>
@@ -661,7 +661,7 @@ const coastPath =
 
     <footer>
       <p class="signature">
-        Make better products.
+        Make useful things, with care.
         — <a href="https://rickoyu.com">Ricko Yu</a>
       </p>
       <nav aria-label="Project links">
@@ -752,21 +752,21 @@ const coastPath =
 
     <style>
       :root {
-        /* warm paper neutrals, tinted toward the tangerine hue */
-        --bg: oklch(96.5% 0.01 85);
-        --panel: oklch(93.5% 0.013 85);
-        --fg: oklch(24% 0.015 60);
-        --muted: oklch(42% 0.02 60);
-        --faint: oklch(52% 0.025 60);
-        --line: oklch(87% 0.014 80);
-        --line-strong: oklch(78% 0.018 80);
+        /* near-white swiss neutrals, barely warm */
+        --bg: oklch(99% 0.002 90);
+        --panel: oklch(96.5% 0.003 90);
+        --fg: oklch(21% 0.006 70);
+        --muted: oklch(43% 0.008 65);
+        --faint: oklch(53% 0.01 65);
+        --line: oklch(90% 0.004 85);
+        --line-strong: oklch(82% 0.006 85);
         /* hallabong tangerine (text-safe) + fill for buttons + sea */
         --accent: oklch(55% 0.145 45);
         --accent-fill: oklch(67% 0.165 48);
         --accent-fill-hover: oklch(62% 0.16 46);
         --accent-ink: oklch(20% 0.03 48);
-        --sea: oklch(48% 0.09 195);
-        --sans: "Bricolage Grotesque", "PingFang SC", sans-serif;
+        --sea: oklch(46% 0.09 195);
+        --sans: "Schibsted Grotesk", "PingFang SC", sans-serif;
         --mono: "Sometype Mono", ui-monospace, monospace;
         --w: min(1180px, 100% - 48px);
         --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -780,7 +780,6 @@ const coastPath =
         background: var(--bg);
         color: var(--fg);
         font-family: var(--sans);
-        font-optical-sizing: auto;
         font-size: clamp(15.5px, 0.35vw + 14.4px, 17px);
         line-height: 1.58;
         scroll-behavior: smooth;
@@ -926,7 +925,7 @@ const coastPath =
         align-items: center;
         gap: 10px;
         margin: 0 0 20px;
-        color: var(--accent);
+        color: var(--faint);
         font-family: var(--mono);
         font-size: 0.72rem;
         font-weight: 500;
@@ -934,7 +933,7 @@ const coastPath =
         text-transform: uppercase;
       }
 
-      /* tiny contour-ring badge, echoing the favicon */
+      /* tiny contour-ring badge, printed gray like the map */
       .index::before {
         content: "";
         flex: none;
@@ -943,11 +942,11 @@ const coastPath =
         border-radius: 50%;
         background: radial-gradient(
           circle,
-          var(--accent) 0 2.1px,
+          oklch(50% 0.01 65) 0 2.1px,
           transparent 2.6px 4.8px,
-          oklch(55% 0.145 45 / 0.55) 5.2px 6.2px,
+          oklch(50% 0.01 65 / 0.55) 5.2px 6.2px,
           transparent 6.7px 9.4px,
-          oklch(55% 0.145 45 / 0.32) 9.8px 10.8px,
+          oklch(50% 0.01 65 / 0.32) 9.8px 10.8px,
           transparent 11.2px
         );
       }
@@ -957,7 +956,7 @@ const coastPath =
       }
 
       .block h2 {
-        font-size: clamp(1.9rem, 3.8vw, 2.9rem);
+        font-size: clamp(1.7rem, 3.2vw, 2.5rem);
       }
 
       .block-lede {
@@ -988,25 +987,24 @@ const coastPath =
         mask-image: radial-gradient(110% 95% at 74% 42%, black 42%, transparent 76%);
       }
 
+      /* contours print like a real map: neutral gray hairlines on white */
       .ring {
         fill: none;
-        stroke: var(--accent);
-        stroke-opacity: 0.2;
+        stroke: oklch(72% 0.006 85);
+        stroke-opacity: 0.55;
         stroke-width: 1;
       }
 
       .ring-inner {
-        stroke-opacity: 0.38;
+        stroke-opacity: 0.9;
       }
 
       .summit {
-        fill: var(--accent);
-        opacity: 0.55;
+        fill: oklch(60% 0.01 70);
       }
 
       .summit-label {
-        fill: var(--accent);
-        opacity: 0.55;
+        fill: oklch(60% 0.01 70);
         font-family: var(--mono);
         font-size: 11px;
         letter-spacing: 0.08em;
@@ -1026,10 +1024,10 @@ const coastPath =
       }
 
       .hero h1 {
-        font-size: clamp(2.7rem, 5.6vw, 4.6rem);
+        font-size: clamp(2.4rem, 4.4vw, 3.8rem);
         font-weight: 700;
-        letter-spacing: -0.03em;
-        line-height: 0.99;
+        letter-spacing: -0.025em;
+        line-height: 1.02;
       }
 
       .hero .lede {
@@ -1051,7 +1049,7 @@ const coastPath =
         display: inline-block;
         padding: 11px 22px;
         border: 1px solid transparent;
-        border-radius: 3px;
+        border-radius: 2px;
         font-size: 0.9rem;
         font-weight: 600;
         transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -1102,7 +1100,7 @@ const coastPath =
         max-width: 920px;
         margin: clamp(44px, 6vw, 72px) 0 0;
         border: 1px solid var(--line);
-        border-radius: 5px;
+        border-radius: 3px;
         background: var(--bg);
         box-shadow: 0 24px 48px -28px oklch(30% 0.03 60 / 0.5);
         overflow: hidden;
@@ -1282,7 +1280,7 @@ const coastPath =
         min-width: 0;
         padding: 12px 16px;
         border: 1px solid var(--line);
-        border-radius: 3px;
+        border-radius: 2px;
         background: var(--panel);
       }
 
@@ -1380,7 +1378,7 @@ const coastPath =
         margin: 0;
         padding: 20px 22px;
         border: 1px solid var(--line);
-        border-radius: 4px;
+        border-radius: 2px;
         background: var(--panel);
         overflow-x: auto;
       }
@@ -1458,7 +1456,7 @@ const coastPath =
         margin: 0;
         padding: 20px 22px;
         border: 1px solid var(--line);
-        border-radius: 4px;
+        border-radius: 2px;
         background: var(--panel);
         overflow-x: auto;
       }
@@ -1502,7 +1500,7 @@ const coastPath =
       .router {
         margin-top: clamp(36px, 5vw, 56px);
         border: 1px solid var(--line);
-        border-radius: 4px;
+        border-radius: 2px;
         overflow: hidden;
       }
 
@@ -1589,7 +1587,7 @@ const coastPath =
         gap: 1px;
         margin-top: clamp(36px, 5vw, 56px);
         border: 1px solid var(--line);
-        border-radius: 4px;
+        border-radius: 2px;
         overflow: hidden;
         background: var(--line);
       }
@@ -1636,7 +1634,7 @@ const coastPath =
         margin: 0;
         padding: 18px 20px;
         border: 1px solid var(--line);
-        border-radius: 4px;
+        border-radius: 2px;
         background: var(--panel);
         overflow-x: auto;
       }
@@ -1855,7 +1853,7 @@ const coastPath =
         position: relative;
         padding: 16px 22px 14px;
         border: 1px solid var(--line);
-        border-radius: 5px;
+        border-radius: 3px;
         background: oklch(98.5% 0.007 90);
         box-shadow: 0 20px 44px -32px oklch(30% 0.03 60 / 0.6);
         font-family: var(--mono);
