@@ -661,8 +661,9 @@ const coastPath =
 
     <footer>
       <p class="signature">
-        Make useful things, with care.
-        — <a href="https://rickoyu.com">Ricko Yu</a>
+        <span class="motto">Make useful things, with care</span>
+        <span class="sig-slash" aria-hidden="true">/</span>
+        <a class="byline" href="https://rickoyu.com">Ricko Yu</a>
       </p>
       <nav aria-label="Project links">
         <a href="https://github.com/cosmtrek/jeju">GitHub</a>
@@ -1743,20 +1744,39 @@ const coastPath =
       }
 
       .signature {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 6px 12px;
         margin: 0;
-        color: var(--faint);
-        font-size: 0.88rem;
-        line-height: 1.65;
       }
 
-      .signature a {
+      .sig-slash {
+        color: var(--line-strong);
+        font-family: var(--mono);
+        font-size: 0.85rem;
+      }
+
+      .signature .motto {
         color: var(--fg);
-        font-weight: 600;
-        border-bottom-color: var(--line-strong);
+        font-size: 0.95rem;
+        font-weight: 500;
+        line-height: 1.5;
       }
 
-      .signature a:hover {
-        border-bottom-color: var(--accent);
+      .signature .byline {
+        border: none;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        font-weight: 500;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        transition: color 0.15s;
+      }
+
+      .signature .byline:hover {
+        color: var(--accent);
       }
 
       footer nav {
