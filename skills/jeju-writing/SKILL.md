@@ -3,7 +3,7 @@ name: jeju-writing
 description: Use Jeju writing packages as specialized workers for article review, Chinese prose polishing, full rewrites, and translation. Use when the user asks to review a draft, improve Chinese writing, rewrite an article, translate text, or delegate writing work to bounded Jeju agents.
 metadata:
   short-description: Route writing tasks to Jeju workers
-  version: "0.3.0"
+  version: "0.3.1"
 ---
 
 # Jeju Writing
@@ -27,7 +27,7 @@ index and update this skill before publishing.
 Before running a worker:
 
 ```bash
-jeju --version
+jeju version
 test -n "$DEEPSEEK_API_KEY"
 ```
 
