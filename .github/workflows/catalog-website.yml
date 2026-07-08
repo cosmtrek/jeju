@@ -88,58 +88,28 @@ jobs:
           fi
 
       - name: Ensure Cloudflare Pages project
-        id: pages
         if: github.ref == 'refs/heads/master' && steps.cf.outputs.enabled == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          list_projects() {
-            npx --yes wrangler@latest pages project list --json
-          }
-          project_exists() {
-            node -e '
-              const fs = require("node:fs");
-              const data = JSON.parse(fs.readFileSync(0, "utf8"));
-              const projects = Array.isArray(data) ? data : data.result || [];
-              process.exit(projects.some((project) => project.name === "jeju") ? 0 : 1);
-            '
-          }
-          project_host() {
-            node -e '
-              const fs = require("node:fs");
-              const data = JSON.parse(fs.readFileSync(0, "utf8"));
-              const projects = Array.isArray(data) ? data : data.result || [];
-              const project = projects.find((item) => item.name === "jeju");
-              const domains = project?.domains || [];
-              const host = project?.subdomain || domains.find((domain) => domain.endsWith(".pages.dev")) || "";
-              if (!host) process.exit(1);
-              process.stdout.write(String(host).replace(/^https?:\/\//, "").replace(/\/$/, ""));
-            '
-          }
-
-          list_projects > /tmp/cf-pages-projects.json
-          if project_exists < /tmp/cf-pages-projects.json; then
+          if npx --yes wrangler@latest pages project create jeju --production-branch=master > /tmp/wrangler-project-create.log 2>&1; then
+            cat /tmp/wrangler-project-create.log
+          elif grep -q "A project with this name already exists" /tmp/wrangler-project-create.log; then
             echo "Cloudflare Pages project jeju already exists."
           else
-            npx --yes wrangler@latest pages project create jeju --production-branch=master
-            list_projects > /tmp/cf-pages-projects.json
+            cat /tmp/wrangler-project-create.log >&2
+            exit 1
           fi
-          host="$(project_host < /tmp/cf-pages-projects.json)"
-          echo "host=$host" >> "$GITHUB_OUTPUT"
-          echo "Cloudflare Pages host: https://$host" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fetch published registry baseline
         if: github.event_name != 'pull_request'
-        env:
-          PAGES_HOST: ${{ steps.pages.outputs.host }}
         run: |
           set -euo pipefail
-          curl -fsSL https://jeju.rickoyu.com/registry/index.yaml -o /tmp/jeju-published-index.yaml && exit 0
-          if [ -n "$PAGES_HOST" ]; then
-            curl -fsSL "https://$PAGES_HOST/registry/index.yaml" -o /tmp/jeju-published-index.yaml || true
-          fi
+          curl --retry 3 --retry-delay 3 --retry-all-errors -fsSL \
+            https://jeju.rickoyu.com/registry/index.yaml \
+            -o /tmp/jeju-published-index.yaml || true
 
       - name: Build website
         run: npm run build
@@ -159,11 +129,9 @@ jobs:
 
       - name: Smoke test production
         if: github.ref == 'refs/heads/master' && steps.cf.outputs.enabled == 'true'
-        env:
-          PAGES_HOST: ${{ steps.pages.outputs.host }}
         run: |
           set -euo pipefail
-          base="https://$PAGES_HOST"
+          base="https://jeju.rickoyu.com"
           for url in \
             "$base/" \
             "$base/registry/index.yaml"; do
