@@ -2,9 +2,27 @@
 import packages from "../data/catalog.generated.json";
 
 const registryUrl = "https://jeju.rickoyu.com/registry/index.yaml";
+const siteUrl = "https://jeju.rickoyu.com/";
 
 const installCmd = "npx skills add cosmtrek/jeju --skill jeju-writing -g";
 const agentPrompt = "Review ~/drafts/launch-post.md for publish readiness.";
+const viewCmd = "jeju view 20260708-a41f";
+
+const builderInstall = "npx skills add cosmtrek/jeju --skill jeju-agent-builder -g";
+const builderAsk = "Turn my changelog drafting into a jeju agent.";
+const builderTree = `changelog-drafter/
+├── agents/
+│   └── changelog-drafter.agent.yaml
+├── prompts/
+│   └── changelog-drafter.md
+├── workspace/
+├── eval/                # smoke evaluator
+└── README.md
+
+$ jeju validate agents/changelog-drafter.agent.yaml
+✓ manifest ok · readOnly · maxSteps 16
+$ jeju run … "Draft the changelog for last week."
+✓ run 20260708-c7e2 · $0.002`;
 
 const manifestSnippet = `kind: Agent
 metadata:
@@ -53,18 +71,34 @@ const problems = [
   {
     num: "a",
     title: "Frontier models doing grunt work",
-    body: "When your orchestrator writes, rewrites, and translates everything itself, you pay frontier prices for work a smaller model does fine. Jeju splits the bill: your model plans and reviews, cheap specialists execute.",
+    body: "Your orchestrator rewrites and translates at frontier prices. Jeju splits the bill: your model plans and reviews; cheap specialists execute.",
   },
   {
     num: "b",
     title: "Prompted behavior drifts",
-    body: "A prompt is advice — the same instructions behave differently across sessions and models. A Jeju worker is a manifest: pinned model, temperature, prompt, tools, step limits. Identical next month.",
+    body: "A prompt is advice — it behaves differently across sessions and models. A manifest is pinned: model, temperature, tools, limits. Identical next month.",
   },
   {
     num: "c",
     title: "Chat logs are not evidence",
-    body: "When delegated work goes wrong, a conversation tells you nothing. Every Jeju run files trajectory.jsonl and a report — model calls, tool calls, policy decisions — and every tool call passes a policy gate first.",
+    body: "When delegated work goes wrong, a conversation tells you nothing. A run files trajectory.jsonl — every tool call gated, every decision recorded.",
   },
+];
+
+const pipeline = [
+  { label: "agent.yaml", sub: "declare the worker" },
+  { label: "compile", sub: "validate & pin" },
+  { label: "run", sub: "every call policy-gated" },
+  { label: "trajectory.jsonl", sub: "the canonical record" },
+  { label: "jeju view", sub: "render the report" },
+];
+
+const reportRows = [
+  { kind: "model.call", label: "plan review pass", w: 58, cls: "", state: "" },
+  { kind: "tool.call", label: "read launch-post.md", w: 16, cls: "is-tool", state: "allow" },
+  { kind: "tool.call", label: "read ../notes/ideas.md", w: 7, cls: "is-deny", state: "deny" },
+  { kind: "model.call", label: "compose findings", w: 86, cls: "", state: "" },
+  { kind: "final.answer", label: "editorial_review", w: 11, cls: "is-final", state: "schema ok" },
 ];
 
 const routes = [
@@ -130,7 +164,66 @@ const registryEntry = `packages:
         source: github:cosmtrek/jeju//catalog/writing/article-editor?ref=<commit>
         digest: sha256:966d…6aff`;
 
+const replayJson = `{ "verdict": "needs_revision", "findings": 3 }`;
+
 const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
+
+// --- tiny build-time highlighters (keys only, restraint on purpose) ---
+const esc = (s: string) =>
+  s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+const hlYaml = (src: string) =>
+  src
+    .split("\n")
+    .map((line) => {
+      const m = line.match(/^(\s*)([\w-]+)(:)(.*)$/);
+      if (!m) return esc(line);
+      const rest = esc(m[4]).replace(/#.*$/, (c) => `<span class="hc">${c}</span>`);
+      return `${m[1]}<span class="hk">${m[2]}</span>:${rest}`;
+    })
+    .join("\n");
+
+const hlJson = (src: string) =>
+  esc(src).replace(/"([^"]+)":/g, '<span class="hk">"$1"</span>:');
+
+// --- Hallasan contour lines, generated at build time ---
+// One wobbly base shape, scaled per ring, so contours nest like real topography.
+function islandContours(cx: number, cy: number, radii: number[]) {
+  const points = 12;
+  let s = 20260708;
+  const rand = () => {
+    s = (s * 16807) % 2147483647;
+    return s / 2147483647;
+  };
+  const mult = Array.from({ length: points }, () => 1 + (rand() - 0.5) * 0.44);
+  return radii.map((r) => {
+    const jitter = 1 + (rand() - 0.5) * 0.05;
+    const pts = mult.map((m, i) => {
+      const a = (i / points) * Math.PI * 2;
+      return [
+        cx + Math.cos(a) * r * m * jitter * 1.35,
+        cy + Math.sin(a) * r * m * jitter,
+      ];
+    });
+    let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < points; i++) {
+      const p0 = pts[(i - 1 + points) % points];
+      const p1 = pts[i];
+      const p2 = pts[(i + 1) % points];
+      const p3 = pts[(i + 2) % points];
+      const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+      const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+      d += ` C ${c1[0].toFixed(1)} ${c1[1].toFixed(1)}, ${c2[0].toFixed(1)} ${c2[1].toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+    return d + " Z";
+  });
+}
+const contourPaths = islandContours(950, 300, [42, 88, 142, 204, 274, 352]);
+
+// gentle coastline wave for the footer divider
+const coastPath =
+  "M 0 11 Q 30 4, 60 11 " +
+  Array.from({ length: 19 }, (_, i) => `T ${120 + i * 60} 11`).join(" ");
 ---
 
 <!doctype html>
@@ -143,21 +236,41 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       name="description"
       content="Jeju gives your coding agent bounded, cheap, auditable workers. Install one skill; your agent routes writing work to pinned specialists and files evidence for every run."
     />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#f6f1e6" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Jeju — hire a workforce for your coding agent" />
+    <meta
+      property="og:description"
+      content="Bounded, cheap, auditable workers for your coding agent. One skill to install; evidence filed for every run."
+    />
+    <meta property="og:url" content={siteUrl} />
+    <meta property="og:image" content={`${siteUrl}og.png`} />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Sometype+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap"
       rel="stylesheet"
     />
+    <script is:inline>
+      // Gate the replay animation before first paint: no JS or reduced motion
+      // means the finished run renders statically.
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        document.documentElement.classList.add("replay-anim");
+      }
+    </script>
   </head>
   <body>
     <header class="nav">
-      <a class="wordmark" href="#top">jeju</a>
+      <a class="wordmark" href="#top">jeju<span class="wordmark-dot" aria-hidden="true"></span></a>
       <nav>
-        <a href="#problem">Why</a>
-        <a href="#product">Product</a>
-        <a href="#skill">First recipe</a>
-        <a href="#internals">Under the hood</a>
+        <a href="#product">What it is</a>
+        <a href="#pipeline">Pipeline</a>
+        <a href="#quickstart">Quickstart</a>
+        <a href="#builder">Build</a>
+        <a href="#skill">Writing team</a>
+        <a href="#registry">Registry</a>
         <a href="https://github.com/cosmtrek/jeju">GitHub ↗</a>
       </nav>
     </header>
@@ -165,57 +278,63 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
     <main id="top">
       <!-- ================= HERO ================= -->
       <section class="hero">
-        <p class="tag" data-reveal>Open-source agent runtime — Go, local-first</p>
-        <h1 data-reveal>
-          Hire a workforce<br />for your coding agent.
-        </h1>
-        <p class="lede" data-reveal>
-          Jeju is a local-first runtime that turns agents into installable
-          workers — pinned manifest, policy-gated workspace, evidence for every
-          run. Your agent plans; cheap bounded specialists execute; you audit.
-        </p>
-        <div class="cta" data-reveal>
-          <a class="btn btn-solid" href="#install">Install the skill</a>
-          <a class="btn btn-ghost" href="https://github.com/cosmtrek/jeju">Star on GitHub</a>
-        </div>
+        <svg
+          class="contours"
+          viewBox="0 0 1440 620"
+          preserveAspectRatio="xMidYMid slice"
+          aria-hidden="true"
+        >
+          {contourPaths.map((d, i) => (
+            <path d={d} class={i < 2 ? "ring ring-inner" : "ring"} />
+          ))}
+          <path class="summit" d="M 950 293 l 5.5 10 h -11 z" />
+          <text class="summit-label" x="963" y="303">1947</text>
+        </svg>
 
-        <div class="terminal" id="install" data-reveal>
-          <div class="terminal-row">
-            <div class="terminal-label">
-              <span>shell</span>
-              <button type="button" data-copy>copy</button>
-            </div>
-            <pre><code><span class="prompt">$</span> {installCmd}</code></pre>
+        <div class="hero-copy">
+          <p class="tag" data-reveal>Open-source agent runtime — Go, local-first</p>
+          <h1 data-reveal>Hire a workforce<br />for your coding agent.</h1>
+          <p class="lede" data-reveal>
+            Jeju turns agents into installable workers — pinned manifest,
+            policy-gated workspace, evidence for every run. Your agent plans;
+            cheap bounded specialists execute; you audit.
+          </p>
+          <div class="cta" data-reveal>
+            <a class="btn btn-solid" href="#quickstart">Get started</a>
+            <a class="btn btn-ghost" href="https://github.com/cosmtrek/jeju">Star on GitHub</a>
           </div>
-          <div class="terminal-row">
-            <div class="terminal-label"><span>then, in your coding agent</span></div>
-            <pre><code><span class="prompt">›</span> {agentPrompt}</code></pre>
-          </div>
-          <p class="terminal-foot">
-            Works with Claude Code, Codex, Cursor and 20+ agents. The skill
-            bootstraps the Jeju runtime on first use — you only bring a
-            <code>DEEPSEEK_API_KEY</code>.
+          <p class="proof" data-reveal>
+            Dogfooded, not demoed — the four launch workers run the author's
+            own writing pipeline.
           </p>
         </div>
-      </section>
 
-      <!-- ================= PROBLEM ================= -->
-      <section class="block" id="problem">
-        <p class="index" data-reveal>01 — The problem</p>
-        <h2 data-reveal>Delegation without a runtime is hoping</h2>
-        <div class="cols" data-reveal>
-          {problems.map((p) => (
-            <article>
-              <h3><span class="col-key">{p.num}.</span> {p.title}</h3>
-              <p>{p.body}</p>
-            </article>
-          ))}
-        </div>
+        <figure class="replay" data-reveal aria-label="Replay of a Jeju run: a review request is routed to a worker, tool calls pass the policy gate, and the run files evidence.">
+            <figcaption class="replay-bar">
+              <span class="replay-pip" aria-hidden="true"></span>
+              <span>run replay</span>
+              <span class="replay-bar-right">jeju-writing</span>
+            </figcaption>
+            <div class="replay-body" data-replay>
+              <p class="rl rl-prompt">
+                <span class="rp">›&nbsp;</span><span class="type" data-text={agentPrompt}>{agentPrompt}</span><span class="caret" aria-hidden="true"></span>
+              </p>
+              <p class="rl rl-dim">jeju-writing · routed → writing/article-editor@0.1.0</p>
+              <p class="rl rl-cmd"><span class="rp-sh">$</span> jeju run p:writing/article-editor@0.1.0</p>
+              <p class="rl rl-dim">run 20260708-a41f · deepseek-v4-pro · workspace ~/drafts · readOnly</p>
+              <p class="rl rl-ev"><span class="ev-k">tool</span> read&nbsp;&nbsp;launch-post.md <span class="ok">→ allow</span></p>
+              <p class="rl rl-ev"><span class="ev-k">tool</span> read&nbsp;&nbsp;../notes/ideas.md <span class="deny">→ deny · outside workspace</span></p>
+              <p class="rl rl-ev"><span class="ev-k">model</span> deepseek-v4-pro · review pass</p>
+              <p class="rl rl-json" set:html={hlJson(replayJson)} />
+              <p class="rl rl-done"><span class="ok">✓</span> evidence filed — trajectory.jsonl · report.html</p>
+              <p class="rl rl-cmd"><span class="rp-sh">$</span> {viewCmd}</p>
+            </div>
+          </figure>
       </section>
 
       <!-- ================= PRODUCT ================= -->
       <section class="block" id="product">
-        <p class="index" data-reveal>02 — What Jeju is</p>
+        <p class="index" data-reveal>01 — What Jeju is</p>
         <h2 data-reveal>An agent is a file.<br />A run is a record.</h2>
         <p class="block-lede" data-reveal>
           Jeju compiles a YAML manifest into a running worker. Everything the
@@ -224,7 +343,7 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         </p>
 
         <div class="anatomy" data-reveal>
-          <pre class="anatomy-yaml"><code>{manifestSnippet}</code></pre>
+          <pre class="anatomy-yaml"><code set:html={hlYaml(manifestSnippet)} /></pre>
           <div class="pillars">
             {pillars.map((p) => (
               <article class="pillar">
@@ -236,12 +355,205 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         </div>
       </section>
 
+      <!-- ================= PIPELINE ================= -->
+      <section class="block" id="pipeline">
+        <p class="index" data-reveal>02 — From manifest to report</p>
+        <h2 data-reveal>One YAML in,<br />one report out</h2>
+        <p class="block-lede" data-reveal>
+          Everything in between is enforced, not suggested: the manifest
+          compiles into a bounded worker, every tool call passes the policy
+          gate, and the whole run lands in one JSONL file
+          that <code>jeju view</code> renders as a report.
+        </p>
+
+        <ol class="flow" data-reveal>
+          {pipeline.map((s) => (
+            <li class="flow-node">
+              <span class="flow-dot" aria-hidden="true"></span>
+              <span class="flow-label">{s.label}</span>
+              <span class="flow-sub">{s.sub}</span>
+            </li>
+          ))}
+        </ol>
+
+        <div class="report-wrap" data-reveal>
+          <div class="report" aria-label="Example of the report jeju view renders from a run's trajectory">
+            <div class="report-head">
+              <span class="report-title">report · run 20260708-a41f</span>
+              <span>writing/article-editor@0.1.0</span>
+            </div>
+            <div class="report-sum">
+              <span>verdict <b class="deny">needs_revision</b></span>
+              <span>model <b>deepseek-v4-pro</b></span>
+              <span>access <b>readOnly</b></span>
+              <span>cost <b>$0.004</b></span>
+            </div>
+            <div class="report-rows">
+              {reportRows.map((r) => (
+                <div class="report-row">
+                  <span class="report-kind">{r.kind}</span>
+                  <span class="report-label">{r.label}</span>
+                  <span class={`report-bar ${r.cls}`} style={`--w:${r.w}%`} aria-hidden="true"></span>
+                  <span class={`report-state ${r.state === "deny" ? "deny" : "ok"}`}>{r.state}</span>
+                </div>
+              ))}
+            </div>
+            <div class="report-foot">12 events · 8.4k tokens · trajectory.jsonl saved</div>
+            <svg class="stamp" viewBox="0 0 120 120" aria-hidden="true">
+              <defs>
+                <path id="stamp-arc" d="M 60 15 a 45 45 0 1 1 -0.01 0" fill="none" />
+              </defs>
+              <circle cx="60" cy="60" r="57" fill="none" stroke="currentColor" stroke-width="2.5" />
+              <circle cx="60" cy="60" r="37" fill="none" stroke="currentColor" stroke-width="1" />
+              <text font-size="10" letter-spacing="2.2">
+                <textPath href="#stamp-arc">EVIDENCE FILED · SHA256 VERIFIED · JEJU ·</textPath>
+              </text>
+              <path d="M 60 48 l 7.5 13 h -15 z" fill="currentColor" />
+              <text x="60" y="79" text-anchor="middle" font-size="9" letter-spacing="1.6">1947 M</text>
+            </svg>
+          </div>
+          <div class="report-note">
+            <p>
+              Not a transcript — a record. <code>jeju view</code> renders the
+              run's JSONL into this report: every model call, every gated tool
+              call, every artifact, with cost attached. Failed runs exit
+              non-zero, and the report says why.
+            </p>
+          </div>
+        </div>
+      </section>
+      <!-- ================= PROBLEM ================= -->
+      <section class="block" id="problem">
+        <p class="index" data-reveal>03 — Why a runtime</p>
+        <h2 data-reveal>Delegation without a runtime is hoping</h2>
+        <div class="cols" data-reveal>
+          {problems.map((p) => (
+            <article>
+              <h3><span class="col-key">{p.num}.</span> {p.title}</h3>
+              <p>{p.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <!-- ================= QUICKSTART ================= -->
+      <section class="block quickstart" id="quickstart">
+        <p class="index" data-reveal>04 — Quickstart · 60 seconds</p>
+        <h2 data-reveal>One install, one sentence,<br />one audited run</h2>
+        <p class="block-lede" data-reveal>
+          All you need: a coding agent (Claude Code, Codex, Cursor — 20+
+          work), a <code>DEEPSEEK_API_KEY</code>, and macOS or Linux. The
+          skill bootstraps the Jeju runtime the first time your agent uses
+          it; there is nothing else to set up.
+        </p>
+        <ol class="steps" data-reveal>
+          <li>
+            <div class="step-info">
+              <h3><span class="step-n" aria-hidden="true">01</span>Install the skill</h3>
+              <p>
+                A skill is just instructions. This one teaches your agent how
+                to hire Jeju workers: which one fits a request, how to install
+                it, how to run it, and what evidence to hand back to you.
+              </p>
+            </div>
+            <div class="step-do">
+              <div class="step-code" data-copy-scope>
+                <pre><code>{installCmd}</code></pre>
+                <button type="button" data-copy>copy</button>
+              </div>
+              <p class="step-note">→ registers jeju-writing with your coding agent</p>
+            </div>
+          </li>
+          <li>
+            <div class="step-info">
+              <h3><span class="step-n" aria-hidden="true">02</span>Say what you need</h3>
+              <p>
+                No new syntax — ask the way you already talk to your agent. It
+                picks the cheapest capable worker, installs the package pinned
+                by commit and sha256, and runs it read-only against your
+                workspace. Simple asks skip review entirely.
+              </p>
+            </div>
+            <div class="step-do">
+              <div class="step-code">
+                <pre><code><span class="rp">›</span> {agentPrompt}</code></pre>
+              </div>
+              <p class="step-note">→ routes to writing/article-editor@0.1.0 · digest verified</p>
+            </div>
+          </li>
+          <li>
+            <div class="step-info">
+              <h3><span class="step-n" aria-hidden="true">03</span>Audit the evidence</h3>
+              <p>
+                Every delegated step prints its run id. The report shows each
+                model call, what was read, what was denied, and what it
+                cost — the same <code>trajectory.jsonl</code> you saw above.
+                Failed runs exit non-zero, so your agent notices too.
+              </p>
+            </div>
+            <div class="step-do">
+              <div class="step-code">
+                <pre><code><span class="rp-sh">$</span> {viewCmd}</code></pre>
+              </div>
+              <p class="step-note">→ opens the run report in your browser</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ================= BUILDER ================= -->
+      <section class="block" id="builder">
+        <p class="index" data-reveal>05 — Build your own</p>
+        <h2 data-reveal>Your agent builds<br />the next worker</h2>
+        <p class="block-lede" data-reveal>
+          Ready-made workers are the fast path. The base skill
+          is <code>jeju-agent-builder</code>: describe a repeated workflow, and
+          your agent turns it into a new bounded worker — or tells you a plain
+          script would do.
+        </p>
+
+        <div class="builder-grid" data-reveal>
+          <div class="builder-steps">
+            <div class="step-code">
+              <pre><code><span class="rp">›</span> {builderAsk}</code></pre>
+            </div>
+            <ol class="builder-list">
+              <li>
+                <b>Decide fit.</b> Not everything deserves an agent. If a
+                deterministic script is enough, the skill says so and stops.
+              </li>
+              <li>
+                <b>Scaffold the bundle.</b> Manifest, prompt, workspace,
+                README — with a model tier, tools, and step limits sized to
+                the task.
+              </li>
+              <li>
+                <b>Default to read-only.</b> Writes, shell, or network are
+                declared only when the workflow demands them, and gated by
+                policy either way.
+              </li>
+              <li>
+                <b>Validate and smoke-run.</b> <code>jeju validate</code>, one
+                real run, and the report to prove the worker behaves before
+                you rely on it.
+              </li>
+            </ol>
+            <div class="step-code" data-copy-scope>
+              <pre><code>{builderInstall}</code></pre>
+              <button type="button" data-copy>copy</button>
+            </div>
+          </div>
+          <pre class="builder-tree"><code>{builderTree}</code></pre>
+        </div>
+      </section>
+
       <!-- ================= FIRST RECIPE ================= -->
       <section class="block" id="skill">
-        <p class="index" data-reveal>03 — First recipe</p>
+        <p class="index" data-reveal>06 — First recipe</p>
         <h2 data-reveal>The writing team</h2>
         <p class="block-lede" data-reveal>
-          The first thing shipped on Jeju: four catalog workers behind one
+          The first thing shipped on Jeju — and the builder loop's first
+          product: four catalog workers behind one
           skill. <code>jeju-writing</code> turns your agent into a dispatcher —
           plain language in, the cheapest capable worker out. A review step is
           added only when stakes call for one; simple requests never pay for it.
@@ -281,24 +593,25 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
           </div>
           <div class="demo-col">
             <p class="demo-label">final answer — <span class="ok">schema-validated</span></p>
-            <pre><code>{reviewOut}</code></pre>
+            <pre><code set:html={hlJson(reviewOut)} /></pre>
           </div>
         </div>
       </section>
 
       <!-- ================= UNDER THE HOOD ================= -->
-      <section class="block" id="internals">
-        <p class="index" data-reveal>04 — Under the hood</p>
+      <section class="block" id="registry">
+        <p class="index" data-reveal>07 — The open registry</p>
         <h2 data-reveal>Pinned, verified, immutable</h2>
         <p class="block-lede" data-reveal>
           The workers are packages resolved from a static registry — no
           accounts, no API. Each version pins a commit and a sha256 digest,
           checked on install. Published versions never change; content changes
-          require a version bump.
+          require a version bump. The catalog starts with four writing
+          workers — the shelf is open.
         </p>
 
         <div class="internals-grid" data-reveal>
-          <pre class="registry-yaml"><code>{registryEntry}</code></pre>
+          <pre class="registry-yaml"><code set:html={hlYaml(registryEntry)} /></pre>
           <div class="internals-note">
             <p>
               The skill points <code>JEJU_REGISTRY_INDEX</code> at{" "}
@@ -338,26 +651,31 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       </section>
     </main>
 
+    <div class="coast" aria-hidden="true">
+      <svg viewBox="0 0 1200 22" preserveAspectRatio="none">
+        <path d={coastPath} fill="none" stroke="currentColor" stroke-width="1.5" />
+        <circle cx="600" cy="11" r="3.5" fill="var(--accent)" />
+      </svg>
+      <span class="coast-label">33.36° N · 126.53° E</span>
+    </div>
+
     <footer>
-      <p>
-        Built by <a href="https://rickoyu.com">Ricko Yu</a> — cosmtrek, author
-        of <a href="https://github.com/air-verse/air">air</a>. These workers run
-        his own blog's writing workflow.
+      <p class="signature">
+        Make better products.
+        — <a href="https://rickoyu.com">Ricko Yu</a>
       </p>
       <nav aria-label="Project links">
         <a href="https://github.com/cosmtrek/jeju">GitHub</a>
-        <a href="https://github.com/cosmtrek/jeju/blob/master/docs/agent-package.md">Package docs</a>
-        <a href="https://github.com/cosmtrek/jeju/blob/master/docs/agent-manifest.md">Manifest docs</a>
-        <a href="https://rickoyu.com">Blog</a>
-        <a href={registryUrl}>Registry index</a>
+        <a href="https://github.com/cosmtrek/jeju/tree/master/docs">Docs</a>
+        <a href={registryUrl}>Registry</a>
       </nav>
     </footer>
 
     <script>
-      // Copy button: copies the npx install command.
+      // ---- copy buttons ----
       for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
         btn.addEventListener("click", async () => {
-          const code = btn.closest(".terminal-row")?.querySelector("code");
+          const code = btn.closest("[data-copy-scope]")?.querySelector("code");
           if (!code) return;
           const text = code.innerText.replace(/^[$›]\s*/, "");
           try {
@@ -374,7 +692,7 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         });
       }
 
-      // Scroll reveal
+      // ---- scroll reveal ----
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const targets = document.querySelectorAll("[data-reveal]");
       if (reduced || !("IntersectionObserver" in window)) {
@@ -393,21 +711,65 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         );
         for (const el of targets) io.observe(el);
       }
+
+      // ---- hero run replay ----
+      // Types the request, then streams the run's events, then loops.
+      // Without JS or with reduced motion the finished run renders statically
+      // (the `replay-anim` class is only added when animation is wanted).
+      const replay = document.querySelector<HTMLElement>("[data-replay]");
+      if (replay && document.documentElement.classList.contains("replay-anim")) {
+        const lines = [...replay.querySelectorAll<HTMLElement>(".rl")];
+        const typed = replay.querySelector<HTMLElement>(".type");
+        const fullText = typed?.dataset.text ?? "";
+        const delayAfter = [300, 550, 500, 450, 460, 430, 430, 620, 520, 0];
+        const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+        const cycle = async () => {
+          replay.classList.remove("done");
+          for (const l of lines) l.classList.remove("on");
+          if (typed) typed.textContent = "";
+          await sleep(600);
+          for (let i = 0; i < lines.length; i++) {
+            lines[i].classList.add("on");
+            if (i === 0 && typed) {
+              for (const ch of fullText) {
+                typed.textContent += ch;
+                await sleep(26);
+              }
+            }
+            await sleep(delayAfter[i] ?? 400);
+          }
+          replay.classList.add("done");
+          await sleep(4600);
+        };
+
+        (async () => {
+          // eslint-disable-next-line no-constant-condition
+          while (true) await cycle();
+        })();
+      }
     </script>
 
     <style>
       :root {
-        --bg: oklch(15% 0 0);
-        --panel: oklch(18% 0 0);
-        --fg: oklch(96.5% 0 0);
-        --muted: oklch(68% 0 0);
-        --faint: oklch(48% 0 0);
-        --line: oklch(96.5% 0 0 / 0.1);
-        --line-strong: oklch(96.5% 0 0 / 0.22);
-        --ok: oklch(82% 0.16 155);
-        --sans: "Geist", "PingFang SC", sans-serif;
-        --mono: "Geist Mono", ui-monospace, monospace;
-        --w: min(1120px, 100% - 48px);
+        /* warm paper neutrals, tinted toward the tangerine hue */
+        --bg: oklch(96.5% 0.01 85);
+        --panel: oklch(93.5% 0.013 85);
+        --fg: oklch(24% 0.015 60);
+        --muted: oklch(42% 0.02 60);
+        --faint: oklch(52% 0.025 60);
+        --line: oklch(87% 0.014 80);
+        --line-strong: oklch(78% 0.018 80);
+        /* hallabong tangerine (text-safe) + fill for buttons + sea */
+        --accent: oklch(55% 0.145 45);
+        --accent-fill: oklch(67% 0.165 48);
+        --accent-fill-hover: oklch(62% 0.16 46);
+        --accent-ink: oklch(20% 0.03 48);
+        --sea: oklch(48% 0.09 195);
+        --sans: "Bricolage Grotesque", "PingFang SC", sans-serif;
+        --mono: "Sometype Mono", ui-monospace, monospace;
+        --w: min(1180px, 100% - 48px);
+        --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
       }
 
       * {
@@ -418,8 +780,9 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         background: var(--bg);
         color: var(--fg);
         font-family: var(--sans);
+        font-optical-sizing: auto;
         font-size: clamp(15.5px, 0.35vw + 14.4px, 17px);
-        line-height: 1.55;
+        line-height: 1.58;
         scroll-behavior: smooth;
         -webkit-font-smoothing: antialiased;
       }
@@ -429,8 +792,8 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       }
 
       ::selection {
-        background: var(--fg);
-        color: var(--bg);
+        background: var(--accent-fill);
+        color: var(--accent-ink);
       }
 
       a {
@@ -441,12 +804,12 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       }
 
       a:hover {
-        border-color: var(--fg);
+        border-color: var(--accent);
       }
 
       code {
         font-family: var(--mono);
-        font-size: 0.9em;
+        font-size: 0.88em;
       }
 
       h1,
@@ -454,9 +817,26 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       h3 {
         margin: 0;
         font-weight: 600;
-        letter-spacing: -0.025em;
+        letter-spacing: -0.02em;
         line-height: 1.05;
         text-wrap: balance;
+      }
+
+      /* injected by set:html, so they need :global to escape Astro scoping */
+      :global(.hk) {
+        color: var(--accent);
+      }
+
+      :global(.hc) {
+        color: var(--faint);
+      }
+
+      .ok {
+        color: var(--sea);
+      }
+
+      .deny {
+        color: var(--accent);
       }
 
       /* ---------- reveal ---------- */
@@ -464,8 +844,8 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         opacity: 0;
         transform: translateY(10px);
         transition:
-          opacity 0.55s cubic-bezier(0.16, 1, 0.3, 1),
-          transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+          opacity 0.55s var(--ease-out),
+          transform 0.55s var(--ease-out);
       }
 
       [data-reveal].in {
@@ -494,7 +874,7 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         align-items: center;
         justify-content: space-between;
         width: 100%;
-        padding: 0 max(24px, (100% - 1120px) / 2);
+        padding: 0 max(24px, (100% - 1180px) / 2);
         height: 56px;
         border-bottom: 1px solid var(--line);
         background: color-mix(in oklab, var(--bg) 88%, transparent);
@@ -502,6 +882,9 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       }
 
       .wordmark {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 3px;
         border: none;
         font-family: var(--mono);
         font-weight: 500;
@@ -509,9 +892,16 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         letter-spacing: -0.02em;
       }
 
+      .wordmark-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
       .nav nav {
         display: flex;
-        gap: 24px;
+        gap: 22px;
         font-size: 0.84rem;
         font-weight: 500;
       }
@@ -532,8 +922,11 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       }
 
       .index {
+        display: flex;
+        align-items: center;
+        gap: 10px;
         margin: 0 0 20px;
-        color: var(--faint);
+        color: var(--accent);
         font-family: var(--mono);
         font-size: 0.72rem;
         font-weight: 500;
@@ -541,8 +934,26 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         text-transform: uppercase;
       }
 
+      /* tiny contour-ring badge, echoing the favicon */
+      .index::before {
+        content: "";
+        flex: none;
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle,
+          var(--accent) 0 2.1px,
+          transparent 2.6px 4.8px,
+          oklch(55% 0.145 45 / 0.55) 5.2px 6.2px,
+          transparent 6.7px 9.4px,
+          oklch(55% 0.145 45 / 0.32) 9.8px 10.8px,
+          transparent 11.2px
+        );
+      }
+
       .block {
-        padding: clamp(72px, 10vw, 136px) 0 0;
+        padding: clamp(76px, 10vw, 140px) 0 0;
       }
 
       .block h2 {
@@ -554,7 +965,7 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         margin: 18px 0 0;
         color: var(--muted);
         font-size: 1.02rem;
-        line-height: 1.65;
+        line-height: 1.68;
       }
 
       .block-lede code {
@@ -563,7 +974,46 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
 
       /* ---------- hero ---------- */
       .hero {
-        padding-top: clamp(72px, 11vw, 140px);
+        position: relative;
+        padding-top: clamp(64px, 9vw, 120px);
+      }
+
+      .contours {
+        position: absolute;
+        inset: -56px calc(-1 * max(24px, (100vw - 1180px) / 2)) auto;
+        width: 100vw;
+        max-width: none;
+        height: min(640px, 100%);
+        pointer-events: none;
+        mask-image: radial-gradient(110% 95% at 74% 42%, black 42%, transparent 76%);
+      }
+
+      .ring {
+        fill: none;
+        stroke: var(--accent);
+        stroke-opacity: 0.2;
+        stroke-width: 1;
+      }
+
+      .ring-inner {
+        stroke-opacity: 0.38;
+      }
+
+      .summit {
+        fill: var(--accent);
+        opacity: 0.55;
+      }
+
+      .summit-label {
+        fill: var(--accent);
+        opacity: 0.55;
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+      }
+
+      .hero-copy {
+        position: relative;
       }
 
       .tag {
@@ -576,16 +1026,18 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       }
 
       .hero h1 {
-        font-size: clamp(2.8rem, 7vw, 5.6rem);
-        font-weight: 650;
+        font-size: clamp(2.7rem, 5.6vw, 4.6rem);
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        line-height: 0.99;
       }
 
       .hero .lede {
-        max-width: 56ch;
-        margin: 26px 0 0;
+        max-width: 50ch;
+        margin: 24px 0 0;
         color: var(--muted);
-        font-size: 1.14rem;
-        line-height: 1.6;
+        font-size: 1.1rem;
+        line-height: 1.62;
       }
 
       .cta {
@@ -598,21 +1050,22 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       .btn {
         display: inline-block;
         padding: 11px 22px;
-        border: 1px solid var(--fg);
-        border-radius: 2px;
+        border: 1px solid transparent;
+        border-radius: 3px;
         font-size: 0.9rem;
         font-weight: 600;
         transition: background 0.15s, color 0.15s, border-color 0.15s;
       }
 
       .btn-solid {
-        background: var(--fg);
-        color: var(--bg);
+        background: var(--accent-fill);
+        border-color: var(--accent-fill);
+        color: var(--accent-ink);
       }
 
       .btn-solid:hover {
-        background: var(--muted);
-        border-color: var(--muted);
+        background: var(--accent-fill-hover);
+        border-color: var(--accent-fill-hover);
       }
 
       .btn-ghost {
@@ -621,64 +1074,326 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       }
 
       .btn-ghost:hover {
-        border-color: var(--fg);
+        border-color: var(--accent);
       }
 
-      /* ---------- terminal ---------- */
-      .terminal {
-        margin-top: clamp(44px, 6vw, 72px);
+      .proof {
+        max-width: 46ch;
+        margin: 26px 0 0;
+        color: var(--faint);
+        font-size: 0.88rem;
+        line-height: 1.6;
+      }
+
+      /* ---------- run replay ---------- */
+      /* The terminal is the one dark object on the paper page, so it
+         re-declares the palette tokens for everything inside it. */
+      .replay {
+        --bg: oklch(21% 0.012 55);
+        --panel: oklch(24% 0.013 55);
+        --fg: oklch(94% 0.008 75);
+        --muted: oklch(72% 0.015 65);
+        --faint: oklch(57% 0.018 60);
+        --line: oklch(32% 0.014 55);
+        --line-strong: oklch(40% 0.016 55);
+        --accent: oklch(73% 0.15 50);
+        --sea: oklch(79% 0.095 195);
+        position: relative;
+        max-width: 920px;
+        margin: clamp(44px, 6vw, 72px) 0 0;
         border: 1px solid var(--line);
-        background: var(--panel);
-        scroll-margin-top: 80px;
+        border-radius: 5px;
+        background: var(--bg);
+        box-shadow: 0 24px 48px -28px oklch(30% 0.03 60 / 0.5);
+        overflow: hidden;
       }
 
-      .terminal-row + .terminal-row {
-        border-top: 1px solid var(--line);
-      }
-
-      .terminal-label {
+      .replay-bar {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        padding: 10px 18px 0;
+        gap: 8px;
+        padding: 9px 16px;
+        border-bottom: 1px solid var(--line);
         color: var(--faint);
         font-family: var(--mono);
-        font-size: 0.7rem;
+        font-size: 0.68rem;
+        font-weight: 500;
         letter-spacing: 0.12em;
         text-transform: uppercase;
       }
 
-      .terminal pre {
-        margin: 0;
-        padding: 10px 18px 16px;
-        overflow-x: auto;
+      .replay-pip {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--accent);
       }
 
-      .terminal code {
-        font-size: 0.88rem;
+      html.replay-anim .replay-pip {
+        animation: pip 1.6s ease-in-out infinite;
+      }
+
+      @keyframes pip {
+        50% {
+          opacity: 0.35;
+        }
+      }
+
+      .replay-bar-right {
+        margin-left: auto;
+        letter-spacing: 0.08em;
+      }
+
+      .replay-body {
+        padding: 20px 24px 22px;
+        min-height: 316px;
+        font-family: var(--mono);
+        font-size: 0.92rem;
+        line-height: 1.8;
+      }
+
+      .rl {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+
+      html.replay-anim .rl {
+        opacity: 0;
+        transform: translateY(4px);
+        transition:
+          opacity 0.3s var(--ease-out),
+          transform 0.3s var(--ease-out);
+      }
+
+      html.replay-anim .rl.on {
+        opacity: 1;
+        transform: none;
+      }
+
+      .rl-prompt {
+        color: var(--fg);
+        font-weight: 500;
+      }
+
+      .rp {
+        color: var(--accent);
+        user-select: none;
+      }
+
+      .rp-sh {
+        color: var(--sea);
+        user-select: none;
+      }
+
+      .rl-dim,
+      .rl-ev {
+        color: var(--muted);
+      }
+
+      .rl-cmd {
+        color: var(--fg);
+      }
+
+      .rl-ev .ev-k {
+        display: inline-block;
+        min-width: 5ch;
+        color: var(--faint);
+      }
+
+      .rl-json {
+        color: var(--muted);
+      }
+
+      .rl-done {
+        color: var(--sea);
+      }
+
+      .caret {
+        display: none;
+      }
+
+      html.replay-anim .caret {
+        display: inline-block;
+        width: 7px;
+        height: 1em;
+        margin-left: 2px;
+        vertical-align: -0.15em;
+        background: var(--accent);
+        animation: caret 1s steps(1) infinite;
+      }
+
+      html.replay-anim .replay.done .caret,
+      html.replay-anim [data-replay].done .caret {
+        animation: none;
+        opacity: 0.4;
+      }
+
+      @keyframes caret {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      /* ---------- quickstart ---------- */
+      .quickstart h2 {
+        max-width: 24ch;
+      }
+
+      .steps {
+        margin: clamp(36px, 5vw, 56px) 0 0;
+        padding: 0;
+        border-top: 1px solid var(--line);
+        list-style: none;
+      }
+
+      .steps li {
+        display: grid;
+        grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+        gap: 14px clamp(32px, 5vw, 72px);
+        align-items: center;
+        min-width: 0;
+        padding: clamp(22px, 3vw, 30px) 0;
+      }
+
+      .steps li + li {
+        border-top: 1px solid var(--line);
+      }
+
+      .step-n {
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        font-weight: 500;
+        letter-spacing: 0.1em;
+      }
+
+      .steps h3 {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        font-size: 1.08rem;
+        margin-bottom: 10px;
+      }
+
+      .step-code {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+        padding: 12px 16px;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        background: var(--panel);
+      }
+
+      .step-code pre {
+        margin: 0;
+        overflow-x: auto;
+        flex: 1;
+      }
+
+      .step-code code {
+        font-size: 0.8rem;
         line-height: 1.6;
         white-space: pre;
       }
 
-      .prompt {
-        color: var(--ok);
-        user-select: none;
-      }
-
-      .terminal-foot {
+      .steps p {
         margin: 0;
-        padding: 12px 18px 14px;
-        border-top: 1px solid var(--line);
         color: var(--muted);
-        font-size: 0.86rem;
+        font-size: 0.9rem;
+        line-height: 1.62;
       }
 
-      .terminal-foot code {
+      .steps p code {
         color: var(--fg);
-        font-size: 0.8rem;
+      }
+
+      .step-do {
+        min-width: 0;
+      }
+
+      .step-note {
+        margin: 8px 2px 0 !important;
+        color: var(--faint) !important;
+        font-family: var(--mono);
+        font-size: 0.72rem !important;
+        letter-spacing: 0.02em;
+      }
+
+      /* ---------- builder ---------- */
+      .builder-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+        gap: clamp(28px, 4.5vw, 64px);
+        align-items: start;
+        margin-top: clamp(36px, 5vw, 56px);
+      }
+
+      .builder-steps {
+        display: grid;
+        gap: 20px;
+        min-width: 0;
+      }
+
+      .builder-list {
+        display: grid;
+        gap: 14px;
+        margin: 4px 0;
+        padding: 0 0 0 2px;
+        list-style: none;
+        counter-reset: builder;
+      }
+
+      .builder-list li {
+        position: relative;
+        padding-left: 34px;
+        color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.6;
+        counter-increment: builder;
+      }
+
+      .builder-list li::before {
+        content: counter(builder, decimal-leading-zero);
+        position: absolute;
+        left: 0;
+        top: 2px;
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+      }
+
+      .builder-list b {
+        color: var(--fg);
+        font-weight: 600;
+      }
+
+      .builder-list code {
+        color: var(--fg);
+        font-size: 0.82rem;
+      }
+
+      .builder-tree {
+        margin: 0;
+        padding: 20px 22px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--panel);
+        overflow-x: auto;
+      }
+
+      .builder-tree code {
+        font-size: 0.78rem;
+        line-height: 1.7;
+        white-space: pre;
+        color: var(--muted);
       }
 
       button[data-copy] {
+        flex: none;
         padding: 2px 10px;
         border: 1px solid var(--line-strong);
         border-radius: 2px;
@@ -692,13 +1407,13 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       }
 
       button[data-copy]:hover {
-        color: var(--fg);
-        border-color: var(--fg);
+        color: var(--accent);
+        border-color: var(--accent);
       }
 
       button[data-copy].copied {
-        color: var(--ok);
-        border-color: var(--ok);
+        color: var(--sea);
+        border-color: var(--sea);
       }
 
       /* ---------- problem cols ---------- */
@@ -717,7 +1432,7 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       }
 
       .col-key {
-        color: var(--faint);
+        color: var(--accent);
         font-family: var(--mono);
         font-weight: 500;
         margin-right: 2px;
@@ -743,6 +1458,7 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         margin: 0;
         padding: 20px 22px;
         border: 1px solid var(--line);
+        border-radius: 4px;
         background: var(--panel);
         overflow-x: auto;
       }
@@ -786,6 +1502,8 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       .router {
         margin-top: clamp(36px, 5vw, 56px);
         border: 1px solid var(--line);
+        border-radius: 4px;
+        overflow: hidden;
       }
 
       .router-row {
@@ -821,7 +1539,7 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       }
 
       .router-arrow {
-        color: var(--faint);
+        color: var(--accent);
         text-align: center;
       }
 
@@ -839,9 +1557,7 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       .router-note {
         grid-column: 3 / -1;
         margin: 4px 0 0;
-        padding-left: 14px;
-        border-left: 1px solid var(--line-strong);
-        color: var(--muted);
+        color: var(--faint);
         font-size: 0.85rem;
         line-height: 1.55;
       }
@@ -873,6 +1589,8 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         gap: 1px;
         margin-top: clamp(36px, 5vw, 56px);
         border: 1px solid var(--line);
+        border-radius: 4px;
+        overflow: hidden;
         background: var(--line);
       }
 
@@ -892,10 +1610,6 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         text-transform: uppercase;
       }
 
-      .demo-label .ok {
-        color: var(--ok);
-      }
-
       .demo-col pre {
         margin: 0;
         overflow-x: auto;
@@ -904,7 +1618,8 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       .demo-col code {
         font-size: 0.8rem;
         line-height: 1.65;
-        white-space: pre;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
         color: var(--muted);
       }
 
@@ -921,6 +1636,7 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         margin: 0;
         padding: 18px 20px;
         border: 1px solid var(--line);
+        border-radius: 4px;
         background: var(--panel);
         overflow-x: auto;
       }
@@ -953,7 +1669,7 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       }
 
       .pkg-table th {
-        padding: 0 16px 10px 0;
+        padding: 0 24px 10px 0;
         border-bottom: 1px solid var(--line-strong);
         color: var(--faint);
         font-family: var(--mono);
@@ -964,25 +1680,46 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         text-align: left;
       }
 
+      .pkg-table th:nth-child(1) {
+        width: 42%;
+      }
+
+      .pkg-table th:nth-child(2) {
+        width: 21%;
+      }
+
+      .pkg-table th:nth-child(3) {
+        width: 27%;
+      }
+
+      .pkg-table th:last-child,
+      .pkg-table td:last-child {
+        width: 10%;
+        padding-right: 0;
+        text-align: right;
+      }
+
       .pkg-table td {
-        padding: 15px 16px 15px 0;
+        padding: 16px 24px 16px 0;
         border-bottom: 1px solid var(--line);
         vertical-align: top;
       }
 
-      .pkg-cell {
-        display: grid;
-        gap: 3px;
-        max-width: 38ch;
+      .pkg-table tbody tr:hover {
+        background: color-mix(in oklab, var(--panel) 60%, transparent);
       }
 
       .pkg-name {
+        display: block;
+        margin-bottom: 4px;
         font-family: var(--mono);
         font-size: 0.82rem;
         font-weight: 500;
       }
 
       .pkg-desc {
+        display: block;
+        max-width: 52ch;
         color: var(--muted);
         font-size: 0.85rem;
         line-height: 1.5;
@@ -998,22 +1735,30 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
       /* ---------- footer ---------- */
       footer {
         width: var(--w);
-        margin: clamp(72px, 10vw, 136px) auto 0;
-        padding: 30px 0 52px;
-        border-top: 1px solid var(--line);
+        margin: 26px auto 0;
+        padding: 12px 0 52px;
         display: flex;
         flex-wrap: wrap;
-        gap: 20px 48px;
+        gap: 24px 48px;
         justify-content: space-between;
-        align-items: baseline;
+        align-items: center;
       }
 
-      footer p {
+      .signature {
         margin: 0;
-        max-width: 52ch;
-        color: var(--muted);
+        color: var(--faint);
         font-size: 0.88rem;
         line-height: 1.65;
+      }
+
+      .signature a {
+        color: var(--fg);
+        font-weight: 600;
+        border-bottom-color: var(--line-strong);
+      }
+
+      .signature a:hover {
+        border-bottom-color: var(--accent);
       }
 
       footer nav {
@@ -1036,17 +1781,325 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         color: var(--fg);
       }
 
+      /* ---------- pipeline flow ---------- */
+      .flow {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 20px;
+        margin: clamp(40px, 5.5vw, 64px) 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      /* the dashed route the stations sit on */
+      .flow::before {
+        content: "";
+        position: absolute;
+        top: 6px;
+        left: 4px;
+        right: 14px;
+        border-top: 2px dashed var(--line-strong);
+      }
+
+      .flow::after {
+        content: "";
+        position: absolute;
+        top: 1.5px;
+        right: 2px;
+        border-left: 9px solid var(--accent);
+        border-top: 5.5px solid transparent;
+        border-bottom: 5.5px solid transparent;
+      }
+
+      .flow-node {
+        position: relative;
+        display: grid;
+        justify-items: start;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .flow-dot {
+        width: 13px;
+        height: 13px;
+        margin-bottom: 10px;
+        border: 2.5px solid var(--accent);
+        border-radius: 50%;
+        background: var(--bg);
+        box-shadow: 0 0 0 4px var(--bg);
+      }
+
+      .flow-label {
+        font-family: var(--mono);
+        font-size: 0.86rem;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+
+      .flow-sub {
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+
+      /* ---------- report card ---------- */
+      .report-wrap {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+        gap: clamp(28px, 4.5vw, 64px);
+        align-items: center;
+        margin-top: clamp(44px, 6vw, 72px);
+      }
+
+      .report {
+        position: relative;
+        padding: 16px 22px 14px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: oklch(98.5% 0.007 90);
+        box-shadow: 0 20px 44px -32px oklch(30% 0.03 60 / 0.6);
+        font-family: var(--mono);
+      }
+
+      .report-head {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 4px 16px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--line);
+        color: var(--faint);
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .report-title {
+        color: var(--fg);
+        font-weight: 600;
+      }
+
+      .report-sum {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 22px;
+        padding: 11px 0;
+        border-bottom: 1px solid var(--line);
+        color: var(--faint);
+        font-size: 0.76rem;
+      }
+
+      .report-sum b {
+        color: var(--fg);
+        font-weight: 500;
+      }
+
+      .report-sum b.deny {
+        color: var(--accent);
+      }
+
+      .report-rows {
+        display: grid;
+        gap: 9px;
+        padding: 13px 0 11px;
+      }
+
+      .report-row {
+        display: grid;
+        grid-template-columns: 7em minmax(0, 14em) minmax(0, 1fr) 5.5em;
+        gap: 12px;
+        align-items: center;
+        font-size: 0.74rem;
+      }
+
+      .report-kind {
+        color: var(--faint);
+      }
+
+      .report-label {
+        color: var(--fg);
+        overflow-wrap: anywhere;
+      }
+
+      .report-bar {
+        width: var(--w);
+        height: 7px;
+        border-radius: 2px;
+        background: oklch(60% 0.02 60);
+      }
+
+      .report-bar.is-tool {
+        background: var(--sea);
+      }
+
+      .report-bar.is-deny {
+        background: var(--accent);
+      }
+
+      .report-bar.is-final {
+        background: var(--accent-fill);
+      }
+
+      .report-state {
+        font-size: 0.66rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        text-align: right;
+      }
+
+      .report-state.ok {
+        color: var(--sea);
+      }
+
+      .report-state.deny {
+        color: var(--accent);
+      }
+
+      .report-foot {
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        color: var(--faint);
+        font-size: 0.72rem;
+      }
+
+      .report-note p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.96rem;
+        line-height: 1.7;
+      }
+
+      .report-note code {
+        color: var(--fg);
+        font-size: 0.82rem;
+      }
+
+      /* the harbor stamp */
+      .stamp {
+        position: absolute;
+        bottom: -36px;
+        right: -30px;
+        width: 108px;
+        color: var(--accent);
+        opacity: 0.75;
+        transform: rotate(-8deg);
+        mix-blend-mode: multiply;
+        pointer-events: none;
+      }
+
+      .stamp text {
+        fill: currentColor;
+        font-family: var(--mono);
+        font-weight: 600;
+      }
+
+      /* ---------- coastline footer divider ---------- */
+      .coast {
+        width: var(--w);
+        margin: clamp(72px, 10vw, 136px) auto 0;
+        text-align: center;
+      }
+
+      .coast svg {
+        display: block;
+        width: 100%;
+        height: 22px;
+        color: var(--line-strong);
+      }
+
+      .coast-label {
+        display: inline-block;
+        margin-top: 10px;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 0.66rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
       /* ---------- responsive ---------- */
+      @media (max-width: 1020px) {
+        .replay-body {
+          font-size: 0.8rem;
+          min-height: 0;
+        }
+
+        .contours {
+          mask-image: radial-gradient(120% 70% at 80% 20%, black 30%, transparent 72%);
+        }
+      }
+
       @media (max-width: 900px) {
         .cols,
         .rules,
+        .steps li,
         .demo {
           grid-template-columns: 1fr;
         }
 
         .internals-grid,
-        .anatomy {
+        .anatomy,
+        .report-wrap,
+        .builder-grid {
           grid-template-columns: 1fr;
+        }
+
+        .flow {
+          grid-template-columns: 1fr;
+          gap: 22px;
+          padding-left: 4px;
+        }
+
+        /* route runs vertically on small screens */
+        .flow::before {
+          top: 6px;
+          bottom: 4px;
+          left: 9.5px;
+          right: auto;
+          border-top: none;
+          border-left: 2px dashed var(--line-strong);
+        }
+
+        .flow::after {
+          top: auto;
+          bottom: -4px;
+          left: 5.5px;
+          right: auto;
+          border-top: 9px solid var(--accent);
+          border-left: 5.5px solid transparent;
+          border-right: 5.5px solid transparent;
+          border-bottom: none;
+        }
+
+        .flow-node {
+          grid-template-columns: 24px minmax(0, 1fr);
+          grid-template-rows: auto auto;
+          column-gap: 12px;
+        }
+
+        .flow-dot {
+          grid-row: 1 / 3;
+          margin-top: 2px;
+          margin-bottom: 0;
+        }
+
+        .flow-label,
+        .flow-sub {
+          grid-column: 2;
+        }
+
+        .stamp {
+          bottom: -20px;
+          right: -6px;
+          width: 88px;
+        }
+
+        .report-row {
+          grid-template-columns: 6em minmax(0, 1fr) 5em;
+        }
+
+        .report-bar {
+          display: none;
         }
 
         .router-head {
@@ -1077,6 +2130,11 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
           gap: 16px;
         }
 
+        /* keep the two links that matter on small screens */
+        .nav nav a:not([href="#quickstart"]):not([href^="https://github"]) {
+          display: none;
+        }
+
         .pkg-table thead {
           display: none;
         }
@@ -1096,6 +2154,11 @@ const orderedPackages = [...packages].sort((a, b) => a.id.localeCompare(b.id));
         .pkg-table td {
           padding: 3px 0;
           border: none;
+        }
+
+        .pkg-table td:last-child {
+          width: auto;
+          text-align: left;
         }
 
         td.mono {
