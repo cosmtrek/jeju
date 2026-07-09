@@ -5,8 +5,8 @@ metadata:
   name: code-review
   description: "Repeatable code review agent for structured diff review"
   labels:
-    scenario: personal-agent
-    example: code-review
+    domain: coding
+    task: code-review
 
 models:
   providers:

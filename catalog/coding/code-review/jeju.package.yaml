@@ -1,0 +1,14 @@
+apiVersion: jeju/v1alpha1
+kind: AgentPackage
+
+metadata:
+  id: coding/code-review
+  name: code-review
+  version: 0.1.0
+  description: "Review local Git working tree changes and return structured findings."
+
+compatibility:
+  jeju: ">=0.7.0"
+
+agent:
+  manifest: agents/code-review.agent.yaml

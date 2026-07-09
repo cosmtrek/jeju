@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-agent_dir="$repo_root/examples/code-review-agent"
+agent_dir="$repo_root/catalog/coding/code-review"
 manifest="agents/code-review.agent.yaml"
 bin="$repo_root/.jeju-dev/bin/jeju"
 runs_dir="$repo_root/.jeju-dev/runs/code-review"

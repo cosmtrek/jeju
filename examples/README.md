@@ -13,8 +13,6 @@ evaluation evidence.
 
 - [Bug rescue agent](bug-rescue-agent/README.md): repairs a failing Python
   ledger fixture with DeepSeek V4 Flash, reruns tests, and writes a repair note.
-- [Code review agent](code-review-agent/README.md): reviews a Git diff with
-  read-only Git tools and returns structured findings.
 - [Code review with agent tools](code-review-with-agent-tools/README.md): runs
   one parent agent that calls packet-builder, reviewer, and verifier child
   agents through `uses: agent`.
@@ -30,6 +28,10 @@ evaluation evidence.
   evidence.
 - [SkillsBench Lite agent](skillsbench-lite-agent/README.md): replicates a
   small SkillsBench-style harness activation and adherence experiment.
+
+The high-frequency single-agent code review workflow is maintained as the
+installable [`coding/code-review`](../catalog/coding/code-review/README.md)
+catalog package rather than duplicated here.
 
 ## Local Artifacts
 

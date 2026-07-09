@@ -289,13 +289,16 @@ test fixtures, but recommended scenarios showing declarative behavior, explicit
 boundaries, run evidence, and evaluation or evolution where useful:
 
 - [Bug rescue agent](examples/bug-rescue-agent/README.md)
-- [Code review agent](examples/code-review-agent/README.md)
 - [Code review with agent tools](examples/code-review-with-agent-tools/README.md)
 - [Code review team](examples/code-review-team/README.md)
 - [Commit plan agent](examples/commit-plan-agent/README.md)
 - [HotpotQA evolve benchmark](examples/hotpotqa-agent/README.md)
 - [Privacy delegation agent](examples/privacy-delegation-agent/README.md)
 - [SkillsBench Lite agent](examples/skillsbench-lite-agent/README.md)
+
+The high-frequency single-agent code review workflow is maintained as the
+installable [coding/code-review](catalog/coding/code-review/README.md) catalog
+package.
 
 Reference docs:
 
