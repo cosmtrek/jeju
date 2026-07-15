@@ -640,7 +640,7 @@ const coastPath =
                   <span class="pkg-desc">{pkg.description}</span>
                 </td>
                 <td class="mono">{pkg.model}</td>
-                <td class="mono">
+                <td class="mono pkg-boundary">
                   {pkg.access}{pkg.tools.length ? ` · ${pkg.tools.join(", ")}` : " · no tools"}
                 </td>
                 <td class="mono">{pkg.version}</td>
@@ -1729,6 +1729,13 @@ const coastPath =
         font-size: 0.78rem;
         color: var(--muted);
         white-space: nowrap;
+      }
+
+      /* the boundary column can list many tools — let it wrap instead of
+         forcing the table wider than the page */
+      td.pkg-boundary {
+        white-space: normal;
+        overflow-wrap: anywhere;
       }
 
       /* ---------- footer ---------- */
