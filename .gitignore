@@ -1,5 +1,6 @@
 /log/
 /jeju
+/.claude/launch.json
 /runs/
 dist/
 /.jeju-dev/
