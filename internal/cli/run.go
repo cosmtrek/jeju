@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -18,7 +17,7 @@ const (
 	runOutputFinal = "final"
 )
 
-func runAgent(ctx context.Context, agentRef, task, workspace, runsDir, output string) error {
+func runAgent(ctx context.Context, agentRef, task, workspace, runsDir, output, modelID string) error {
 	if output != runOutputLive && output != runOutputFinal {
 		return fmt.Errorf("run --output must be one of: %s, %s", runOutputLive, runOutputFinal)
 	}
@@ -39,7 +38,10 @@ func runAgent(ctx context.Context, agentRef, task, workspace, runsDir, output st
 	if err != nil {
 		return err
 	}
-	opts := compiler.Options{RunStore: runs.NewStore(runStoreDir)}
+	opts := compiler.Options{
+		RunStore:      runs.NewStore(runStoreDir),
+		ModelOverride: modelID,
+	}
 	if workspace != "" {
 		absWorkspace, err := filepath.Abs(workspace)
 		if err != nil {
@@ -72,7 +74,6 @@ func runAgent(ctx context.Context, agentRef, task, workspace, runsDir, output st
 		if result.Final != "" {
 			fmt.Println(strings.TrimRight(result.Final, "\n"))
 		}
-		fmt.Fprintf(os.Stderr, "Outputs\n  run_id %s\n  report %s\n", result.RunID, reportPath)
 		return runStatusError(result)
 	}
 	if result.Final != "" {

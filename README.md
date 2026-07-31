@@ -226,6 +226,7 @@ jeju package pack ./agents/code-review --out dist/
 jeju package add dist/coding-code-review-0.1.0.jpkg
 jeju run package://coding/code-review@0.1.0 "Review current diff."
 jeju run p:coding/code-review "Review current diff."
+jeju run --model deepseek-v4 p:coding/code-review "Review current diff."
 ```
 
 The package layer only adds distribution metadata, source provenance,
@@ -234,6 +235,11 @@ digest-based storage, and stable refs; runs still take the normal
 GitHub or generic Git subdirectories, or `jeju:` registry refs. See
 [Agent Package](docs/agent-package.md) for the manifest fields, source syntax,
 and full command set.
+
+`jeju run --model <model-id>` overrides the active runtime provider's model ID
+for one run without modifying the package or its digest. The provider type,
+endpoint, credentials, context window, token limits, and other model settings
+still come from the agent manifest.
 
 Package-backed runs default to `~/.jeju/runs` unless `--runs-dir` or
 `JEJU_RUNS_DIR` is set, so invoking `p:...` from an arbitrary directory does not

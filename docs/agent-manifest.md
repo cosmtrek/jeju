@@ -203,6 +203,16 @@ Provider fields:
 
 `runtime.model` selects the provider used by the agent loop. If omitted, Jeju uses the single configured provider; with multiple providers it must be explicit.
 
+For one-off model testing, `jeju run --model <model-id> ...` overrides the
+`model` field of the provider selected by `runtime.model` before validation and
+compilation. Other provider settings remain manifest-defined. The effective
+model ID is included in the run config snapshot and trajectory without
+modifying the source manifest. The override applies to the root agent only;
+separately compiled `uses: agent` children retain their own model configuration.
+An LLM evaluator that defaults to `runtime.model` or explicitly selects the
+same provider alias also uses the overridden model ID; select a separate
+provider alias for a fixed judge.
+
 Jeju keeps the manifest model fields provider-neutral and maps them in the model adapter. OpenAI-style structured output and function calling are protocol capabilities, not user-facing loop-format knobs: the runtime prefers native tool/function calling when the provider supports it, and uses structured outputs or JSON mode for final/evaluator outputs. Provider presets are where API spelling differences live, such as OpenAI `reasoning_effort`, DeepSeek/MiMo `thinking.type`, and MiMo `max_completion_tokens`.
 
 For `openaiCompatible` providers, Jeju sends tools as function definitions by default. It asks for final answers with a structured response schema when the provider supports JSON Schema response formats. For providers such as DeepSeek where the documented structured-output surface is JSON mode rather than schema-strict response format, Jeju relies on prompt guidance while tools are available, validates the final answer locally, and uses JSON object mode on the tool-disabled schema retry turn.
@@ -520,8 +530,10 @@ stored as typed events or inline/chunked artifacts inside the trajectory. The
 HTML report is a projection of the trajectory and can be regenerated.
 
 The run output location is a Jeju runtime convention, not an agent manifest field.
-Use `jeju run --output final` when stdout should contain only the final answer;
-the run directory and trajectory recording remain unchanged.
+Use `jeju run --output final` when the command should print only the final agent
+answer, without run ID or report metadata on stderr. The run directory and
+trajectory recording remain unchanged; use `jeju view` or `jeju inspect` when
+the evidence path is needed.
 
 In a generated user agent project, `./runs` is the normal local run history for
 local manifest runs. In the Jeju source checkout, prefer ignored development

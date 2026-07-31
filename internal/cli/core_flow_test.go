@@ -146,7 +146,84 @@ func TestRunWorkspaceOverride(t *testing.T) {
 	}
 }
 
-func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
+func TestRunModelOverrideIsEffectiveAndAuditable(t *testing.T) {
+	tmp := t.TempDir()
+	restoreCWD := chdir(t, tmp)
+	defer restoreCWD()
+
+	ctx := context.Background()
+	if err := Execute(ctx, []string{"init", "research", "--dir", "jeju-work"}); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	restoreWorkCWD := chdir(t, filepath.Join(tmp, "jeju-work"))
+	defer restoreWorkCWD()
+	manifestPath := filepath.Join("agents", "research.agent.yaml")
+	original, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(ctx, []string{
+		"run",
+		"--model", "mock-candidate",
+		manifestPath,
+		"Return a short final answer.",
+	}); err != nil {
+		t.Fatalf("run --model failed: %v", err)
+	}
+
+	store := runs.NewStore("./runs")
+	items, err := store.ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(items))
+	}
+	events, err := trajectory.ReadFile(filepath.Join("runs", items[0].RunID, runs.TrajectoryFile))
+	if err != nil {
+		t.Fatalf("read trajectory failed: %v", err)
+	}
+	record := trajectory.Project(events)
+	snapshot := record.ArtifactContent(record.ConfigRef)
+	if !strings.Contains(snapshot, "model: mock-candidate") {
+		t.Fatalf("config snapshot missing model override:\n%s", snapshot)
+	}
+	modelRecorded := false
+	for _, span := range record.Spans {
+		if span.Kind == string(trajectory.SpanLLM) && span.Attrs["model"] == "mock-candidate" {
+			modelRecorded = true
+			break
+		}
+	}
+	if !modelRecorded {
+		t.Fatal("trajectory model span missing model override")
+	}
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(original) {
+		t.Fatal("run --model modified the source manifest")
+	}
+}
+
+func TestRunRejectsEmptyModelOverride(t *testing.T) {
+	err := Execute(context.Background(), []string{"run", "--model", " ", "agent.yaml", "task"})
+	if err == nil || !strings.Contains(err.Error(), "--model requires a non-empty model ID") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunRejectsModelFlagAfterManifest(t *testing.T) {
+	err := Execute(context.Background(), []string{"run", "agent.yaml", "--model", "mock-candidate", "task"})
+	if err == nil || !strings.Contains(err.Error(), "run flags must appear before <agent-ref>") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunOutputFinalPrintsOnlyFinalAnswer(t *testing.T) {
 	tmp := t.TempDir()
 	restoreCWD := chdir(t, tmp)
 	defer restoreCWD()
@@ -175,8 +252,8 @@ func TestRunOutputFinalSuppressesConsoleTrajectory(t *testing.T) {
 	if !strings.Contains(output, "This is a deterministic mock response.") {
 		t.Fatalf("run --output final did not print final answer:\n%s", output)
 	}
-	if !strings.Contains(stderr, "run_id ") || !strings.Contains(stderr, "report ") {
-		t.Fatalf("run --output final did not print run evidence to stderr:\n%s", stderr)
+	if stderr != "" {
+		t.Fatalf("run --output final wrote metadata to stderr:\n%s", stderr)
 	}
 
 	store := runs.NewStore("./runs")
@@ -255,8 +332,8 @@ output:
 	if !strings.Contains(output, "Run failed because final answer did not match output schema") {
 		t.Fatalf("run output did not include final failure:\n%s", output)
 	}
-	if !strings.Contains(stderr, "run_id ") || !strings.Contains(stderr, "report ") {
-		t.Fatalf("failed run did not print evidence to stderr:\n%s", stderr)
+	if stderr != "" {
+		t.Fatalf("failed run wrote metadata to stderr:\n%s", stderr)
 	}
 
 	items, err := runs.NewStore("./runs").ListRuns()
@@ -537,7 +614,7 @@ func TestExecuteHelpPrintsRootUsage(t *testing.T) {
 		"Validate a manifest and optionally explain resolved wiring",
 		"jeju package",
 		"Manage distributable agent packages",
-		"jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> [\"<task>\"]",
+		"jeju run [--model <model-id>] [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> [\"<task>\"]",
 		"Run an agent against a task",
 		"jeju evolve [--dry-run] [--baseline-only] [--test] [--max-iterations N] [--out <dir>] <experiment.yaml>",
 		"Run an evolution experiment",
@@ -571,8 +648,9 @@ func TestExecuteSubcommandHelpPrintsFlags(t *testing.T) {
 	})
 	for _, want := range []string{
 		"Jeju - Run an agent against a task",
-		`jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> ["<task>"] [flags]`,
+		`jeju run [--model <model-id>] [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> ["<task>"] [flags]`,
 		"--from string",
+		"--model string",
 		"--output string",
 		"--runs-dir string",
 		"--workspace string",

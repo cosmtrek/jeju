@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -134,19 +135,24 @@ func newRunCommand(ctx context.Context) *cobra.Command {
 	var output string
 	var runsDir string
 	var inputFrom string
+	var modelID string
 	cmd := &cobra.Command{
-		Use:          `run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> ["<task>"]`,
+		Use:          `run [--model <model-id>] [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> ["<task>"]`,
 		Short:        "Run an agent against a task",
 		Args:         cobra.MinimumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("model") && strings.TrimSpace(modelID) == "" {
+				return cmd.FlagErrorFunc()(cmd, fmt.Errorf("run --model requires a non-empty model ID"))
+			}
 			agentRef, task, err := resolveRunTask(ctx, args, inputFrom, readRunInputSource)
 			if err != nil {
 				return cmd.FlagErrorFunc()(cmd, err)
 			}
-			return runAgent(ctx, agentRef, task, workspace, runsDir, output)
+			return runAgent(ctx, agentRef, task, workspace, runsDir, output, modelID)
 		},
 	}
+	cmd.Flags().StringVar(&modelID, "model", "", "override the active runtime provider's model ID for this run")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "override workspace.path for this run")
 	cmd.Flags().StringVar(&runsDir, "runs-dir", "", "run store directory (default: JEJU_RUNS_DIR, ~/.jeju/runs for package refs, or ./runs for local manifests)")
 	cmd.Flags().StringVar(&output, "output", runOutputLive, "console output mode: live or final")
@@ -156,7 +162,8 @@ func newRunCommand(ctx context.Context) *cobra.Command {
 }
 
 func isMisplacedRunFlag(arg string) bool {
-	return arg == "--workspace" || strings.HasPrefix(arg, "--workspace=") ||
+	return arg == "--model" || strings.HasPrefix(arg, "--model=") ||
+		arg == "--workspace" || strings.HasPrefix(arg, "--workspace=") ||
 		arg == "--runs-dir" || strings.HasPrefix(arg, "--runs-dir=") ||
 		arg == "--output" || strings.HasPrefix(arg, "--output=") ||
 		arg == "--from" || strings.HasPrefix(arg, "--from=")

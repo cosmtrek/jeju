@@ -42,6 +42,14 @@ func TestPackageLifecycleAndRunRef(t *testing.T) {
 	if err := Execute(ctx, []string{"package", "add", pkgRoot}); err != nil {
 		t.Fatalf("package add failed: %v", err)
 	}
+	pkgStore, err := agentpkg.DefaultStore()
+	if err != nil {
+		t.Fatalf("open package store failed: %v", err)
+	}
+	beforeRun, err := pkgStore.Inspect("research/research@0.1.0", version)
+	if err != nil {
+		t.Fatalf("inspect package before run failed: %v", err)
+	}
 	listOutput := captureStdout(t, func() {
 		if err := Execute(ctx, []string{"package", "ls"}); err != nil {
 			t.Fatalf("package ls failed: %v", err)
@@ -68,6 +76,7 @@ func TestPackageLifecycleAndRunRef(t *testing.T) {
 	}
 	if err := Execute(ctx, []string{
 		"run",
+		"--model", "mock-package-candidate",
 		"--workspace", targetWorkspace,
 		"--runs-dir", runsDir,
 		"p:research/research@0.1.0",
@@ -76,7 +85,14 @@ func TestPackageLifecycleAndRunRef(t *testing.T) {
 		t.Fatalf("run package ref failed: %v", err)
 	}
 	assertFileExists(t, filepath.Join(targetWorkspace, "notes.md"))
-	assertPackageProvenance(t, runsDir, "research/research", "0.1.0")
+	assertPackageProvenance(t, runsDir, "research/research", "0.1.0", "mock-package-candidate")
+	afterRun, err := pkgStore.Inspect("research/research@0.1.0", version)
+	if err != nil {
+		t.Fatalf("inspect package after run failed: %v", err)
+	}
+	if afterRun.Digest != beforeRun.Digest {
+		t.Fatalf("package digest changed after model override: before %s, after %s", beforeRun.Digest, afterRun.Digest)
+	}
 
 	distDir := filepath.Join(tmp, "dist")
 	if err := Execute(ctx, []string{"package", "pack", pkgRoot, "--out", distDir}); err != nil {
@@ -255,10 +271,10 @@ func TestRunDirectGenericGitPackageSource(t *testing.T) {
 		t.Fatalf("run direct git package source failed: %v", err)
 	}
 	assertFileExists(t, filepath.Join(targetWorkspace, "notes.md"))
-	assertPackageProvenance(t, runsDir, "coding/review", "0.1.0")
+	assertPackageProvenance(t, runsDir, "coding/review", "0.1.0", "")
 }
 
-func assertPackageProvenance(t *testing.T, runsDir, id, version string) {
+func assertPackageProvenance(t *testing.T, runsDir, id, version, expectedModel string) {
 	t.Helper()
 	store := runs.NewStore(runsDir)
 	items, err := store.ListRuns()
@@ -291,6 +307,23 @@ func assertPackageProvenance(t *testing.T, runsDir, id, version string) {
 	}
 	if !artifactHasPackage {
 		t.Fatalf("trajectory missing package provenance artifact")
+	}
+	if expectedModel != "" {
+		record := trajectory.Project(events)
+		snapshot := record.ArtifactContent(record.ConfigRef)
+		if !strings.Contains(snapshot, "model: "+expectedModel) {
+			t.Fatalf("config snapshot missing package run model override %q:\n%s", expectedModel, snapshot)
+		}
+		modelRecorded := false
+		for _, span := range record.Spans {
+			if span.Kind == string(trajectory.SpanLLM) && span.Attrs["model"] == expectedModel {
+				modelRecorded = true
+				break
+			}
+		}
+		if !modelRecorded {
+			t.Fatalf("trajectory model span missing package run model override %q", expectedModel)
+		}
 	}
 }
 

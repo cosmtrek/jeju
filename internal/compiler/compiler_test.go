@@ -75,6 +75,83 @@ func TestCompileAgentToolRejectsTeamChild(t *testing.T) {
 	}
 }
 
+func TestCompileWithOptionsOverridesActiveModel(t *testing.T) {
+	root := t.TempDir()
+	manifestPath := writeCompilerTestAgent(t, root, "model-override", "", false)
+	original, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := CompileWithOptions(manifestPath, Options{ModelOverride: "mock-candidate"})
+	if err != nil {
+		t.Fatalf("CompileWithOptions failed: %v", err)
+	}
+	if got := agent.Config.Models.Providers["primary"].Model; got != "mock-candidate" {
+		t.Fatalf("effective model = %q, want mock-candidate", got)
+	}
+	_, provider, ok := agent.Models.Get("primary")
+	if !ok {
+		t.Fatal("compiled model registry missing primary")
+	}
+	if provider.Model != "mock-candidate" {
+		t.Fatalf("compiled provider model = %q, want mock-candidate", provider.Model)
+	}
+	if !strings.Contains(string(agent.ConfigSnapshot), "model: mock-candidate") {
+		t.Fatalf("config snapshot missing model override:\n%s", agent.ConfigSnapshot)
+	}
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(original) {
+		t.Fatal("model override modified the source manifest")
+	}
+}
+
+func TestCompileWithOptionsOverridesOnlyRuntimeProvider(t *testing.T) {
+	root := t.TempDir()
+	manifestPath := writeCompilerTestAgent(t, root, "multi-model", "", false)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(data),
+		`    primary:
+      type: mock
+      model: mock-react`,
+		`    primary:
+      type: mock
+      model: mock-react
+    judge:
+      type: mock
+      model: mock-judge`,
+		1,
+	)
+	updated = strings.Replace(updated,
+		`runtime:
+  loop:`,
+		`runtime:
+  model: primary
+  loop:`,
+		1,
+	)
+	if err := os.WriteFile(manifestPath, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := CompileWithOptions(manifestPath, Options{ModelOverride: "mock-candidate"})
+	if err != nil {
+		t.Fatalf("CompileWithOptions failed: %v", err)
+	}
+	if got := agent.Config.Models.Providers["primary"].Model; got != "mock-candidate" {
+		t.Fatalf("primary model = %q, want mock-candidate", got)
+	}
+	if got := agent.Config.Models.Providers["judge"].Model; got != "mock-judge" {
+		t.Fatalf("judge model = %q, want mock-judge", got)
+	}
+}
+
 func writeCompilerTestAgent(t *testing.T, root, name, child string, teamKind bool) string {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, "prompts"), 0o755); err != nil {

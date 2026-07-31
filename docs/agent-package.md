@@ -247,7 +247,7 @@ read with bounded timeout and response size.
 `jeju run` accepts an agent reference:
 
 ```bash
-jeju run [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> ["<task>"]
+jeju run [--model <model-id>] [--workspace <dir>] [--runs-dir <dir>] [--output live|final] [--from clipboard|stdin|<path>] <agent-ref> ["<task>"]
 ```
 
 Supported agent refs:
@@ -264,6 +264,9 @@ jeju run package://coding/code-review "Review current diff."
 
 # Short local package ref.
 jeju run p:coding/code-review "Review current diff."
+
+# Override the active runtime provider's model ID for this run.
+jeju run --model deepseek-v4 p:coding/code-review "Review current diff."
 
 # Read task input from a source.
 jeju run --from clipboard p:coding/code-review
@@ -296,8 +299,17 @@ source text from clipboard, stdin, or a file. When a trailing task argument is
 also provided, Jeju treats it as supplemental instructions for that source text
 and builds the final task as the supplemental instructions, a blank line, then
 the source text. Package metadata must not render, transform, or reinterpret the
-task. `--workspace`, `--output`, and `--from` keep the same semantics for local
-manifests, local package refs, and remote package sources.
+task. `--model`, `--workspace`, `--output`, and `--from` keep the same semantics
+for local manifests, local package refs, and remote package sources.
+
+`--model <model-id>` changes only the `model` field of the provider selected by
+`runtime.model`. It does not select another provider or override `type`,
+`preset`, `baseUrl`, `envKey`, `temperature`, thinking settings, token limits,
+or `contextWindow`. With multiple providers, all other provider entries remain
+unchanged. The effective model ID is stored in the run's config snapshot and
+model spans, while package ID, version, and digest provenance remain unchanged.
+The override applies to the root agent only; separately compiled `uses: agent`
+children keep their own manifests.
 
 Package-backed runs default to `~/.jeju/runs` when neither `--runs-dir` nor
 `JEJU_RUNS_DIR` is set, so invoking a package from an arbitrary working

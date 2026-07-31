@@ -61,6 +61,7 @@ type OutputSpec struct {
 type Options struct {
 	RunStore          *runs.Store
 	WorkspaceOverride string
+	ModelOverride     string
 }
 
 func Compile(manifestPath string) (*CompiledAgent, error) {
@@ -72,8 +73,26 @@ func CompileWithOptions(manifestPath string, opts Options) (*CompiledAgent, erro
 	if err != nil {
 		return nil, err
 	}
+	overridden := false
 	if opts.WorkspaceOverride != "" {
 		manifest.Workspace.Path = opts.WorkspaceOverride
+		overridden = true
+	}
+	if opts.ModelOverride != "" {
+		modelID := strings.TrimSpace(opts.ModelOverride)
+		if modelID == "" {
+			return nil, fmt.Errorf("model override requires a non-empty model ID")
+		}
+		providerName := manifest.Runtime.Model
+		provider, ok := manifest.Models.Providers[providerName]
+		if !ok {
+			return nil, fmt.Errorf("model override: runtime.model %q is not defined in models.providers", providerName)
+		}
+		provider.Model = modelID
+		manifest.Models.Providers[providerName] = provider
+		overridden = true
+	}
+	if overridden {
 		snapshot, err = yaml.Marshal(manifest)
 		if err != nil {
 			return nil, err
