@@ -1,13 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/cosmtrek/jeju/internal/agentpkg"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func newPackageCommand(ctx context.Context) *cobra.Command {
@@ -219,9 +221,11 @@ func newPackageListCommand() *cobra.Command {
 }
 
 func newPackageInspectCommand() *cobra.Command {
-	return &cobra.Command{
+	var pathOnly bool
+	var showAgent bool
+	cmd := &cobra.Command{
 		Use:          "inspect <package-id[@version]>",
-		Short:        "Show package metadata and resolved source",
+		Short:        "Inspect an installed package",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -233,32 +237,127 @@ func newPackageInspectCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("id: %s\n", result.ID)
-			fmt.Printf("version: %s\n", result.Version)
-			fmt.Printf("active: %t\n", result.Active)
-			fmt.Printf("digest: %s\n", result.Digest)
-			fmt.Printf("store: %s\n", result.StorePath)
-			fmt.Printf("agent: %s\n", result.Manifest.Agent.Manifest)
-			if result.Source != "" {
-				fmt.Printf("source: %s\n", result.Source)
+			if pathOnly {
+				fmt.Println(result.StorePath)
+				return nil
 			}
-			fmt.Println("risk:")
-			fmt.Printf("  level: %s\n", result.Risk.Level)
-			fmt.Printf("  access: %s\n", result.Risk.Access)
-			fmt.Printf("  approval: %s\n", result.Risk.Approval)
-			if len(result.Risk.Capabilities) > 0 {
-				fmt.Printf("  capabilities: %s\n", strings.Join(result.Risk.Capabilities, ","))
-			}
-			if resolved := result.Resolved.Map(); len(resolved) > 0 {
-				fmt.Println("resolved:")
-				for _, line := range sortedMapLines(resolved) {
-					fmt.Printf("  %s\n", line)
+			var agentContent string
+			if showAgent {
+				data, err := os.ReadFile(result.AgentManifestPath)
+				if err != nil {
+					return fmt.Errorf("read agent manifest: %w", err)
 				}
+				agentContent = string(data)
 			}
-			printPackageWarnings(result.Warnings)
+			output := newPackageInspectOutput(result, agentContent)
+			data, err := formatPackageInspectOutput(output)
+			if err != nil {
+				return fmt.Errorf("format package inspection: %w", err)
+			}
+			fmt.Print(data)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&pathOnly, "path", false, "print only the installed package directory")
+	cmd.Flags().BoolVar(&showAgent, "show-agent", false, "include the agent manifest content")
+	cmd.MarkFlagsMutuallyExclusive("path", "show-agent")
+	return cmd
+}
+
+type packageInspectOutput struct {
+	Package       agentpkg.Metadata             `yaml:"package"`
+	Compatibility *agentpkg.CompatibilityConfig `yaml:"compatibility,omitempty"`
+	Agent         packageInspectAgent           `yaml:"agent"`
+	Installation  packageInspectInstallation    `yaml:"installation"`
+	Risk          packageInspectRisk            `yaml:"risk"`
+	Source        *packageInspectSource         `yaml:"source,omitempty"`
+	Warnings      []string                      `yaml:"warnings,omitempty"`
+}
+
+type packageInspectAgent struct {
+	Manifest string `yaml:"manifest"`
+	Content  string `yaml:"content,omitempty"`
+}
+
+type packageInspectInstallation struct {
+	Active bool   `yaml:"active"`
+	Path   string `yaml:"path"`
+	Digest string `yaml:"digest"`
+}
+
+type packageInspectRisk struct {
+	Level        string   `yaml:"level"`
+	Access       string   `yaml:"access"`
+	Approval     string   `yaml:"approval"`
+	Capabilities []string `yaml:"capabilities,omitempty"`
+}
+
+type packageInspectSource struct {
+	Requested string `yaml:"requested,omitempty"`
+	Canonical string `yaml:"canonical,omitempty"`
+	Type      string `yaml:"type,omitempty"`
+	URL       string `yaml:"url,omitempty"`
+	Ref       string `yaml:"ref,omitempty"`
+	Commit    string `yaml:"commit,omitempty"`
+	Subdir    string `yaml:"subdir,omitempty"`
+	Registry  string `yaml:"registry,omitempty"`
+	Unstable  bool   `yaml:"unstable,omitempty"`
+}
+
+func newPackageInspectOutput(result agentpkg.InspectResult, agentContent string) packageInspectOutput {
+	var compatibility *agentpkg.CompatibilityConfig
+	if result.Manifest.Compatibility.Jeju != "" {
+		value := result.Manifest.Compatibility
+		compatibility = &value
+	}
+	var source *packageInspectSource
+	if result.Source != "" || len(result.Resolved.Map()) > 0 {
+		source = &packageInspectSource{
+			Requested: result.Source,
+			Canonical: result.Resolved.CanonicalSource,
+			Type:      result.Resolved.Type,
+			URL:       result.Resolved.URL,
+			Ref:       result.Resolved.Ref,
+			Commit:    result.Resolved.Commit,
+			Subdir:    result.Resolved.Subdir,
+			Registry:  result.Resolved.Registry,
+			Unstable:  result.Resolved.Unstable,
+		}
+	}
+	return packageInspectOutput{
+		Package:       result.Manifest.Metadata,
+		Compatibility: compatibility,
+		Agent: packageInspectAgent{
+			Manifest: result.Manifest.Agent.Manifest,
+			Content:  agentContent,
+		},
+		Installation: packageInspectInstallation{
+			Active: result.Active,
+			Path:   result.StorePath,
+			Digest: result.Digest,
+		},
+		Risk: packageInspectRisk{
+			Level:        result.Risk.Level,
+			Access:       result.Risk.Access,
+			Approval:     result.Risk.Approval,
+			Capabilities: result.Risk.Capabilities,
+		},
+		Source:   source,
+		Warnings: result.Warnings,
+	}
+}
+
+func formatPackageInspectOutput(output packageInspectOutput) (string, error) {
+	var buffer bytes.Buffer
+	encoder := yaml.NewEncoder(&buffer)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(output); err != nil {
+		return "", err
+	}
+	if err := encoder.Close(); err != nil {
+		return "", err
+	}
+	return buffer.String(), nil
 }
 
 func newPackageRemoveCommand() *cobra.Command {
@@ -294,29 +393,5 @@ func printAddResult(verb string, result agentpkg.AddResult) {
 func printPackageWarnings(warnings []string) {
 	for _, warning := range warnings {
 		fmt.Printf("warning: %s\n", warning)
-	}
-}
-
-func sortedMapLines(values map[string]any) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sortStrings(keys)
-	lines := make([]string, 0, len(keys))
-	for _, key := range keys {
-		lines = append(lines, fmt.Sprintf("%s: %v", key, values[key]))
-	}
-	return lines
-}
-
-func sortStrings(values []string) {
-	if len(values) < 2 {
-		return
-	}
-	for i := 1; i < len(values); i++ {
-		for j := i; j > 0 && strings.Compare(values[j-1], values[j]) > 0; j-- {
-			values[j-1], values[j] = values[j], values[j-1]
-		}
 	}
 }

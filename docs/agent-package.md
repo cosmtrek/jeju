@@ -343,6 +343,8 @@ jeju package update --all
 jeju package update --all --replace
 jeju package ls
 jeju package inspect coding/code-review
+jeju package inspect coding/code-review --path
+jeju package inspect coding/code-review --show-agent
 jeju package rm coding/code-review
 ```
 
@@ -356,8 +358,43 @@ Command roles:
 | `add` | Resolve a local directory, local artifact, Git source, or `jeju:` ref into the local package store. |
 | `update` | Re-resolve a package's saved source and update the active local ref when new content is available. |
 | `ls` | List local package refs. |
-| `inspect` | Show package metadata, resolved source, digest, and derived risk summary. |
+| `inspect` | Show package metadata, agent entrypoint, local installation, resolved source, and derived risk summary. |
 | `rm` | Remove local package refs. |
+
+`package inspect` groups declared package information separately from local
+installation state:
+
+```yaml
+package:
+  id: coding/code-review
+  version: 0.1.0
+  description: Review a local repository change and return structured findings.
+agent:
+  manifest: agents/code-review.agent.yaml
+installation:
+  active: true
+  path: /path/to/packages/store/sha256/9f1c...
+  digest: sha256:9f1c...
+risk:
+  level: medium
+  access: readOnly
+  approval: never
+source:
+  requested: jeju:coding/code-review@0.1.0
+  canonical: github:jeju-ai/agents//coding/code-review?ref=<commit>
+  commit: <commit>
+```
+
+Use `--path` when another shell command needs only the installed package
+directory:
+
+```bash
+cd "$(jeju package inspect coding/code-review --path)"
+```
+
+Use `--show-agent` to include the raw agent manifest under `agent.content`.
+The installed directory is content-addressed execution material and should be
+treated as read-only.
 
 ## Pack And Add
 

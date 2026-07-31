@@ -257,16 +257,17 @@ func (s *Store) List() ([]PackageListItem, error) {
 }
 
 type InspectResult struct {
-	ID        string
-	Version   string
-	Active    bool
-	Digest    string
-	Source    string
-	Resolved  ResolvedSource
-	StorePath string
-	Manifest  Manifest
-	Risk      RiskSummary
-	Warnings  []string
+	ID                string
+	Version           string
+	Active            bool
+	Digest            string
+	Source            string
+	Resolved          ResolvedSource
+	StorePath         string
+	AgentManifestPath string
+	Manifest          Manifest
+	Risk              RiskSummary
+	Warnings          []string
 }
 
 func (s *Store) Inspect(selector string, jejuVersion string) (InspectResult, error) {
@@ -298,16 +299,17 @@ func (s *Store) Inspect(selector string, jejuVersion string) (InspectResult, err
 		return InspectResult{}, err
 	}
 	return InspectResult{
-		ID:        id,
-		Version:   version,
-		Active:    version == pkg.Active,
-		Digest:    item.Digest,
-		Source:    item.Source,
-		Resolved:  item.Resolved,
-		StorePath: storePath,
-		Manifest:  validated.Manifest,
-		Risk:      DeriveRisk(validated.AgentManifest),
-		Warnings:  validated.Warnings,
+		ID:                id,
+		Version:           version,
+		Active:            version == pkg.Active,
+		Digest:            item.Digest,
+		Source:            item.Source,
+		Resolved:          item.Resolved,
+		StorePath:         storePath,
+		AgentManifestPath: validated.AgentManifestPath,
+		Manifest:          validated.Manifest,
+		Risk:              DeriveRisk(validated.AgentManifest),
+		Warnings:          validated.Warnings,
 	}, nil
 }
 

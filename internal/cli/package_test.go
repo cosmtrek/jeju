@@ -63,10 +63,41 @@ func TestPackageLifecycleAndRunRef(t *testing.T) {
 			t.Fatalf("package inspect failed: %v", err)
 		}
 	})
-	for _, want := range []string{"id: research/research", "version: 0.1.0", "digest: sha256:", "agent: agents/research.agent.yaml"} {
+	for _, want := range []string{
+		"package:\n  id: research/research",
+		"version: 0.1.0",
+		"description:",
+		"agent:\n  manifest: agents/research.agent.yaml",
+		"installation:\n  active: true",
+		"path: " + beforeRun.StorePath,
+		"digest: sha256:",
+		"risk:",
+		"source:",
+	} {
 		if !strings.Contains(inspectOutput, want) {
 			t.Fatalf("package inspect missing %q:\n%s", want, inspectOutput)
 		}
+	}
+	pathOutput := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"package", "inspect", "research/research", "--path"}); err != nil {
+			t.Fatalf("package inspect --path failed: %v", err)
+		}
+	})
+	if got := strings.TrimSpace(pathOutput); got != beforeRun.StorePath {
+		t.Fatalf("package inspect --path = %q, want %q", got, beforeRun.StorePath)
+	}
+	showAgentOutput := captureStdout(t, func() {
+		if err := Execute(ctx, []string{"package", "inspect", "research/research", "--show-agent"}); err != nil {
+			t.Fatalf("package inspect --show-agent failed: %v", err)
+		}
+	})
+	for _, want := range []string{"content: |", "apiVersion: jeju/v1alpha1", "kind: Agent"} {
+		if !strings.Contains(showAgentOutput, want) {
+			t.Fatalf("package inspect --show-agent missing %q:\n%s", want, showAgentOutput)
+		}
+	}
+	if err := Execute(ctx, []string{"package", "inspect", "research/research", "--path", "--show-agent"}); err == nil {
+		t.Fatal("package inspect accepted mutually exclusive --path and --show-agent")
 	}
 
 	targetWorkspace := filepath.Join(tmp, "target-workspace")

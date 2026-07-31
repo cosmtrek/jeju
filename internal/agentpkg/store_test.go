@@ -78,6 +78,9 @@ func TestStoreUpdateRequiresReplaceForSameVersionDigestChange(t *testing.T) {
 	if inspect.Digest != second.Digest {
 		t.Fatalf("active digest = %s, want %s", inspect.Digest, second.Digest)
 	}
+	if inspect.AgentManifestPath != filepath.Join(inspect.StorePath, "agent.yaml") {
+		t.Fatalf("agent manifest path = %q, want it inside %q", inspect.AgentManifestPath, inspect.StorePath)
+	}
 
 	appendFile(t, filepath.Join(packageRoot, "instructions.md"), "More package content.\n")
 	_, err = store.Add(context.Background(), packageRoot, true, "dev")
