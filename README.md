@@ -1,3 +1,5 @@
+
+
 # Jeju
 
 > Declarative, local-first runtime for bounded AI agents.
@@ -226,7 +228,7 @@ jeju package pack ./agents/code-review --out dist/
 jeju package add dist/coding-code-review-0.1.0.jpkg
 jeju run package://coding/code-review@0.1.0 "Review current diff."
 jeju run p:coding/code-review "Review current diff."
-jeju run --model deepseek-v4 p:coding/code-review "Review current diff."
+jeju run --model deepseek-v4-flash p:coding/code-review "Review current diff."
 ```
 
 The package layer only adds distribution metadata, source provenance,
